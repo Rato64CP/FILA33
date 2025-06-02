@@ -3,9 +3,8 @@
 #include <RTClib.h>
 #include <EEPROM.h>
 #include "kazaljke_sata.h"
+#include "podesavanja_piny.h"
 
-const int relejParniPin = 10;
-const int relejNeparniPin = 11;
 const unsigned long TRAJANJE_IMPULSA = 6000UL;
 
 static DateTime zadnjeVrijeme;
@@ -15,10 +14,10 @@ static bool impulsUTijeku = false;
 int memoriraneKazaljkeMinuta = 0;
 
 void inicijalizirajKazaljke() {
-  pinMode(relejParniPin, OUTPUT);
-  pinMode(relejNeparniPin, OUTPUT);
-  digitalWrite(relejParniPin, LOW);
-  digitalWrite(relejNeparniPin, LOW);
+  pinMode(PIN_RELEJ_PARNE_KAZALJKE, OUTPUT);
+  pinMode(PIN_RELEJ_NEPARNE_KAZALJKE, OUTPUT);
+  digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
+  digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
   EEPROM.get(10, memoriraneKazaljkeMinuta);
   if (memoriraneKazaljkeMinuta < 0 || memoriraneKazaljkeMinuta > 1439) memoriraneKazaljkeMinuta = 0;
 }
@@ -28,7 +27,7 @@ void upravljajKazaljkama() {
   int ukupnoMinuta = now.hour() * 60 + now.minute();
   if (!impulsUTijeku && now.second() == 0 && now != zadnjeVrijeme) {
     zadnjeVrijeme = now;
-    int pin = (now.minute() % 2 == 0) ? relejParniPin : relejNeparniPin;
+    int pin = (now.minute() % 2 == 0) ? PIN_RELEJ_PARNE_KAZALJKE : PIN_RELEJ_NEPARNE_KAZALJKE;
     digitalWrite(pin, HIGH);
     vrijemePocetkaImpulsa = millis();
     impulsUTijeku = true;
@@ -37,8 +36,8 @@ void upravljajKazaljkama() {
     EEPROM.put(10, memoriraneKazaljkeMinuta);
   }
   if (impulsUTijeku && millis() - vrijemePocetkaImpulsa >= TRAJANJE_IMPULSA) {
-    digitalWrite(relejParniPin, LOW);
-    digitalWrite(relejNeparniPin, LOW);
+    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
+    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
     impulsUTijeku = false;
   }
 }
@@ -54,7 +53,7 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta) {
   if (razlika < 0) razlika += 1440;
 
   for (int i = 0; i < razlika; i++) {
-    int pin = ((memoriraneKazaljkeMinuta + i) % 2 == 0) ? relejParniPin : relejNeparniPin;
+    int pin = ((memoriraneKazaljkeMinuta + i) % 2 == 0) ? PIN_RELEJ_PARNE_KAZALJKE : PIN_RELEJ_NEPARNE_KAZALJKE;
     digitalWrite(pin, HIGH);
     delay(TRAJANJE_IMPULSA);
     digitalWrite(pin, LOW);
