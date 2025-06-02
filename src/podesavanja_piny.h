@@ -1,6 +1,11 @@
 // podesavanja_piny.h
 #pragma once
 
+// DCF signalni ulaz
+#ifndef PODESAVANJA_PINY_H
+#define PODESAVANJA_PINY_H
+#define DCF_PIN 2 
+
 // Kazaljke sata
 #define PIN_RELEJ_PARNE_KAZALJKE   10
 #define PIN_RELEJ_NEPARNE_KAZALJKE 11
