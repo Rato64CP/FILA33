@@ -6,6 +6,7 @@
 #include "podesavanja_piny.h"
 
 const unsigned long TRAJANJE_IMPULSA = 6000UL;
+const int MAKS_PAMETNI_POMAK_MINUTA = 15;
 
 static DateTime zadnjeVrijeme;
 static unsigned long vrijemePocetkaImpulsa = 0;
@@ -47,10 +48,12 @@ void postaviTrenutniPolozajKazaljki(int trenutnaMinuta) {
   EEPROM.put(10, memoriraneKazaljkeMinuta);
 }
 
-void pomakniKazaljkeNaMinutu(int ciljMinuta) {
+void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod) {
   ciljMinuta = constrain(ciljMinuta, 0, 1439);
   int razlika = ciljMinuta - memoriraneKazaljkeMinuta;
   if (razlika < 0) razlika += 1440;
+
+  if (pametanMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) return;
 
   for (int i = 0; i < razlika; i++) {
     int pin = ((memoriraneKazaljkeMinuta + i) % 2 == 0) ? PIN_RELEJ_PARNE_KAZALJKE : PIN_RELEJ_NEPARNE_KAZALJKE;
@@ -63,14 +66,14 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta) {
   EEPROM.put(10, memoriraneKazaljkeMinuta);
 }
 
-void kompenzirajKazaljke() {
+void kompenzirajKazaljke(bool pametanMod) {
   DateTime now = RTC_DS3231().now();
   int trenutnaMinuta = now.hour() * 60 + now.minute();
-  pomakniKazaljkeNaMinutu(trenutnaMinuta);
+  pomakniKazaljkeNaMinutu(trenutnaMinuta, pametanMod);
 }
 
 void pomakniKazaljkeZa(int brojMinuta) {
   int cilj = memoriraneKazaljkeMinuta + brojMinuta;
   if (cilj > 1439) cilj -= 1440;
-  pomakniKazaljkeNaMinutu(cilj);
+  pomakniKazaljkeNaMinutu(cilj, false);
 }
