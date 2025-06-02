@@ -1,0 +1,27 @@
+# Ignoriraj Arduino build datoteke
+*.elf
+*.hex
+*.bin
+*.eep
+*.map
+*.d
+*.o
+*.a
+*.cpp.d
+*.s
+*.lst
+
+# PlatformIO build folder
+.pio/
+
+# VS Code folderi
+.vscode/
+
+# Arduino cache
+__MACOSX/
+.DS_Store
+*.swp
+*.swo
+
+# Arduino IDE build folder
+build/
