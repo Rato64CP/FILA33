@@ -9,4 +9,18 @@
 #define PIN_RELEJ_PARNE_PLOCE      8
 #define PIN_RELEJ_NEPARNE_PLOCE    9
 
-// Dodaj ostale pinove prema potrebi...
+// Čekići
+#define PIN_CEKIC_MUSKI             2
+#define PIN_CEKIC_ZENSKI            3
+
+// Zvona
+#define PIN_ZVONO_MUSKO             4
+#define PIN_ZVONO_ZENSKO            5
+
+// LCD I2C — koristi se I2C adresiranje, nema potrebu za pinovima ovdje
+
+// RTC I2C — koristi se I2C adresiranje, nema potrebu za pinovima ovdje
+
+// ESP komunikacija (softverski serijski port primjerice)
+#define PIN_ESP_RX                  6
+#define PIN_ESP_TX                  7
