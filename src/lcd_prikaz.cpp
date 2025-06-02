@@ -9,7 +9,7 @@
 LiquidCrystal_I2C lcd(0x27, 16, 2); // prilagodi adresu po potrebi
 
 const char* dani[7] = {"Ned", "Pon", "Uto", "Sri", "Cet", "Pet", "Sub"};
-String izvor = "RTC"; // moze biti "RTC", "NTP", "DCF", "---"
+String izvor = "RTC"; // moze biti "RTC", "NTP", "DCF"
 char oznakaDana = 'R'; // 'R' ili 'N'
 bool prikaziSekunde = true;
 unsigned long zadnjiRefresh = 0;
@@ -31,13 +31,13 @@ void azurirajLCDPrikaz() {
   // Odredi izvor vremena za prikaz
   IzvorVremena izvorEnum = getZadnjiIzvor();
   if (jeSinkronizacijaZastarjela()) {
-    izvor = "---";
+    izvor = "RTC";
   } else {
     switch (izvorEnum) {
       case RTC_VRIJEME: izvor = "RTC"; break;
       case NTP_VRIJEME: izvor = "NTP"; break;
       case DCF_VRIJEME: izvor = "DCF"; break;
-      default: izvor = "---"; break;
+      default: izvor = "RTC"; break;
     }
   }
 
