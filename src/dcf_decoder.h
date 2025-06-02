@@ -2,4 +2,4 @@
 #pragma once
 
 void inicijalizirajDCF();
-void obradiDCF();
+void dekodirajDCFSignal();
