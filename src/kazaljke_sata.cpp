@@ -69,3 +69,9 @@ void kompenzirajKazaljke() {
   int trenutnaMinuta = now.hour() * 60 + now.minute();
   pomakniKazaljkeNaMinutu(trenutnaMinuta);
 }
+
+void pomakniKazaljkeZa(int brojMinuta) {
+  int cilj = memoriraneKazaljkeMinuta + brojMinuta;
+  if (cilj > 1439) cilj -= 1440;
+  pomakniKazaljkeNaMinutu(cilj);
+}
