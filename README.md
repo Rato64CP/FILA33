@@ -7,9 +7,11 @@ Ovaj projekt zamjenjuje postojeći sustav upravljanja toranjskim satom korišten
 ## 🛠️ Glavne funkcionalnosti
 
 - Prikaz točnog vremena i datuma na LCD-u
+- Upravljanje kazaljkama toranjskog sata
+- Upravljanje zvonima preko interneta
 - Detekcija izvora vremena: RTC / NTP / DCF / ručno
 - Otkucavanje punih i pola sati pomoću čekića
-- Zvonjenje za slavljenje i mrtvačko zvono
+- Zvonjenje, slavljenje i mrtvačko zvono
 - Upravljanje okretnom pločom sa štapićima
 - Upravljačka tipkovnica (6 tipki: GORE, DOLJE, LIJEVO, DESNO, DA, NE)
 - Postavke se spremaju u EEPROM
