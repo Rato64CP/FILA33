@@ -6,6 +6,7 @@
 #include "podesavanja_piny.h"
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
+const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
 
 static unsigned long vrijemeStarta = 0;
 static bool uTijeku = false;
@@ -83,7 +84,7 @@ int dohvatiPozicijuPloce() {
   return pozicijaPloce;
 }
 
-void kompenzirajPlocu() {
+void kompenzirajPlocu(bool pametniMod) {
   DateTime now = RTC_DS3231().now();
   int sati = now.hour();
   int minuta = now.minute();
@@ -92,6 +93,8 @@ void kompenzirajPlocu() {
   int ciljPozicija = (sati - 5) * 4 + (minuta / 15);
   int razlika = ciljPozicija - pozicijaPloce;
   if (razlika < 0) razlika += 64;
+
+  if (pametniMod && razlika <= 1) return; // čekaj sljedeći impuls ako je blizu
 
   for (int i = 0; i < razlika; i++) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
