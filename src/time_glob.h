@@ -1,7 +1,7 @@
 #pragma once
 #include <RTClib.h>
 
-void inicijalizirajSat();
+void inicijalizirajRTC();
 DateTime dohvatiTrenutnoVrijeme();
 void postaviVrijemeIzNTP(const DateTime& dt);
 void azurirajVrijemeIzNTP(const DateTime& dt);

@@ -11,7 +11,7 @@
 
 void setup() {
   inicijalizirajLCD();
-  inicijalizirajSat();
+  inicijalizirajRTC();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
   kompenzirajKazaljke(true);
