@@ -13,7 +13,7 @@ void azurirajVrijemeIzNTP(const DateTime& dt) {
   azurirajOznakuDana();
 }
 
-void inicijalizirajSat() {
+void inicijalizirajRTC() {
   rtc.begin();
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // postavi na build vrijeme

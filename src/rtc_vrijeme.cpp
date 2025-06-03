@@ -9,16 +9,6 @@ static RTC_DS3231 rtc;
 // Zadnji izvor sinkronizacije. Spremamo u EEPROM na adresi 30
 String izvorVremena = "RTC";
 
-void inicijalizirajRTC() {
-    rtc.begin();
-    if (rtc.lostPower()) {
-        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    }
-    EEPROM.get(30, izvorVremena);
-    if (izvorVremena != "NTP" && izvorVremena != "DCF" && izvorVremena != "RU") {
-        izvorVremena = "RTC";
-    }
-}
 
 // Provjera za srednjoeuropsko ljetno računanje vremena
 bool isDST(int dan, int mjesec, int danUTjednu) {
