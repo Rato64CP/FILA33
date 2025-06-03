@@ -20,6 +20,7 @@ void inicijalizirajSat() {
   }
   EEPROM.get(30, izvorVremena);
   if (izvorVremena != "NTP" && izvorVremena != "DCF" && izvorVremena != "RU") izvorVremena = "RTC";
+  azurirajOznakuDana();
 }
 
 DateTime dohvatiTrenutnoVrijeme() {
@@ -30,18 +31,21 @@ void postaviVrijemeIzNTP(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "NTP";
   EEPROM.put(30, izvorVremena);
+  azurirajOznakuDana();
 }
 
 void postaviVrijemeIzDCF(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "DCF";
   EEPROM.put(30, izvorVremena);
+  azurirajOznakuDana();
 }
 
 void postaviVrijemeRucno(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "RU";
   EEPROM.put(30, izvorVremena);
+  azurirajOznakuDana();
 }
 
 void azurirajOznakuDana() {
