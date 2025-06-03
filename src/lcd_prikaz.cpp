@@ -24,7 +24,7 @@ void azurirajLCDPrikaz() {
   if (millis() - zadnjiRefresh < 500) return;
   zadnjiRefresh = millis();
 
-  DateTime now = RTC_DS3231().now();
+  DateTime now = rtc.now();
   char red1[17];
   char red2[17];
 

@@ -3,11 +3,9 @@
 #include <EEPROM.h>
 #include "vrijeme_izvor.h"
 #include "dcf_decoder.h"
+#include "time_glob.h"
 
-static RTC_DS3231 rtc;
-
-// Zadnji izvor sinkronizacije. Spremamo u EEPROM na adresi 30
-String izvorVremena = "RTC";
+// Zadnji izvor sinkronizacije pohranjen je u izvorVremena (time_glob.cpp)
 
 void inicijalizirajRTC() {
     rtc.begin();
