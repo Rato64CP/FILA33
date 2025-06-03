@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <RTClib.h>
 #include "esp_serial.h"
+#include "synchronizacija.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
 
@@ -22,7 +23,7 @@ void obradiESPSerijskuKomunikaciju() {
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         DateTime ntpVrijeme = DateTime(iso.c_str());
-        azurirajVrijemeIzNTP(ntpVrijeme);
+        sinkronizirajVrijemeIzvora(ntpVrijeme, NTP_VRIJEME);
         ESP_SERIAL.println("ACK:NTP");
       }
       else if (ulazniBuffer.startsWith("CMD:")) {
