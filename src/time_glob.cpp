@@ -8,6 +8,11 @@ RTC_DS3231 rtc;
 String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
 char oznakaDana = 'R';
 
+void azurirajVrijemeIzNTP(const DateTime& dt) {
+  postaviVrijemeIzNTP(dt);
+  azurirajOznakuDana();
+}
+
 void inicijalizirajSat() {
   rtc.begin();
   if (rtc.lostPower()) {

@@ -6,6 +6,7 @@
 #include "zvonjenje.h"
 #include "tipke.h"
 #include "postavke.h"
+#include "kazaljke_sata.h"
 
 void setup() {
   inicijalizirajLCD();
@@ -13,6 +14,7 @@ void setup() {
   inicijalizirajTipke();
   ucitajPostavke();
   inicijalizirajZvona();
+  inicijalizirajKazaljke();
 }
 
 void loop() {
@@ -22,4 +24,5 @@ void loop() {
   provjeriTipke();
   upravljajZvonom();
   upravljajOtkucavanjem();
+  upravljajKazaljkama();
 }

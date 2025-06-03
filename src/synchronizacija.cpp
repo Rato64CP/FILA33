@@ -4,9 +4,9 @@
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "vrijeme_izvor.h"
+#include "time_glob.h"
 
 void sinkronizirajVrijemeIzvora(const DateTime& novoVrijeme, IzvorVremena izvor) {
-  RTC_DS3231 rtc;
   rtc.adjust(novoVrijeme);
 
   // Spremi izvor
