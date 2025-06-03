@@ -60,5 +60,4 @@ void dekodirajFrame() {
 
   DateTime dt(year, month, day, hour, minute, 0);
   postaviVrijemeIzDCF(dt);
-  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
 }
