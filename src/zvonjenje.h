@@ -6,3 +6,9 @@ void upravljajZvonom();
 void zapocniSlavljenje();
 void zapocniMrtvacko();
 void zaustaviZvonjenje();
+
+void aktivirajZvonjenje(int koje);
+void deaktivirajZvonjenje(int koje);
+bool jeZvonoUTijeku();
+bool jeSlavljenjeUTijeku();
+bool jeMrtvackoUTijeku();
