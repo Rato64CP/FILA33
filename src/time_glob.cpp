@@ -2,6 +2,7 @@
 #include <RTClib.h>
 #include <EEPROM.h>
 #include "time_glob.h"
+#include "vrijeme_izvor.h"
 
 RTC_DS3231 rtc;
 
@@ -30,18 +31,21 @@ void postaviVrijemeIzNTP(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "NTP";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(NTP_VRIJEME, dt);
 }
 
 void postaviVrijemeIzDCF(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "DCF";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
 }
 
 void postaviVrijemeRucno(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "RU";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(RTC_VRIJEME, dt);
 }
 
 void azurirajOznakuDana() {
