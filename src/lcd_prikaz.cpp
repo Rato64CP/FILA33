@@ -27,22 +27,15 @@ void azurirajLCDPrikaz() {
   char red1[17];
   char red2[17];
 
-  // Odredi izvor vremena za prikaz
-  IzvorVremena izvorEnum = getZadnjiIzvor();
-  if (jeSinkronizacijaZastarjela()) {
-    izvor = "RTC";
-  } else {
-    switch (izvorEnum) {
-      case RTC_VRIJEME: izvor = "RTC"; break;
-      case NTP_VRIJEME: izvor = "NTP"; break;
-      case DCF_VRIJEME: izvor = "DCF"; break;
-      default: izvor = "RTC"; break;
-    }
+  static int zadnjiDan = -1;
+  if (now.dayOfTheWeek() != zadnjiDan) {
+    zadnjiDan = now.dayOfTheWeek();
+    azurirajOznakuDana();
   }
 
   snprintf(red1, sizeof(red1), "%02d.%02d.%02d  %-3s %c",
     now.hour(), now.minute(), prikaziSekunde ? now.second() : 32,
-    izvor.c_str(), dohvatiOznakuDana());
+    dohvatiIzvorVremena().c_str(), dohvatiOznakuDana());
 
   snprintf(red2, sizeof(red2), "%s, %02d:%02d:%04d.",
     dani[now.dayOfTheWeek()], now.day(), now.month(), now.year());
