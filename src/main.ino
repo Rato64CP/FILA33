@@ -12,6 +12,10 @@
 void setup() {
   inicijalizirajLCD();
   inicijalizirajRTC();
+  inicijalizirajKazaljke();
+  inicijalizirajPlocu();
+  kompenzirajKazaljke(true);
+  kompenzirajPlocu(true);
   inicijalizirajTipke();
   ucitajPostavke();
   inicijalizirajZvona();
@@ -27,4 +31,5 @@ void loop() {
   provjeriTipke();
   upravljajZvonom();
   upravljajOtkucavanjem();
+  upravljajPločom();
 }
