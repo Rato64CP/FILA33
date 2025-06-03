@@ -4,6 +4,7 @@
 #include <EEPROM.h>
 #include "okretna_ploca.h"
 #include "podesavanja_piny.h"
+#include "time_glob.h"
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
@@ -27,11 +28,11 @@ void inicijalizirajPlocu() {
   EEPROM.get(22, offsetMinuta);
   if (offsetMinuta < 0 || offsetMinuta > 15) offsetMinuta = 14;
 
-  prosloVrijeme = RTC_DS3231().now();
+  prosloVrijeme = dohvatiTrenutnoVrijeme();
 }
 
 void upravljajPločom() {
-  DateTime now = RTC_DS3231().now();
+  DateTime now = dohvatiTrenutnoVrijeme();
   int sati = now.hour();
   int minuta = now.minute();
   int sekunda = now.second();
@@ -85,7 +86,7 @@ int dohvatiPozicijuPloce() {
 }
 
 void kompenzirajPlocu(bool pametniMod) {
-  DateTime now = RTC_DS3231().now();
+  DateTime now = dohvatiTrenutnoVrijeme();
   int sati = now.hour();
   int minuta = now.minute();
   if (sati < 5 || sati > 20) return;
