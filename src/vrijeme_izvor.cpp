@@ -2,6 +2,7 @@
 #include <EEPROM.h>
 #include <RTClib.h>
 #include "vrijeme_izvor.h"
+#include "time_glob.h"
 
 #define EEPROM_ADRESA_IZVOR 0
 #define EEPROM_ADRESA_VRIJEME 4
@@ -26,7 +27,6 @@ DateTime getZadnjeSinkroniziranoVrijeme() {
 }
 
 bool jeSinkronizacijaZastarjela() {
-  RTC_DS3231 rtc;
   DateTime sad = rtc.now();
   DateTime zadnje = getZadnjeSinkroniziranoVrijeme();
   TimeSpan razlika = sad - zadnje;

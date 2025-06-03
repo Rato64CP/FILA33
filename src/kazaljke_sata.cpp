@@ -4,6 +4,7 @@
 #include <EEPROM.h>
 #include "kazaljke_sata.h"
 #include "podesavanja_piny.h"
+#include "time_glob.h"
 
 const unsigned long TRAJANJE_IMPULSA = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15;
@@ -24,7 +25,7 @@ void inicijalizirajKazaljke() {
 }
 
 void upravljajKazaljkama() {
-  DateTime now = RTC_DS3231().now();
+  DateTime now = rtc.now();
   int ukupnoMinuta = now.hour() * 60 + now.minute();
   if (!impulsUTijeku && now.second() == 0 && now != zadnjeVrijeme) {
     zadnjeVrijeme = now;
@@ -67,7 +68,7 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod) {
 }
 
 void kompenzirajKazaljke(bool pametanMod) {
-  DateTime now = RTC_DS3231().now();
+  DateTime now = rtc.now();
   int trenutnaMinuta = now.hour() * 60 + now.minute();
   pomakniKazaljkeNaMinutu(trenutnaMinuta, pametanMod);
 }
