@@ -1,6 +1,9 @@
 #pragma once
 #include <RTClib.h>
 
+// Global RTC instance used by all modules
+extern RTC_DS3231 rtc;
+
 void inicijalizirajSat();
 DateTime dohvatiTrenutnoVrijeme();
 void postaviVrijemeIzNTP(const DateTime& dt);
