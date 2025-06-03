@@ -6,10 +6,16 @@
 #include "zvonjenje.h"
 #include "tipke.h"
 #include "postavke.h"
+#include "kazaljke_sata.h"
+#include "okretna_ploca.h"
 
 void setup() {
   inicijalizirajLCD();
   inicijalizirajRTC();
+  inicijalizirajKazaljke();
+  inicijalizirajPlocu();
+  kompenzirajKazaljke(true);
+  kompenzirajPlocu(true);
   inicijalizirajTipke();
   ucitajPostavke();
   inicijalizirajZvona();
@@ -22,4 +28,5 @@ void loop() {
   provjeriTipke();
   upravljajZvonom();
   upravljajOtkucavanjem();
+  upravljajPločom();
 }
