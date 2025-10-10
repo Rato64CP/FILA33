@@ -1,52 +1,71 @@
 # Automatika sata – Toranjski sustav
 
-Ovaj projekt zamjenjuje postojeći sustav upravljanja toranjskim satom korištenjem Arduino Mega 2560, RTC (DS3231), LCD 2x16 i ESP-01 (NTP) uz ostale upravljačke komponente.
+Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, RTC DS3231, LCD 2x16 i ESP-01/ESP-12 za mrežnu sinkronizaciju, uz ULN2803 i relejne izlaze za čekiće, zvona i kazaljke.
 
 ---
 
 ## 🛠️ Glavne funkcionalnosti
 
-- Prikaz točnog vremena i datuma na LCD-u
-- Upravljanje kazaljkama toranjskog sata
-- Upravljanje zvonima preko interneta
-- Detekcija izvora vremena: RTC / NTP / ručno
-- Otkucavanje punih i pola sati pomoću čekića
-- Zvonjenje, slavljenje i mrtvačko zvono
-- Upravljanje okretnom pločom sa štapićima
-- Upravljačka tipkovnica (6 tipki: GORE, DOLJE, LIJEVO, DESNO, DA, NE)
-- Postavke se spremaju u EEPROM
-- Praćenje izvora vremena i zadnje sinkronizacije
-- Automatizirano zakazivanje zvona i slavljenja po vanjskim ulazima
+- Prikaz točnog vremena i datuma na LCD-u toranjskog ormara
+- Upravljanje kazaljkama toranjskog sata dvostrukim impulsima
+- Upravljanje zvonima (muško, žensko, slavljenje, mrtvačko) i čekićima
+- Automatsko zakazivanje zvona i slavljenja prema ulazima okretne ploče
+- Praćenje izvora vremena (RTC, NTP, ručno) i spremanje u EEPROM
+- Tipkovnica s 6 tipki za lokalne postavke i servisne komande
+
+---
+
+## 🧩 Moduli i ključne funkcije
+
+- `kazaljke_sata` inicijalizira relejne izlaze, vodi dnevnik položaja u EEPROM-u i kompenzira kazaljke na zadano vrijeme (`inicijalizirajKazaljke()`, `upravljajKazaljkama()`, `kompenzirajKazaljke(bool)`), čime toranjski sat ostaje sinkroniziran s RTC-om.【F:src/kazaljke_sata.cpp†L46-L147】
+- `okretna_ploca` čita pet ulaza ploče, pokreće releje za smjer rotacije te automatizira zvona i slavljenje u koordinaciji s toranjskim rasporedom (`inicijalizirajPlocu()`, `kompenzirajPlocu(bool)`, `obradiUlazePloce(...)`).【F:src/okretna_ploca.cpp†L92-L219】【F:src/okretna_ploca.cpp†L283-L307】
+- `zvonjenje` definira sekvence čekića, upravlja trajanjima i sigurnosnim odgodama te sinkronizira slavljenje i mrtvačko zvono (`inicijalizirajZvona()`, `upravljajZvonom()`, `zapocniSlavljenje()`).【F:src/zvonjenje.cpp†L61-L153】
+- `esp_serial` otvara UART1 prema ESP-01/ESP-12 te obrađuje NTP i naredbe zvona (`inicijalizirajESP()`, `obradiESPSerijskuKomunikaciju()`).【F:src/esp_serial.cpp†L8-L45】
+- `time_glob` i `vrijeme_izvor` spremaju izvor vremena, ručna i NTP ažuriranja te nadziru starost sinkronizacije, što je ključno za toranjski raspored zvona.【F:src/time_glob.cpp†L12-L44】【F:src/vrijeme_izvor.cpp†L7-L34】
 
 ---
 
 ## 📦 Komponente
 
-- Arduino Mega 2560
-- RTC DS3231 s baterijom
-- LCD 2x16 s I2C adapterom
-- Tipke: 6x (digitalni ulazi s pull-up)
-- Relejna pločica (5V)
-- ULN2803 + optokapleri (npr. TLP504)
-- ESP-01 za NTP sinkronizaciju (preko UART)
-- Napajanje: SMPS 5V 10A + LM2596 za 3.3V
+- Arduino Mega 2560 (glavna kontrolna ploča)
+- RTC DS3231 s baterijom (rezervni izvor vremena)
+- LCD 2x16 s I2C adapterom (vizualne informacije u ormaru)
+- ULN2803 i optokapleri (izolacija i pogon toranjskih releja)
+- Relejna pločica 5 V (kazaljke, okretna ploča, zvona)
+- Tipkovnica: 6 tipki (GORE, DOLJE, LIJEVO, DESNO, DA, NE)
+- ESP-01 / ESP-12 (NTP i udaljene naredbe)
+- Napajanje: 5 V / 10 A SMPS + spuštanje na 3.3 V za ESP
+
+---
+
+## 🔗 Povezivanje i preporučeni pinovi
+
+- **Napajanje i zaštita**
+  - 5 V rail napaja Arduino, ULN2803 i releje; zvona i motori ploče ostaju na zasebnim napajanjima uz optičku izolaciju.
+  - Obavezno uzemljenje zajedničke mase između logike i napajanja toranjskog ormara.
+- **I2C sabirnica**
+  - DS3231 i LCD dijele SDA (D20) i SCL (D21) linije Mega kontrolera, s kratkim vodičima radi otpornika pull-up.
+- **Releji kazaljki**
+  - PIN_RELEJ_PARNE_KAZALJKE (D10) i PIN_RELEJ_NEPARNE_KAZALJKE (D11) vode dvije faze impulsa kazaljki preko ULN2803 u relejne zavojnice.【F:src/podesavanja_piny.h†L7-L10】
+- **Releji okretne ploče**
+  - PIN_RELEJ_PARNE_PLOCE (D8) pokreće naprijed, a PIN_RELEJ_NEPARNE_PLOCE (D9) natrag; oba izlaza uvode se preko optokaplera radi zaštite mehanizma toranjske ploče.【F:src/podesavanja_piny.h†L11-L13】
+- **Ulazi okretne ploče**
+  - PIN_PLOCA_ULAZ_1–5 (D30–D34) koriste interno povlačenje i čitaju reed sklopke / čavle koji najavljuju raspored zvona i slavljenja.【F:src/podesavanja_piny.h†L15-L20】
+- **Tipkovnica**
+  - PIN_TIPKA_GORE–PIN_TIPKA_NE (D40–D45) se povezuju na tipke prema masi; aktiviraj `INPUT_PULLUP` u `tipke` modulu kako bi toranjski tehničar mogao upravljati postavkama bez vanjskih otpornika.【F:src/podesavanja_piny.h†L22-L28】
+- **Zvonjenja i čekići**
+  - PIN_ZVONO_MUSKO (D4) i PIN_ZVONO_ZENSKO (D5) vode zavojnice zvona, dok PIN_CEKIC_MUSKI (D12) i PIN_CEKIC_ZENSKI (D3) upravljaju čekićima preko releja ili SSR-a.【F:src/podesavanja_piny.h†L30-L39】
+- **Slavljenje i eksterni signali**
+  - PIN_SLAVLJENJE_SIGNAL (D2) prati ulaz s procesne logike (aktivno LOW) za ručno pokretanje slavljenja.【F:src/podesavanja_piny.h†L34-L35】
+- **ESP komunikacija**
+  - ESP-01/ESP-12 se spaja na hardware UART1 (RX1=D19, TX1=D18) uz level shifting na 3.3 V; `Serial1` se inicijalizira na 9600 bps u `esp_serial` modulu.【F:src/esp_serial.cpp†L8-L26】
 
 ---
 
 ## 🔌 ESP serijska komunikacija
 
-Glavna ploča komunicira s ESP-01/ESP-12 preko UART1 (Serial1) pri 9600 bps.
-ESP modul može slati naredbe koje završavaju znakom nove linije (`\n`).
-Podržani formati su:
-
-- `NTP:YYYY-MM-DDTHH:MM:SS` – postavlja vrijeme dobiveno s NTP-a.
-- `CMD:ZVONO1_ON` / `CMD:ZVONO1_OFF` – uključuje ili isključuje muško zvono.
-- `CMD:ZVONO2_ON` / `CMD:ZVONO2_OFF` – uključuje ili isključuje žensko zvono.
-
-Nakon ispravne obrade naredbi, ploča vraća `ACK:NTP` ili `ACK:CMD_OK`.
-U slučaju nepoznatih naredbi vraća se `ERR:CMD`, a kod krivog formata `ERR:FORMAT`.
-Ovo omogućuje integraciju s Home Assistantom ili drugim nadređenim sustavima
-preko ESP modula za daljinsko upravljanje zvonima i sinkronizaciju vremena.
+- Serial1 (9600 bps) prima `NTP:` vremenske oznake i `CMD:` naredbe za zvona, svaka završena novim redom.
+- Nakon uspješne obrade Arduino vraća `ACK:NTP` ili `ACK:CMD_OK`, dok pogreške daju `ERR:CMD` ili `ERR:FORMAT`, čime toranjski sustav olakšava integraciju s Home Assistantom ili vlastitim nadzornim serverom.【F:src/esp_serial.cpp†L17-L38】
 
 ---
 
@@ -54,38 +73,32 @@ preko ESP modula za daljinsko upravljanje zvonima i sinkronizaciju vremena.
 
 ```
 src/
-├── main.ino               # Glavni program
-├── lcd_display.h/.cpp     # Prikaz sata, poruka i menija na LCD-u
-├── rtc_vrijeme.h/.cpp     # DST logika, sinkronizacija
-├── otkucavanje.h/.cpp     # Upravljanje čekićima (batovi)
-├── zvonjenje.h/.cpp       # Slavljenje, brecanje, zvona
-├── tipke.h/.cpp           # Tipkovnica i meniji
-├── postavke.h/.cpp        # EEPROM postavke
-├── okretna_ploca.h/.cpp   # Upravljanje mehanizmom ploče
+├── main.ino               # Glavna petlja i inicijalizacija toranjskog sustava
+├── esp_serial.*           # NTP sinkronizacija i udaljene naredbe
+├── kazaljke_sata.*        # Upravljanje kazaljkama
+├── lcd_display.*          # Prikaz poruka i menija
+├── okretna_ploca.*        # Rotacija ploče i vanjski ulazi
+├── otkucavanje.*          # Čekići i otkucaji
+├── postavke.*             # EEPROM postavke
+├── tipke.*                # Tipkovnica i izbornici
+├── time_glob.*            # Globalno vrijeme i izvori
+├── zvonjenje.*            # Zvona, slavljenje i mrtvačko
+└── vrijeme_izvor.*        # Evidencija zadnje sinkronizacije
 ```
-
----
-
-## 🆕 Nove funkcije i moduli
-
-- `kompenzirajPlocu(bool pametniMod)` pametno kompenzira okretni mehanizam i preskače nepotrebne rotacije, čuvajući poziciju ploče u EEPROM-u te sinkronizira stanje s trenutačnim vremenom.【F:src/okretna_ploca.cpp†L125-L165】【F:src/okretna_ploca.cpp†L181-L215】
-- `azurirajAutomatskaZvonjenja()` i pomoćne rutine zakazuju muško/žensko zvono te slavljenje s vremenskim odmakom, uključujući provjeru preklapanja i automatsko gašenje.【F:src/okretna_ploca.cpp†L55-L123】
-- `azurirajVrijemeIzNTP(const DateTime&)` i `postaviVrijemeRucno(const DateTime&)` osvježavaju RTC, spremaju izvor vremena i osvježavaju oznaku dana, uz spremanje u EEPROM.【F:src/time_glob.cpp†L11-L42】
-- `setZadnjaSinkronizacija(...)` i `jeSinkronizacijaZastarjela()` bilježe izvor i vrijeme zadnje sinkronizacije te upozoravaju na stanje starije od 24 sata.【F:src/vrijeme_izvor.cpp†L1-L30】
 
 ---
 
 ## 🔄 Buduće nadogradnje
 
-- Automatsko prepoznavanje izvora vremena
-- Test mod za LED-ice umjesto releja
-- Web konfiguracija preko ESP-01
+- Automatsko prepoznavanje najstabilnijeg izvora vremena (RTC, NTP, ručno)
+- Test mod s LED indikacijom umjesto releja za brzu provjeru u radionici
+- Web konfigurator preko ESP-01 za udaljeni raspored zvona toranjskog sata
 
 ---
 
 ## 📝 Licenca
 
-Projekt je slobodan za edukaciju i osobnu upotrebu.
+Projekt je slobodan za edukaciju i osobnu upotrebu toranjskih sustava.
 
 ---
 
