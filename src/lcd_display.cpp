@@ -6,6 +6,7 @@
 #include <cstring>
 #include "time_glob.h"
 #include "vrijeme_izvor.h"
+#include "tipke.h"
 
 static LiquidCrystal_I2C lcd(0x27, 16, 2); // prilagodi adresu po potrebi
 
@@ -24,6 +25,12 @@ static void postaviStandardniPrikaz() {
 }
 
 static void postaviPorukuNaLCD(const char* red1, const char* red2) {
+  bool istaPoruka = prikazPoruke && strncmp(zadnjaPorukaRed1, red1, sizeof(zadnjaPorukaRed1)) == 0 &&
+                    strncmp(zadnjaPorukaRed2, red2, sizeof(zadnjaPorukaRed2)) == 0;
+  if (istaPoruka) {
+    return;
+  }
+
   strncpy(zadnjaPorukaRed1, red1, sizeof(zadnjaPorukaRed1) - 1);
   zadnjaPorukaRed1[sizeof(zadnjaPorukaRed1) - 1] = '\0';
   strncpy(zadnjaPorukaRed2, red2, sizeof(zadnjaPorukaRed2) - 1);
@@ -112,8 +119,10 @@ void prikaziSat() {
 }
 
 void prikaziPostavke() {
-  postaviStandardniPrikaz();
-  azurirajLCDPrikaz();
+  const char* red1 = dohvatiPostavkeRedak1();
+  const char* red2 = dohvatiPostavkeRedak2();
+  postaviPorukuNaLCD(red1, red2);
+  upravljajBlinkanjem();
 }
 
 void prikaziPoruku(const char* redak1, const char* redak2) {
