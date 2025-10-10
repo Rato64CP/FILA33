@@ -2,42 +2,101 @@
 #include "zvonjenje.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
+#include "postavke.h"
 #include <Arduino.h>
 
-static DateTime zadnjeOtkucavanje;
+namespace {
+enum VrstaOtkucavanja {
+    OTKUCAVANJE_NONE,
+    OTKUCAVANJE_SATI,
+    OTKUCAVANJE_POLA
+};
+
+VrstaOtkucavanja aktivnoOtkucavanje = OTKUCAVANJE_NONE;
+int preostaliUdarci = 0;
+unsigned long fazaStart = 0;
+bool cekicAktivan = false;
+int aktivniPin = -1;
+DateTime zadnjeMjereneVrijeme;
+
+bool jeUIntervalu(int sat) {
+    return jeDozvoljenoOtkucavanjeUSatu(sat);
+}
+
+void pokreniSljedeciUdarac() {
+    if (preostaliUdarci <= 0) {
+        aktivnoOtkucavanje = OTKUCAVANJE_NONE;
+        cekicAktivan = false;
+        aktivniPin = -1;
+        return;
+    }
+    digitalWrite(aktivniPin, HIGH);
+    cekicAktivan = true;
+    preostaliUdarci--;
+    fazaStart = millis();
+}
+
+void zapocniOtkucavanje(VrstaOtkucavanja vrsta, int brojUdaraca, int pin) {
+    if (brojUdaraca <= 0) return;
+    aktivnoOtkucavanje = vrsta;
+    preostaliUdarci = brojUdaraca;
+    aktivniPin = pin;
+    cekicAktivan = false;
+    fazaStart = 0;
+    pokreniSljedeciUdarac();
+}
+} // namespace
 
 void upravljajOtkucavanjem() {
     DateTime sada = dohvatiTrenutnoVrijeme();
-    if (sada == zadnjeOtkucavanje) return; // provjera jednom u sekundi
-    zadnjeOtkucavanje = sada;
+    if (sada != zadnjeMjereneVrijeme) {
+        zadnjeMjereneVrijeme = sada;
 
-    if (jeZvonoUTijeku() || jeSlavljenjeUTijeku() || jeMrtvackoUTijeku()) return;
-
-    int sat = sada.hour();
-    int minuta = sada.minute();
-    int sekunda = sada.second();
-
-    if (minuta == 0 && sekunda == 0 && sat >= 6 && sat <= 22) {
-        int broj = sat % 12;
-        if (broj == 0) broj = 12;
-        otkucajSate(broj);
+        if (aktivnoOtkucavanje == OTKUCAVANJE_NONE && !jeZvonoUTijeku() && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
+            if (sada.second() == 0 && jeUIntervalu(sada.hour())) {
+                if (sada.minute() == 0) {
+                    int broj = sada.hour() % 12;
+                    if (broj == 0) broj = 12;
+                    otkucajSate(broj);
+                } else if (sada.minute() == 30) {
+                    otkucajPolasata();
+                }
+            }
+        }
     }
-    else if (minuta == 30 && sekunda == 0 && sat >= 6 && sat <= 22) {
-        otkucajPolasata();
+
+    if (aktivnoOtkucavanje == OTKUCAVANJE_NONE) {
+        return;
+    }
+
+    unsigned long sadaMs = millis();
+    unsigned long trajanjeImpulsa = dohvatiTrajanjeImpulsaCekica();
+    unsigned long pauza = dohvatiPauzuIzmeduUdaraca();
+
+    if (cekicAktivan) {
+        if (sadaMs - fazaStart >= trajanjeImpulsa) {
+            digitalWrite(aktivniPin, LOW);
+            cekicAktivan = false;
+            fazaStart = millis();
+        }
+    } else {
+        if (preostaliUdarci > 0) {
+            if (fazaStart == 0 || sadaMs - fazaStart >= pauza) {
+                pokreniSljedeciUdarac();
+            }
+        } else {
+            aktivnoOtkucavanje = OTKUCAVANJE_NONE;
+            aktivniPin = -1;
+        }
     }
 }
 
 void otkucajSate(int broj) {
-    for (int i = 0; i < broj; i++) {
-        digitalWrite(PIN_CEKIC_MUSKI, HIGH);
-        delay(200);
-        digitalWrite(PIN_CEKIC_MUSKI, LOW);
-        delay(800);
-    }
+    if (aktivnoOtkucavanje != OTKUCAVANJE_NONE) return;
+    zapocniOtkucavanje(OTKUCAVANJE_SATI, broj, PIN_CEKIC_MUSKI);
 }
 
 void otkucajPolasata() {
-    digitalWrite(PIN_CEKIC_ZENSKI, HIGH);
-    delay(200);
-    digitalWrite(PIN_CEKIC_ZENSKI, LOW);
+    if (aktivnoOtkucavanje != OTKUCAVANJE_NONE) return;
+    zapocniOtkucavanje(OTKUCAVANJE_POLA, 1, PIN_CEKIC_ZENSKI);
 }

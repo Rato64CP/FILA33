@@ -7,4 +7,9 @@ void resetPostavke();
 
 extern int satOd;
 extern int satDo;
-extern int pauzaIzmeduUdaraca;
+extern unsigned int pauzaIzmeduUdaraca;
+extern unsigned int trajanjeImpulsaCekicaMs;
+
+bool jeDozvoljenoOtkucavanjeUSatu(int sat);
+unsigned int dohvatiTrajanjeImpulsaCekica();
+unsigned int dohvatiPauzuIzmeduUdaraca();
