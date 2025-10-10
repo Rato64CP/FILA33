@@ -12,6 +12,13 @@
 #define PIN_RELEJ_PARNE_PLOCE      8
 #define PIN_RELEJ_NEPARNE_PLOCE    9
 
+// Ulazi okretne ploče (čavli) – aktivni na LOW uz interno povlačenje prema Vcc
+#define PIN_PLOCA_ULAZ_1           30
+#define PIN_PLOCA_ULAZ_2           31
+#define PIN_PLOCA_ULAZ_3           32
+#define PIN_PLOCA_ULAZ_4           33
+#define PIN_PLOCA_ULAZ_5           34
+
 // Čekići
 #define PIN_CEKIC_MUSKI             12
 #define PIN_CEKIC_ZENSKI            3
