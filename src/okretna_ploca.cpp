@@ -49,6 +49,12 @@ static int izracunajCiljnuPoziciju(const DateTime& now) {
   return pozicija;
 }
 
+static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija) {
+  int razlika = (ciljnaPozicija - trenutnaPozicija) % 64;
+  if (razlika < 0) razlika += 64;
+  return razlika;
+}
+
 static void pokreniPrvuFazuPloce() {
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
@@ -277,10 +283,16 @@ bool jePlocaUSinkronu() {
 void kompenzirajPlocu(bool pametniMod) {
   DateTime now = dohvatiTrenutnoVrijeme();
   int ciljPozicija = izracunajCiljnuPoziciju(now);
-  int razlika = ciljPozicija - pozicijaPloce;
-  if (razlika < 0) razlika += 64;
+  int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
 
   if (pametniMod && razlika <= 1) return; // čekaj sljedeći impuls ako je blizu
+
+  if (razlika == 0) {
+    zadnjaAktiviranaMinuta = now.minute();
+    ciklusUTijeku = false;
+    drugaFaza = false;
+    return;
+  }
 
   for (int i = 0; i < razlika; i++) {
     odradiJedanKorakPloceBlokirajuci();
