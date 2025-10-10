@@ -11,9 +11,6 @@ void sinkronizirajVrijemeIzvora(const DateTime& novoVrijeme, IzvorVremena izvor)
     case NTP_VRIJEME:
       postaviVrijemeIzNTP(novoVrijeme);
       break;
-    case DCF_VRIJEME:
-      postaviVrijemeIzDCF(novoVrijeme);
-      break;
     case RTC_VRIJEME:
     case NEPOZNATO_VRIJEME:
     default:

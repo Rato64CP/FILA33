@@ -16,7 +16,7 @@ void setZadnjaSinkronizacija(IzvorVremena izvor, const DateTime& vrijeme) {
 IzvorVremena getZadnjiIzvor() {
   int i;
   EEPROM.get(EEPROM_ADRESA_IZVOR, i);
-  if (i < 0 || i > 3) return NEPOZNATO_VRIJEME;
+  if (i < 0 || i > 2) return NEPOZNATO_VRIJEME;
   return (IzvorVremena)i;
 }
 
