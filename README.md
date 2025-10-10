@@ -38,6 +38,14 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 
 ---
 
+## 🖥️ Prikaz na LCD-u
+
+- 📟 **Gornji red** prikazuje sat toranjskog ormara u formatu `HH:MM:SS`, pri čemu se sekunde izmjenjuju svake pola sekunde s razmakom kako bi tehničar odmah vidio da sustav osvježava prikaz (`prikaziSekunde`). Desno od vremena stoji oznaka izvora (`RTC`, `NTP`, `RUC`) iz modula `vrijeme_izvor` te slovna oznaka aktualnog dana u tjednu (`dohvatiOznakuDana()`), što olakšava provjeru sinkronizacije toranjskog sata.【F:src/lcd_display.cpp†L49-L74】
+- 📅 **Donji red** prikazuje kratice dana (`Ned`, `Pon`, ...) i datum u obliku `DD.MM.YYYY`, koristeći podatke iz RTC-a (`DateTime now = dohvatiTrenutnoVrijeme()`), čime servisno osoblje odmah vidi kalendarske informacije toranjskog ormara.【F:src/lcd_display.cpp†L49-L74】
+- 🔁 **Poruke i blinkanje** privremeno brišu standardni prikaz: kada `prikaziPoruku()` stigne iz drugih modula, oba reda se pune prilagođenim tekstom, a funkcija `postaviLCDBlinkanje()` uključuje ili isključuje pulsiranje pozadinskog osvjetljenja svakih 500 ms kako bi upozorenja za toranjski sat bila uočljiva.【F:src/lcd_display.cpp†L24-L47】【F:src/lcd_display.cpp†L76-L118】
+
+---
+
 ## 🔗 Povezivanje i preporučeni pinovi
 
 - **Napajanje i zaštita**
