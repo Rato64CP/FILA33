@@ -19,11 +19,11 @@ static bool blinkanjeAktivno = false;
 static bool lcdVidljiv = true;
 static unsigned long zadnjeBlinkanje = 0;
 
-static void postaviNaSatPrikaz() {
+static void postaviStandardniPrikaz() {
   prikazPoruke = false;
 }
 
-static void prikaziPorukuInterno(const char* red1, const char* red2) {
+static void postaviPorukuNaLCD(const char* red1, const char* red2) {
   strncpy(zadnjaPorukaRed1, red1, sizeof(zadnjaPorukaRed1) - 1);
   zadnjaPorukaRed1[sizeof(zadnjaPorukaRed1) - 1] = '\0';
   strncpy(zadnjaPorukaRed2, red2, sizeof(zadnjaPorukaRed2) - 1);
@@ -107,17 +107,17 @@ void inicijalizirajLCD() {
 }
 
 void prikaziSat() {
-  postaviNaSatPrikaz();
+  postaviStandardniPrikaz();
   azurirajLCDPrikaz();
 }
 
 void prikaziPostavke() {
-  postaviNaSatPrikaz();
+  postaviStandardniPrikaz();
   azurirajLCDPrikaz();
 }
 
 void prikaziPoruku(const char* redak1, const char* redak2) {
-  prikaziPorukuInterno(redak1, redak2);
+  postaviPorukuNaLCD(redak1, redak2);
 }
 
 void postaviLCDBlinkanje(bool omoguci) {
