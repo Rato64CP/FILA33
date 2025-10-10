@@ -101,6 +101,7 @@ src/
 - Automatsko prepoznavanje najstabilnijeg izvora vremena (RTC, NTP, ručno)
 - Test mod s LED indikacijom umjesto releja za brzu provjeru u radionici
 - Web konfigurator preko ESP-01 za udaljeni raspored zvona toranjskog sata
+- Hardverska sinkronizacija sekundi putem SQW izlaza DS3231 i prekidnog ulaza kontrolera, uz prilagodbu ISR logike otkucavanja toranjskog sata
 
 ---
 
