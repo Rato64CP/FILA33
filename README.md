@@ -15,6 +15,8 @@ Ovaj projekt zamjenjuje postojeći sustav upravljanja toranjskim satom korišten
 - Upravljanje okretnom pločom sa štapićima
 - Upravljačka tipkovnica (6 tipki: GORE, DOLJE, LIJEVO, DESNO, DA, NE)
 - Postavke se spremaju u EEPROM
+- Praćenje izvora vremena i zadnje sinkronizacije
+- Automatizirano zakazivanje zvona i slavljenja po vanjskim ulazima
 
 ---
 
@@ -61,6 +63,15 @@ src/
 ├── postavke.h/.cpp        # EEPROM postavke
 ├── okretna_ploca.h/.cpp   # Upravljanje mehanizmom ploče
 ```
+
+---
+
+## 🆕 Nove funkcije i moduli
+
+- `kompenzirajPlocu(bool pametniMod)` pametno kompenzira okretni mehanizam i preskače nepotrebne rotacije, čuvajući poziciju ploče u EEPROM-u te sinkronizira stanje s trenutačnim vremenom.【F:src/okretna_ploca.cpp†L125-L165】【F:src/okretna_ploca.cpp†L181-L215】
+- `azurirajAutomatskaZvonjenja()` i pomoćne rutine zakazuju muško/žensko zvono te slavljenje s vremenskim odmakom, uključujući provjeru preklapanja i automatsko gašenje.【F:src/okretna_ploca.cpp†L55-L123】
+- `azurirajVrijemeIzNTP(const DateTime&)` i `postaviVrijemeRucno(const DateTime&)` osvježavaju RTC, spremaju izvor vremena i osvježavaju oznaku dana, uz spremanje u EEPROM.【F:src/time_glob.cpp†L11-L42】
+- `setZadnjaSinkronizacija(...)` i `jeSinkronizacijaZastarjela()` bilježe izvor i vrijeme zadnje sinkronizacije te upozoravaju na stanje starije od 24 sata.【F:src/vrijeme_izvor.cpp†L1-L30】
 
 ---
 
