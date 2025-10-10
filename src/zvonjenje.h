@@ -4,6 +4,7 @@
 void inicijalizirajZvona();
 void upravljajZvonom();
 void zapocniSlavljenje();
+void zaustaviSlavljenje();
 void zapocniMrtvacko();
 void zaustaviZvonjenje();
 

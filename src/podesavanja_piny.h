@@ -16,6 +16,9 @@
 #define PIN_CEKIC_MUSKI             12
 #define PIN_CEKIC_ZENSKI            3
 
+// Ulaz za slavljenje (aktivno na LOW uz interno pull-up otpornik)
+#define PIN_SLAVLJENJE_SIGNAL       2
+
 // Zvona
 #define PIN_ZVONO_MUSKO             4
 #define PIN_ZVONO_ZENSKO            5

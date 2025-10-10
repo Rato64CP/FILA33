@@ -10,21 +10,58 @@ static unsigned long zadnjeIskljucenjeZensko = 0;
 static bool slavljenje = false;
 static bool mrtvacko = false;
 
-static unsigned long slavljenjeStart = 0;
-static int slavljenjeKorak = 0;
+static unsigned long slavljenjeKorakStart = 0;
+static unsigned int slavljenjeKorak = 0;
+static bool slavljenjeSignalAktivno = false;
 
 static unsigned long zadnjeBrecanje = 0;
 
+static const unsigned long TRAJANJE_UDARCA_MS = 150UL;
+static const unsigned long SLAVLJENJE_KORAK_MS = 150UL;
+
+enum SlavljenjeAkcija : uint8_t {
+    SLAVLJENJE_PAUZA = 0,
+    SLAVLJENJE_ZENSKO,
+    SLAVLJENJE_MUSKO
+};
+
+static const SlavljenjeAkcija SLAVLJENJE_UZORAK[] = {
+    SLAVLJENJE_ZENSKO,
+    SLAVLJENJE_PAUZA,
+    SLAVLJENJE_ZENSKO,
+    SLAVLJENJE_PAUZA,
+    SLAVLJENJE_MUSKO,
+    SLAVLJENJE_PAUZA,
+};
+
+static const size_t BROJ_KORAKA_SLAVLJENJA = sizeof(SLAVLJENJE_UZORAK) / sizeof(SLAVLJENJE_UZORAK[0]);
+
+static void postaviCekice(bool muskoAktivan, bool zenskoAktivan) {
+    digitalWrite(PIN_CEKIC_MUSKI, muskoAktivan ? HIGH : LOW);
+    digitalWrite(PIN_CEKIC_ZENSKI, zenskoAktivan ? HIGH : LOW);
+}
+
+static void primijeniSlavljenjeKorak() {
+    SlavljenjeAkcija akcija = SLAVLJENJE_UZORAK[slavljenjeKorak % BROJ_KORAKA_SLAVLJENJA];
+    if (akcija == SLAVLJENJE_ZENSKO) {
+        postaviCekice(false, true);
+    } else if (akcija == SLAVLJENJE_MUSKO) {
+        postaviCekice(true, false);
+    } else {
+        postaviCekice(false, false);
+    }
+}
+
 static void udariMusko() {
-    digitalWrite(PIN_CEKIC_MUSKI, HIGH);
-    delay(200);
-    digitalWrite(PIN_CEKIC_MUSKI, LOW);
+    postaviCekice(true, false);
+    delay(TRAJANJE_UDARCA_MS);
+    postaviCekice(false, false);
 }
 
 static void udariZensko() {
-    digitalWrite(PIN_CEKIC_ZENSKI, HIGH);
-    delay(200);
-    digitalWrite(PIN_CEKIC_ZENSKI, LOW);
+    postaviCekice(false, true);
+    delay(TRAJANJE_UDARCA_MS);
+    postaviCekice(false, false);
 }
 
 void inicijalizirajZvona() {
@@ -32,10 +69,11 @@ void inicijalizirajZvona() {
     pinMode(PIN_ZVONO_ZENSKO, OUTPUT);
     pinMode(PIN_CEKIC_MUSKI, OUTPUT);
     pinMode(PIN_CEKIC_ZENSKI, OUTPUT);
+    pinMode(PIN_SLAVLJENJE_SIGNAL, INPUT_PULLUP);
     digitalWrite(PIN_ZVONO_MUSKO, LOW);
     digitalWrite(PIN_ZVONO_ZENSKO, LOW);
-    digitalWrite(PIN_CEKIC_MUSKI, LOW);
-    digitalWrite(PIN_CEKIC_ZENSKI, LOW);
+    postaviCekice(false, false);
+    slavljenjeSignalAktivno = false;
 }
 
 void aktivirajZvonjenje(int koje) {
@@ -74,22 +112,20 @@ bool jeMrtvackoUTijeku() { return mrtvacko; }
 void upravljajZvonom() {
     unsigned long sada = millis();
 
-    if (slavljenje) {
-        if (sada - slavljenjeStart >= 1000UL) {
-            slavljenjeStart = sada;
-            slavljenjeKorak = 0;
+    bool signalAktivan = digitalRead(PIN_SLAVLJENJE_SIGNAL) == LOW;
+    if (signalAktivan != slavljenjeSignalAktivno) {
+        slavljenjeSignalAktivno = signalAktivan;
+        if (signalAktivan) {
+            zapocniSlavljenje();
+        } else if (slavljenje) {
+            zaustaviSlavljenje();
         }
+    }
 
-        if (slavljenjeKorak == 0) {
-            udariMusko();
-            slavljenjeKorak++;
-        } else if (slavljenjeKorak == 1 && sada - slavljenjeStart >= 300UL) {
-            udariZensko();
-            slavljenjeKorak++;
-        } else if (slavljenjeKorak == 2 && sada - slavljenjeStart >= 600UL) {
-            udariZensko();
-            slavljenjeKorak++;
-        }
+    if (slavljenje && sada - slavljenjeKorakStart >= SLAVLJENJE_KORAK_MS) {
+        slavljenjeKorak = (slavljenjeKorak + 1) % BROJ_KORAKA_SLAVLJENJA;
+        slavljenjeKorakStart = sada;
+        primijeniSlavljenjeKorak();
     }
 
     if (mrtvacko && sada - zadnjeBrecanje >= 10000UL) {
@@ -101,8 +137,15 @@ void upravljajZvonom() {
 
 void zapocniSlavljenje() {
     slavljenje = true;
-    slavljenjeStart = millis();
     slavljenjeKorak = 0;
+    primijeniSlavljenjeKorak();
+    slavljenjeKorakStart = millis();
+}
+
+void zaustaviSlavljenje() {
+    slavljenje = false;
+    slavljenjeKorak = 0;
+    postaviCekice(false, false);
 }
 
 void zapocniMrtvacko() {
@@ -111,6 +154,6 @@ void zapocniMrtvacko() {
 }
 
 void zaustaviZvonjenje() {
-    slavljenje = false;
+    zaustaviSlavljenje();
     mrtvacko = false;
 }
