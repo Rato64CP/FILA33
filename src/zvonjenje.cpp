@@ -52,14 +52,8 @@ static void primijeniSlavljenjeKorak() {
     }
 }
 
-static void udariMusko() {
-    postaviCekice(true, false);
-    delay(TRAJANJE_UDARCA_MS);
-    postaviCekice(false, false);
-}
-
-static void udariZensko() {
-    postaviCekice(false, true);
+static void odradiUdarac(bool musko) {
+    postaviCekice(musko, !musko);
     delay(TRAJANJE_UDARCA_MS);
     postaviCekice(false, false);
 }
@@ -130,8 +124,8 @@ void upravljajZvonom() {
 
     if (mrtvacko && sada - zadnjeBrecanje >= 10000UL) {
         zadnjeBrecanje = sada;
-        udariMusko();
-        udariZensko();
+        odradiUdarac(true);
+        odradiUdarac(false);
     }
 }
 
