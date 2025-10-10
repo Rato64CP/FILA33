@@ -4,6 +4,7 @@
 #include "vrijeme_izvor.h"
 #include <RTClib.h>
 #include "podesavanja_piny.h"
+#include "time_glob.h"
 
 volatile bool edgeDetected = false;
 volatile unsigned long edgeTime = 0;
@@ -58,7 +59,5 @@ void dekodirajFrame() {
              + (bitBuffer[54] << 4) + (bitBuffer[55] << 5) + 2000;
 
   DateTime dt(year, month, day, hour, minute, 0);
-  RTC_DS3231 rtc;
-  rtc.adjust(dt);
-  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
+  postaviVrijemeIzDCF(dt);
 }

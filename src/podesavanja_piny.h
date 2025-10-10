@@ -15,7 +15,7 @@
 #define PIN_RELEJ_NEPARNE_PLOCE    9
 
 // Čekići
-#define PIN_CEKIC_MUSKI             2
+#define PIN_CEKIC_MUSKI             12
 #define PIN_CEKIC_ZENSKI            3
 
 // Zvona
@@ -29,3 +29,4 @@
 // ESP komunikacija (softverski serijski port primjerice)
 #define PIN_ESP_RX                  6
 #define PIN_ESP_TX                  7
+#endif // PODESAVANJA_PINY_H

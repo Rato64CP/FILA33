@@ -4,10 +4,22 @@
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "vrijeme_izvor.h"
+#include "time_glob.h"
 
 void sinkronizirajVrijemeIzvora(const DateTime& novoVrijeme, IzvorVremena izvor) {
-  RTC_DS3231 rtc;
-  rtc.adjust(novoVrijeme);
+  switch (izvor) {
+    case NTP_VRIJEME:
+      postaviVrijemeIzNTP(novoVrijeme);
+      break;
+    case DCF_VRIJEME:
+      postaviVrijemeIzDCF(novoVrijeme);
+      break;
+    case RTC_VRIJEME:
+    case NEPOZNATO_VRIJEME:
+    default:
+      postaviVrijemeRucno(novoVrijeme);
+      break;
+  }
 
   // Spremi izvor
   EEPROM.put(0, (int)izvor);

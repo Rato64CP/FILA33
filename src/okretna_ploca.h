@@ -5,7 +5,7 @@ void inicijalizirajPlocu();
 void upravljajPločom();
 void postaviTrenutniPolozajPloce(int pozicija);
 void postaviOffsetMinuta(int offset);
-int dohvatiTrenutnuPozicijuPloce();
+int dohvatiPozicijuPloce();
 int dohvatiOffsetMinuta();
-void pomakniPlocuZa(int brojKvadranata);
-void kompenzirajPlocu();
+// PametniMod izbjegava pomicanje ako je pozicija vec gotovo ispravna
+void kompenzirajPlocu(bool pametniMod);

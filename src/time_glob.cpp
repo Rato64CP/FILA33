@@ -2,13 +2,19 @@
 #include <RTClib.h>
 #include <EEPROM.h>
 #include "time_glob.h"
+#include "vrijeme_izvor.h"
 
 RTC_DS3231 rtc;
 
 String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
 char oznakaDana = 'R';
 
-void inicijalizirajSat() {
+void azurirajVrijemeIzNTP(const DateTime& dt) {
+  postaviVrijemeIzNTP(dt);
+  azurirajOznakuDana();
+}
+
+void inicijalizirajRTC() {
   rtc.begin();
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // postavi na build vrijeme
@@ -25,18 +31,21 @@ void postaviVrijemeIzNTP(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "NTP";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(NTP_VRIJEME, dt);
 }
 
 void postaviVrijemeIzDCF(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "DCF";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
 }
 
 void postaviVrijemeRucno(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "RU";
   EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(RTC_VRIJEME, dt);
 }
 
 void azurirajOznakuDana() {
