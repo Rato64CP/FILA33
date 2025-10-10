@@ -116,10 +116,29 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod) {
 }
 
 void kompenzirajKazaljke(bool pametanMod) {
-  DateTime now = dohvatiTrenutnoVrijeme();
-  int trenutnaMinuta = izracunajDvanaestSatneMinute(now);
-  pomakniKazaljkeNaMinutu(trenutnaMinuta, pametanMod);
-  zadnjaAktiviranaMinuta = now.minute();
+  DateTime pocetnoVrijeme = dohvatiTrenutnoVrijeme();
+  int ciljnaMinuta = izracunajDvanaestSatneMinute(pocetnoVrijeme);
+  pomakniKazaljkeNaMinutu(ciljnaMinuta, pametanMod);
+
+  for (int i = 0; i < BROJ_MINUTA_CIKLUS; ++i) {
+    DateTime osvjezavanje = dohvatiTrenutnoVrijeme();
+    int minuteNakonPomaka = izracunajDvanaestSatneMinute(osvjezavanje);
+    if (memoriraneKazaljkeMinuta == minuteNakonPomaka) {
+      break;
+    }
+
+    // Prisilno preskoci pametni mod kako bi se vrijeme dohvatilo u istom ciklusu,
+    // jer se vrijeme dok se izvodi pomak mijenja u realnom vremenu prema time_glob modulima.
+    int prethodneMinute = memoriraneKazaljkeMinuta;
+    pomakniKazaljkeNaMinutu(minuteNakonPomaka, false);
+
+    if (memoriraneKazaljkeMinuta == prethodneMinute) {
+      break;
+    }
+  }
+
+  DateTime zavrsnoVrijeme = dohvatiTrenutnoVrijeme();
+  zadnjaAktiviranaMinuta = zavrsnoVrijeme.minute();
   impulsUTijeku = false;
   drugaFaza = false;
 }
