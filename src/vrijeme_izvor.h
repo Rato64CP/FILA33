@@ -7,8 +7,7 @@
 enum IzvorVremena {
   RTC_VRIJEME = 0,
   NTP_VRIJEME = 1,
-  DCF_VRIJEME = 2,
-  NEPOZNATO_VRIJEME = 3
+  NEPOZNATO_VRIJEME = 2
 };
 
 void setZadnjaSinkronizacija(IzvorVremena izvor, const DateTime& vrijeme);

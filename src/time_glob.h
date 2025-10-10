@@ -5,7 +5,6 @@ void inicijalizirajRTC();
 DateTime dohvatiTrenutnoVrijeme();
 void postaviVrijemeIzNTP(const DateTime& dt);
 void azurirajVrijemeIzNTP(const DateTime& dt);
-void postaviVrijemeIzDCF(const DateTime& dt);
 void postaviVrijemeRucno(const DateTime& dt);
 void azurirajOznakuDana();
 String dohvatiIzvorVremena();
