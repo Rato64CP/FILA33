@@ -11,4 +11,7 @@ void postaviTrenutniPolozajKazaljki(int trenutnaMinuta);
 void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod);
 void kompenzirajKazaljke(bool pametanMod);
 void pomakniKazaljkeZa(int brojMinuta);
+bool suKazaljkeUSinkronu();
+int dohvatiMemoriraneKazaljkeMinuta();
+void oznaciKazaljkeKaoSinkronizirane();
 

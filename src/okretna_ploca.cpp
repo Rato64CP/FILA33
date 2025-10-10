@@ -5,17 +5,59 @@
 #include "okretna_ploca.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
+#include "lcd_display.h"
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
 
 static unsigned long vrijemeStarta = 0;
-static bool uTijeku = false;
+static bool ciklusUTijeku = false;
 static bool drugaFaza = false;
-static DateTime prosloVrijeme;
+static int zadnjaAktiviranaMinuta = -1;
 
 int pozicijaPloce = 0; // 0-63
 int offsetMinuta = 14; // podesivo u postavkama, 0–15
+
+static int izracunajCiljnuPoziciju(const DateTime& now) {
+  int ukupnoMinuta = now.hour() * 60 + now.minute();
+  int pocetak = 5 * 60 + offsetMinuta;
+  int diff = ukupnoMinuta - pocetak;
+  if (diff < 0) return 0;
+  int pozicija = diff / 15;
+  if (pozicija > 63) pozicija = 63;
+  if (pozicija < 0) pozicija = 0;
+  return pozicija;
+}
+
+static void pokreniPrvuFazuPloce() {
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  vrijemeStarta = millis();
+  ciklusUTijeku = true;
+  drugaFaza = false;
+}
+
+static void zavrsiCiklusPloce() {
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  ciklusUTijeku = false;
+  drugaFaza = false;
+  pozicijaPloce = (pozicijaPloce + 1) % 64;
+  EEPROM.put(20, pozicijaPloce);
+}
+
+static void odradiJedanKorakPloceBlokirajuci() {
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
+  odradiPauzuSaLCD(POLA_OKRETA_MS);
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+  odradiPauzuSaLCD(200);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
+  odradiPauzuSaLCD(POLA_OKRETA_MS);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  odradiPauzuSaLCD(400);
+  pozicijaPloce = (pozicijaPloce + 1) % 64;
+  EEPROM.put(20, pozicijaPloce);
+}
 
 void inicijalizirajPlocu() {
   pinMode(PIN_RELEJ_PARNE_PLOCE, OUTPUT);
@@ -28,42 +70,36 @@ void inicijalizirajPlocu() {
   EEPROM.get(22, offsetMinuta);
   if (offsetMinuta < 0 || offsetMinuta > 15) offsetMinuta = 14;
 
-  prosloVrijeme = dohvatiTrenutnoVrijeme();
+  vrijemeStarta = 0;
+  ciklusUTijeku = false;
+  drugaFaza = false;
+  zadnjaAktiviranaMinuta = -1;
 }
 
-void upravljajPločom() {
+void upravljajPlocom() {
   DateTime now = dohvatiTrenutnoVrijeme();
-  int sati = now.hour();
   int minuta = now.minute();
-  int sekunda = now.second();
 
-  if ((sati < 5) || (sati > 20) || (sati == 20 && minuta > 45)) return;
+  int cilj = izracunajCiljnuPoziciju(now);
+  int razlika = cilj - pozicijaPloce;
+  if (razlika < 0) razlika += 64;
 
-  bool okidac = (minuta % 15 == offsetMinuta) && sekunda == 0;
-  if (okidac && !uTijeku && now != prosloVrijeme) {
-    prosloVrijeme = now;
-    digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
-    vrijemeStarta = millis();
-    uTijeku = true;
-    drugaFaza = false;
+  bool trebaPokrenuti = (!ciklusUTijeku && now.second() <= 1 && minuta != zadnjaAktiviranaMinuta && (minuta % 15 == offsetMinuta) && razlika > 0);
+  if (trebaPokrenuti) {
+    pokreniPrvuFazuPloce();
+    zadnjaAktiviranaMinuta = minuta;
   }
 
-  if (uTijeku) {
-    unsigned long trajanje = millis() - vrijemeStarta;
+  if (!ciklusUTijeku) return;
 
-    if (!drugaFaza && trajanje >= POLA_OKRETA_MS) {
-      digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-      digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
-      drugaFaza = true;
-    }
-
-    if (trajanje >= 2 * POLA_OKRETA_MS) {
-      digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-      uTijeku = false;
-      drugaFaza = false;
-      pozicijaPloce = (pozicijaPloce + 1) % 64;
-      EEPROM.put(20, pozicijaPloce);
-    }
+  unsigned long proteklo = millis() - vrijemeStarta;
+  if (!drugaFaza && proteklo >= POLA_OKRETA_MS) {
+    digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
+    vrijemeStarta = millis();
+    drugaFaza = true;
+  } else if (drugaFaza && proteklo >= POLA_OKRETA_MS) {
+    zavrsiCiklusPloce();
   }
 }
 
@@ -85,28 +121,32 @@ int dohvatiPozicijuPloce() {
   return pozicijaPloce;
 }
 
+bool jePlocaUSinkronu() {
+  DateTime now = dohvatiTrenutnoVrijeme();
+  return pozicijaPloce == izracunajCiljnuPoziciju(now);
+}
+
 void kompenzirajPlocu(bool pametniMod) {
   DateTime now = dohvatiTrenutnoVrijeme();
-  int sati = now.hour();
-  int minuta = now.minute();
-  if (sati < 5 || sati > 20) return;
-
-  int ciljPozicija = (sati - 5) * 4 + (minuta / 15);
+  int ciljPozicija = izracunajCiljnuPoziciju(now);
   int razlika = ciljPozicija - pozicijaPloce;
   if (razlika < 0) razlika += 64;
 
   if (pametniMod && razlika <= 1) return; // čekaj sljedeći impuls ako je blizu
 
   for (int i = 0; i < razlika; i++) {
-    digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
-    delay(POLA_OKRETA_MS);
-    digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-    delay(200);
-    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
-    delay(POLA_OKRETA_MS);
-    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-    delay(500);
+    odradiJedanKorakPloceBlokirajuci();
   }
+
   pozicijaPloce = ciljPozicija;
   EEPROM.put(20, pozicijaPloce);
+
+  zadnjaAktiviranaMinuta = now.minute();
+  ciklusUTijeku = false;
+  drugaFaza = false;
+}
+
+void oznaciPlocuKaoSinkroniziranu() {
+  DateTime now = dohvatiTrenutnoVrijeme();
+  zadnjaAktiviranaMinuta = now.minute();
 }
