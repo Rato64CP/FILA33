@@ -31,6 +31,23 @@ Ovaj projekt zamjenjuje postojeći sustav upravljanja toranjskim satom korišten
 
 ---
 
+## 🔌 ESP serijska komunikacija
+
+Glavna ploča komunicira s ESP-01/ESP-12 preko UART1 (Serial1) pri 9600 bps.
+ESP modul može slati naredbe koje završavaju znakom nove linije (`\n`).
+Podržani formati su:
+
+- `NTP:YYYY-MM-DDTHH:MM:SS` – postavlja vrijeme dobiveno s NTP-a.
+- `CMD:ZVONO1_ON` / `CMD:ZVONO1_OFF` – uključuje ili isključuje muško zvono.
+- `CMD:ZVONO2_ON` / `CMD:ZVONO2_OFF` – uključuje ili isključuje žensko zvono.
+
+Nakon ispravne obrade naredbi, ploča vraća `ACK:NTP` ili `ACK:CMD_OK`.
+U slučaju nepoznatih naredbi vraća se `ERR:CMD`, a kod krivog formata `ERR:FORMAT`.
+Ovo omogućuje integraciju s Home Assistantom ili drugim nadređenim sustavima
+preko ESP modula za daljinsko upravljanje zvonima i sinkronizaciju vremena.
+
+---
+
 ## 📁 Struktura projekta (src/)
 
 ```
