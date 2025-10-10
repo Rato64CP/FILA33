@@ -157,9 +157,13 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   bool pokreniZensko = jeNedjelja ? ulaziAktivni[3] : ulaziAktivni[1];
   bool pokreniSlavljenjePin = ulaziAktivni[4];
 
-  unsigned long trajanjeMs = dohvatiTrajanjeZvonjenjaMs();
+  unsigned long trajanjeMs = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs() : dohvatiTrajanjeZvonjenjaRadniMs();
   if (trajanjeMs == 0) {
-    trajanjeMs = 120000UL;
+    trajanjeMs = jeNedjelja ? 180000UL : 120000UL;
+  }
+  unsigned long trajanjeSlavljenja = dohvatiTrajanjeSlavljenjaMs();
+  if (trajanjeSlavljenja == 0) {
+    trajanjeSlavljenja = 120000UL;
   }
 
   bool imaZvono = false;
@@ -180,9 +184,9 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
           pocetak = autoZvonoKraj[i];
         }
       }
-      zakaziSlavljenje(pocetak, trajanjeMs);
+      zakaziSlavljenje(pocetak, trajanjeSlavljenja);
     } else {
-      pokreniSlavljenjeOdmah(sadaMs, trajanjeMs);
+      pokreniSlavljenjeOdmah(sadaMs, trajanjeSlavljenja);
     }
   }
 }
