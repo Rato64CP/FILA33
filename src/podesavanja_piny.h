@@ -38,7 +38,7 @@
 #define PIN_ZVONO_MUSKO             4
 #define PIN_ZVONO_ZENSKO            5
 
-// ESP komunikacija (softverski serijski port primjerice)
+// ESP komunikacija za toranjski sat (na Mega 2560 WiFi koristi se Serial3, inače softverski UART)
 #define PIN_ESP_RX                  6
 #define PIN_ESP_TX                  7
 

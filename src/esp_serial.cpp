@@ -4,26 +4,34 @@
 #include "esp_serial.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
+#include "podesavanja_piny.h"
 
-#define ESP_SERIAL Serial1  // RX1=19, TX1=18
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA)
+static HardwareSerial &espSerijskiPort = Serial3;  // Ugrađeni WiFi modul na Mega 2560 WiFi
+#else
+#include <SoftwareSerial.h>
+static SoftwareSerial espSerijskiPort(PIN_ESP_RX, PIN_ESP_TX);  // Modul za toranjski sat na softverskom UART-u
+#endif
+
+static const unsigned long ESP_BRZINA = 9600;
 
 String ulazniBuffer = "";
 
 void inicijalizirajESP() {
-  ESP_SERIAL.begin(9600);
+  espSerijskiPort.begin(ESP_BRZINA);
   ulazniBuffer.reserve(128);
 }
 
 void obradiESPSerijskuKomunikaciju() {
-  while (ESP_SERIAL.available()) {
-    char znak = ESP_SERIAL.read();
+  while (espSerijskiPort.available()) {
+    char znak = espSerijskiPort.read();
     if (znak == '\n') {
       ulazniBuffer.trim();
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         DateTime ntpVrijeme = DateTime(iso.c_str());
         azurirajVrijemeIzNTP(ntpVrijeme);
-        ESP_SERIAL.println("ACK:NTP");
+        espSerijskiPort.println("ACK:NTP");
       }
       else if (ulazniBuffer.startsWith("CMD:")) {
         String komanda = ulazniBuffer.substring(4);
@@ -31,11 +39,11 @@ void obradiESPSerijskuKomunikaciju() {
         else if (komanda == "ZVONO1_OFF") deaktivirajZvonjenje(1);
         else if (komanda == "ZVONO2_ON") aktivirajZvonjenje(2);
         else if (komanda == "ZVONO2_OFF") deaktivirajZvonjenje(2);
-        else ESP_SERIAL.println("ERR:CMD");
-        ESP_SERIAL.println("ACK:CMD_OK");
+        else espSerijskiPort.println("ERR:CMD");
+        espSerijskiPort.println("ACK:CMD_OK");
       }
       else {
-        ESP_SERIAL.println("ERR:FORMAT");
+        espSerijskiPort.println("ERR:FORMAT");
       }
       ulazniBuffer = "";
     } else {
