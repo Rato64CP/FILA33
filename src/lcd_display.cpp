@@ -5,7 +5,6 @@
 #include <RTClib.h>
 #include <cstring>
 #include "time_glob.h"
-#include "vrijeme_izvor.h"
 #include "tipke.h"
 
 static LiquidCrystal_I2C lcd(0x27, 16, 2); // prilagodi adresu po potrebi
@@ -69,6 +68,15 @@ static void upravljajBlinkanjem() {
 static void azurirajLCDPrikaz() {
   unsigned long sada = millis();
   if (!prikazPoruke) {
+    if (!jeRTCPouzdan()) {
+      if (!fallbackImaPouzdanuReferencu()) {
+        postaviPorukuNaLCD("RTC baterija", "treba zamjenu");
+      } else {
+        postaviPorukuNaLCD("Cekam sinkron.", "RTC nije valjan");
+      }
+      upravljajBlinkanjem();
+      return;
+    }
     if (sada - zadnjiRefresh >= 500UL) {
       zadnjiRefresh = sada;
 

@@ -12,3 +12,5 @@ void azurirajOznakuDana();
 String dohvatiIzvorVremena();
 char dohvatiOznakuDana();
 void oznaciPovratakNaRTC();
+bool jeRTCPouzdan();
+bool fallbackImaPouzdanuReferencu();
