@@ -15,6 +15,9 @@ static unsigned int slavljenjeKorak = 0;
 static bool slavljenjeSignalAktivno = false;
 
 static unsigned long zadnjeBrecanje = 0;
+static bool mrtvackoSekvenca = false;
+static bool mrtvackoPrviKorak = true;
+static unsigned long mrtvackoKorakStart = 0;
 
 static const unsigned long TRAJANJE_UDARCA_MS = 150UL;
 static const unsigned long SLAVLJENJE_KORAK_MS = 150UL;
@@ -52,10 +55,40 @@ static void primijeniSlavljenjeKorak() {
     }
 }
 
-static void odradiUdarac(bool musko) {
-    postaviCekice(musko, !musko);
-    delay(TRAJANJE_UDARCA_MS);
+static void zaustaviMrtvackuSekvencu() {
+    mrtvackoSekvenca = false;
+    mrtvackoPrviKorak = true;
+    mrtvackoKorakStart = 0;
+    if (!slavljenje) {
+        postaviCekice(false, false);
+    }
+}
+
+static void pokreniMrtvackuSekvencu(unsigned long sadaMs) {
+    mrtvackoSekvenca = true;
+    mrtvackoPrviKorak = true;
+    mrtvackoKorakStart = sadaMs;
+    postaviCekice(true, false);
+}
+
+static void azurirajMrtvackuSekvencu(unsigned long sadaMs) {
+    if (!mrtvackoSekvenca) {
+        return;
+    }
+
+    if (sadaMs - mrtvackoKorakStart < TRAJANJE_UDARCA_MS) {
+        return;
+    }
+
     postaviCekice(false, false);
+
+    if (mrtvackoPrviKorak) {
+        mrtvackoPrviKorak = false;
+        mrtvackoKorakStart = sadaMs;
+        postaviCekice(false, true);
+    } else {
+        zaustaviMrtvackuSekvencu();
+    }
 }
 
 void inicijalizirajZvona() {
@@ -122,14 +155,16 @@ void upravljajZvonom() {
         primijeniSlavljenjeKorak();
     }
 
-    if (mrtvacko && sada - zadnjeBrecanje >= 10000UL) {
+    azurirajMrtvackuSekvencu(sada);
+
+    if (mrtvacko && !slavljenje && !mrtvackoSekvenca && sada - zadnjeBrecanje >= 10000UL) {
         zadnjeBrecanje = sada;
-        odradiUdarac(true);
-        odradiUdarac(false);
+        pokreniMrtvackuSekvencu(sada);
     }
 }
 
 void zapocniSlavljenje() {
+    zaustaviMrtvackuSekvencu();
     slavljenje = true;
     slavljenjeKorak = 0;
     primijeniSlavljenjeKorak();
@@ -145,9 +180,11 @@ void zaustaviSlavljenje() {
 void zapocniMrtvacko() {
     mrtvacko = true;
     zadnjeBrecanje = 0;
+    zaustaviMrtvackuSekvencu();
 }
 
 void zaustaviZvonjenje() {
     zaustaviSlavljenje();
     mrtvacko = false;
+    zaustaviMrtvackuSekvencu();
 }
