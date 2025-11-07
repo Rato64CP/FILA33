@@ -9,6 +9,7 @@
 static const unsigned long DCF_INTERVAL_PROVJERE_MS = 60000; // cekanje izmedu pokusaja
 static const unsigned long DCF_VRIJEME_STABILIZACIJE_MS = 60000; // vrijeme stabilizacije signala
 
+// DCF77 knjižnica koristi prekid nad jednim digitalnim pinom (otvoreni kolektor antene)
 static DCF77 dcfPrijemnik(PIN_DCF_SIGNAL, digitalPinToInterrupt(PIN_DCF_SIGNAL));
 static bool dcfPokrenut = false;
 static unsigned long zadnjaProvjeraMillis = 0;
@@ -20,10 +21,6 @@ static bool dcfStabiliziran() {
 }
 
 void inicijalizirajDCF() {
-#ifdef PIN_DCF_NAPAJANJE
-  pinMode(PIN_DCF_NAPAJANJE, OUTPUT);
-  digitalWrite(PIN_DCF_NAPAJANJE, HIGH);
-#endif
   pinMode(PIN_DCF_SIGNAL, INPUT);
   dcfPrijemnik.Start();
   dcfPokrenut = true;
