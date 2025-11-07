@@ -11,3 +11,4 @@ void postaviVrijemeRucno(const DateTime& dt);
 void azurirajOznakuDana();
 String dohvatiIzvorVremena();
 char dohvatiOznakuDana();
+void oznaciPovratakNaRTC();

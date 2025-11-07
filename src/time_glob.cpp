@@ -66,3 +66,10 @@ String dohvatiIzvorVremena() {
 char dohvatiOznakuDana() {
   return oznakaDana;
 }
+
+void oznaciPovratakNaRTC() {
+  if (izvorVremena == "RTC") return;
+  izvorVremena = "RTC";
+  EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(RTC_VRIJEME, dohvatiTrenutnoVrijeme());
+}
