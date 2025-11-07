@@ -6,7 +6,7 @@
 
 RTC_DS3231 rtc;
 
-String izvorVremena = "RTC"; // moze biti "NTP", "RU" ili "RTC"
+String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
 char oznakaDana = 'R';
 
 void azurirajVrijemeIzNTP(const DateTime& dt) {
@@ -20,7 +20,7 @@ void inicijalizirajRTC() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // postavi na build vrijeme
   }
   EEPROM.get(30, izvorVremena);
-  if (izvorVremena != "NTP" && izvorVremena != "RU") izvorVremena = "RTC";
+  if (izvorVremena != "NTP" && izvorVremena != "RU" && izvorVremena != "DCF") izvorVremena = "RTC";
 }
 
 DateTime dohvatiTrenutnoVrijeme() {
@@ -34,11 +34,23 @@ void postaviVrijemeIzNTP(const DateTime& dt) {
   setZadnjaSinkronizacija(NTP_VRIJEME, dt);
 }
 
+void postaviVrijemeIzDCF(const DateTime& dt) {
+  rtc.adjust(dt);
+  izvorVremena = "DCF";
+  EEPROM.put(30, izvorVremena);
+  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
+}
+
 void postaviVrijemeRucno(const DateTime& dt) {
   rtc.adjust(dt);
   izvorVremena = "RU";
   EEPROM.put(30, izvorVremena);
   setZadnjaSinkronizacija(RTC_VRIJEME, dt);
+}
+
+void azurirajVrijemeIzDCF(const DateTime& dt) {
+  postaviVrijemeIzDCF(dt);
+  azurirajOznakuDana();
 }
 
 void azurirajOznakuDana() {
