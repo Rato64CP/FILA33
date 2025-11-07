@@ -13,6 +13,9 @@
 #include "dcf_sync.h"
 
 static void prikaziPocetneInformacije() {
+  prikaziPoruku("RZV Ver 1.0", "WIFI MQTT");
+  odradiPauzuSaLCD(2000);
+
   DateTime zadnjaSync = getZadnjeSinkroniziranoVrijeme();
   int memorKazMin = dohvatiMemoriraneKazaljkeMinuta();
   int satKaz = memorKazMin / 60;
