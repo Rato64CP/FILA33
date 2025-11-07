@@ -67,6 +67,8 @@ void osvjeziDCFSinkronizaciju() {
 
   time_t primljeno = dcfPrijemnik.getTime();
   if (primljeno == 0) {
+    // Neuspjesno ocitavanje znaci da nastavljamo koristiti DS3231 dok se nocni pokusaji ne stabiliziraju
+    oznaciPovratakNaRTC();
     return;
   }
 
