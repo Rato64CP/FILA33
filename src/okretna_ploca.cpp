@@ -11,6 +11,7 @@
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
+const int MAKS_OFFSET_MINUTA = 14; // offset mora ostati u okviru 0-14 kako bi modulo provjera uspjela
 
 static unsigned long vrijemeStarta = 0;
 static bool ciklusUTijeku = false;
@@ -36,7 +37,7 @@ static bool autoSlavljenjeAktivno = false;
 static unsigned long autoSlavljenjeKraj = 0;
 
 int pozicijaPloce = 0; // 0-63
-int offsetMinuta = 14; // podesivo u postavkama, 0–15
+int offsetMinuta = 14; // podesivo u postavkama, 0–14
 
 static int izracunajCiljnuPoziciju(const DateTime& now) {
   int ukupnoMinuta = now.hour() * 60 + now.minute();
@@ -204,7 +205,7 @@ void inicijalizirajPlocu() {
   EEPROM.get(20, pozicijaPloce);
   if (pozicijaPloce < 0 || pozicijaPloce > 63) pozicijaPloce = 0;
   EEPROM.get(22, offsetMinuta);
-  if (offsetMinuta < 0 || offsetMinuta > 15) offsetMinuta = 14;
+  if (offsetMinuta < 0 || offsetMinuta > MAKS_OFFSET_MINUTA) offsetMinuta = MAKS_OFFSET_MINUTA;
 
   vrijemeStarta = 0;
   ciklusUTijeku = false;
@@ -267,7 +268,7 @@ void postaviTrenutniPolozajPloce(int pozicija) {
 }
 
 void postaviOffsetMinuta(int offset) {
-  offsetMinuta = constrain(offset, 0, 15);
+  offsetMinuta = constrain(offset, 0, MAKS_OFFSET_MINUTA);
   EEPROM.put(22, offsetMinuta);
 }
 
@@ -289,7 +290,7 @@ void kompenzirajPlocu(bool pametniMod) {
   int ciljPozicija = izracunajCiljnuPoziciju(now);
   int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
 
-  if (pametniMod && razlika <= 1) return; // čekaj sljedeći impuls ako je blizu
+  if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) return; // čekaj sljedeći impuls ako je blizu
 
   if (razlika == 0) {
     zadnjaAktiviranaMinuta = now.minute();
