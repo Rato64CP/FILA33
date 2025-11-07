@@ -10,7 +10,7 @@
 
 static LiquidCrystal_I2C lcd(0x27, 16, 2); // prilagodi adresu po potrebi
 
-static const char* dani[7] = {"Ned", "Pon", "Uto", "Sri", "Cet", "Pet", "Sub"};
+static const char* dani[7] = {"NED", "PON", "UTO", "SRI", "CET", "PET", "SUB"};
 static bool prikazPoruke = false;
 static char zadnjaPorukaRed1[17];
 static char zadnjaPorukaRed2[17];
