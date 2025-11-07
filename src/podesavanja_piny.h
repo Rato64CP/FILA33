@@ -42,4 +42,8 @@
 #define PIN_ESP_RX                  6
 #define PIN_ESP_TX                  7
 
+// DCF77 antena
+#define PIN_DCF_SIGNAL              18
+#define PIN_DCF_NAPAJANJE           19
+
 #endif // PODESAVANJA_PINY_H

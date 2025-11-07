@@ -10,6 +10,7 @@
 #include "okretna_ploca.h"
 #include "esp_serial.h"
 #include "vrijeme_izvor.h"
+#include "dcf_sync.h"
 
 static void prikaziPocetneInformacije() {
   DateTime zadnjaSync = getZadnjeSinkroniziranoVrijeme();
@@ -44,6 +45,7 @@ void setup() {
   inicijalizirajZvona();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
+  inicijalizirajDCF();
 
   prikaziPocetneInformacije();
 
@@ -77,4 +79,5 @@ void loop() {
   upravljajOtkucavanjem();
   upravljajKazaljkama();
   upravljajPlocom();
+  osvjeziDCFSinkronizaciju();
 }
