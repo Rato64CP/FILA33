@@ -74,6 +74,12 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 
 - Serial1 (9600 bps) prima `NTP:` vremenske oznake i `CMD:` naredbe za zvona, svaka završena novim redom.
 - Nakon uspješne obrade Arduino vraća `ACK:NTP` ili `ACK:CMD_OK`, dok pogreške daju `ERR:CMD` ili `ERR:FORMAT`, čime toranjski sustav olakšava integraciju s Home Assistantom ili vlastitim nadzornim serverom.【F:src/esp_serial.cpp†L17-L38】
+- Dostupne `CMD:` naredbe omogućuju udaljeni nadzor toranjskog sata preko Home Assistanta i MQTT-a:
+  - `ZVONO1_ON` / `ZVONO1_OFF` – aktivacija i deaktivacija muškog zvona.
+  - `ZVONO2_ON` / `ZVONO2_OFF` – aktivacija i deaktivacija ženskog zvona.
+  - `OTKUCAVANJE_ON` / `OTKUCAVANJE_OFF` – uključenje ili privremena blokada automatskih otkucaja čekića iz modula `otkucavanje`.
+  - `SLAVLJENJE_ON` / `SLAVLJENJE_OFF` – ručno pokretanje ili gašenje slavljenja.
+  - `MRTVACKO_ON` / `MRTVACKO_OFF` – pokretanje ili zaustavljanje mrtvačkog brecanja preko modula `zvonjenje`.
 
 ---
 

@@ -18,16 +18,26 @@ unsigned long fazaStart = 0;
 bool cekicAktivan = false;
 int aktivniPin = -1;
 DateTime zadnjeMjereneVrijeme;
+bool blokadaOtkucavanja = false;
 
 bool jeUIntervalu(int sat) {
     return jeDozvoljenoOtkucavanjeUSatu(sat);
 }
 
+void ponistiAktivnoOtkucavanje() {
+    if (aktivniPin >= 0) {
+        digitalWrite(aktivniPin, LOW);
+    }
+    aktivnoOtkucavanje = OTKUCAVANJE_NONE;
+    preostaliUdarci = 0;
+    cekicAktivan = false;
+    aktivniPin = -1;
+    fazaStart = 0;
+}
+
 void pokreniSljedeciUdarac() {
     if (preostaliUdarci <= 0) {
-        aktivnoOtkucavanje = OTKUCAVANJE_NONE;
-        cekicAktivan = false;
-        aktivniPin = -1;
+        ponistiAktivnoOtkucavanje();
         return;
     }
     digitalWrite(aktivniPin, HIGH);
@@ -37,7 +47,7 @@ void pokreniSljedeciUdarac() {
 }
 
 void zapocniOtkucavanje(VrstaOtkucavanja vrsta, int brojUdaraca, int pin) {
-    if (brojUdaraca <= 0) return;
+    if (brojUdaraca <= 0 || blokadaOtkucavanja) return;
     aktivnoOtkucavanje = vrsta;
     preostaliUdarci = brojUdaraca;
     aktivniPin = pin;
@@ -52,7 +62,7 @@ void upravljajOtkucavanjem() {
     if (sada != zadnjeMjereneVrijeme) {
         zadnjeMjereneVrijeme = sada;
 
-        if (aktivnoOtkucavanje == OTKUCAVANJE_NONE && !jeZvonoUTijeku() && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
+        if (!blokadaOtkucavanja && aktivnoOtkucavanje == OTKUCAVANJE_NONE && !jeZvonoUTijeku() && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
             if (sada.second() == 0 && jeUIntervalu(sada.hour())) {
                 if (sada.minute() == 0) {
                     int broj = sada.hour() % 12;
@@ -63,6 +73,13 @@ void upravljajOtkucavanjem() {
                 }
             }
         }
+    }
+
+    if (blokadaOtkucavanja) {
+        if (aktivnoOtkucavanje != OTKUCAVANJE_NONE) {
+            ponistiAktivnoOtkucavanje();
+        }
+        return;
     }
 
     if (aktivnoOtkucavanje == OTKUCAVANJE_NONE) {
@@ -99,4 +116,16 @@ void otkucajSate(int broj) {
 void otkucajPolasata() {
     if (aktivnoOtkucavanje != OTKUCAVANJE_NONE) return;
     zapocniOtkucavanje(OTKUCAVANJE_POLA, 1, PIN_CEKIC_ZENSKI);
+}
+
+void postaviBlokaduOtkucavanja(bool blokiraj) {
+    if (blokadaOtkucavanja == blokiraj) return;
+    blokadaOtkucavanja = blokiraj;
+    if (blokadaOtkucavanja) {
+        ponistiAktivnoOtkucavanje();
+    }
+}
+
+bool jeOtkucavanjeBlokirano() {
+    return blokadaOtkucavanja;
 }
