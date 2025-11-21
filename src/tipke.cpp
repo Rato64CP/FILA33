@@ -3,6 +3,7 @@
 #include <RTClib.h>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "kazaljke_sata.h"
@@ -11,6 +12,8 @@
 namespace {
 
 constexpr unsigned long DEBOUNCE_MS = 40UL;
+constexpr unsigned int DOZVOLJENA_TRAJANJA_CEKICA[] = {100U, 200U, 500U, 1000U};
+constexpr size_t BROJ_TRAJANJA_CEKICA = sizeof(DOZVOLJENA_TRAJANJA_CEKICA) / sizeof(DOZVOLJENA_TRAJANJA_CEKICA[0]);
 
 enum TipkaIndex : uint8_t {
     TIPKA_GORE = 0,
@@ -84,6 +87,20 @@ bool ocitajPritisak(TipkaIndex index) {
     return false;
 }
 
+unsigned int normalizirajTrajanjeCekica(unsigned int vrijednost) {
+    unsigned int najblize = DOZVOLJENA_TRAJANJA_CEKICA[0];
+    unsigned int najmanjaRazlika = abs(static_cast<int>(vrijednost) - static_cast<int>(najblize));
+    for (size_t i = 1; i < BROJ_TRAJANJA_CEKICA; ++i) {
+        unsigned int kandidat = DOZVOLJENA_TRAJANJA_CEKICA[i];
+        unsigned int razlika = abs(static_cast<int>(vrijednost) - static_cast<int>(kandidat));
+        if (razlika < najmanjaRazlika) {
+            najblize = kandidat;
+            najmanjaRazlika = razlika;
+        }
+    }
+    return najblize;
+}
+
 void resetirajUredjivanje() {
     uEditModu = false;
     sekundarnoPolje = false;
@@ -117,7 +134,7 @@ void zapocniUredjivanjeTrenutnogEkrana() {
             break;
         }
         case EKRAN_CEKICI:
-            privTrajanjeCekic = dohvatiTrajanjeImpulsaCekica();
+            privTrajanjeCekic = normalizirajTrajanjeCekica(dohvatiTrajanjeImpulsaCekica());
             break;
         case EKRAN_OTKUCAVANJE:
             privSatOd = satOd;
@@ -209,17 +226,21 @@ void azurirajVrijemeNaTipkama(bool lijevo, bool desno, bool gore, bool dolje) {
 
 void azurirajCekicNaTipkama(bool lijevo, bool desno) {
     if (!uEditModu) return;
-    const unsigned int KORAK = 10;
-    if (lijevo) {
-        if (privTrajanjeCekic > KORAK) {
-            privTrajanjeCekic -= KORAK;
+    privTrajanjeCekic = normalizirajTrajanjeCekica(privTrajanjeCekic);
+    size_t indeks = 0;
+    for (size_t i = 0; i < BROJ_TRAJANJA_CEKICA; ++i) {
+        if (DOZVOLJENA_TRAJANJA_CEKICA[i] == privTrajanjeCekic) {
+            indeks = i;
+            break;
         }
     }
-    if (desno) {
-        privTrajanjeCekic += KORAK;
-        if (privTrajanjeCekic > 2000U) privTrajanjeCekic = 2000U;
+    if (lijevo) {
+        indeks = (indeks + BROJ_TRAJANJA_CEKICA - 1) % BROJ_TRAJANJA_CEKICA;
     }
-    if (privTrajanjeCekic < 50U) privTrajanjeCekic = 50U;
+    if (desno) {
+        indeks = (indeks + 1) % BROJ_TRAJANJA_CEKICA;
+    }
+    privTrajanjeCekic = DOZVOLJENA_TRAJANJA_CEKICA[indeks];
 }
 
 void azurirajOtkucavanjeNaTipkama(bool lijevo, bool desno, bool gore, bool dolje) {
@@ -299,10 +320,10 @@ void pripremiPrikaz() {
             break;
         }
         case EKRAN_CEKICI: {
-            unsigned int trajanje = uEditModu ? privTrajanjeCekic : dohvatiTrajanjeImpulsaCekica();
+            unsigned int trajanje = uEditModu ? privTrajanjeCekic : normalizirajTrajanjeCekica(dohvatiTrajanjeImpulsaCekica());
             snprintf(prikazRedak1, sizeof(prikazRedak1), "Cekic %4ums%c", trajanje, uEditModu ? '*' : ' ');
             if (uEditModu) {
-                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R +/-10 DA=Sp");
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R izbor DA=Sp");
             } else {
                 snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
             }
