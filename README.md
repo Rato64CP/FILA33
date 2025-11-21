@@ -22,6 +22,12 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - `zvonjenje` definira sekvence čekića, upravlja trajanjima i sigurnosnim odgodama te sinkronizira slavljenje i mrtvačko zvono (`inicijalizirajZvona()`, `upravljajZvonom()`, `zapocniSlavljenje()`).【F:src/zvonjenje.cpp†L61-L153】
 - `esp_serial` otvara UART1 prema ESP-01/ESP-12 te obrađuje NTP i naredbe zvona (`inicijalizirajESP()`, `obradiESPSerijskuKomunikaciju()`).【F:src/esp_serial.cpp†L8-L45】
 - `time_glob` i `vrijeme_izvor` spremaju izvor vremena, ručna i NTP ažuriranja te nadziru starost sinkronizacije, što je ključno za toranjski raspored zvona.【F:src/time_glob.cpp†L12-L44】【F:src/vrijeme_izvor.cpp†L7-L34】
+- `dcf_sync` nadzire DCF77 antenu samo u noćnom prozoru, provjerava stabilizaciju signala i šalje vrijeme toranjskog sata u `time_glob` kada NTP nije dostupan.【F:src/dcf_sync.cpp†L9-L80】
+- `synchronizacija` centralizira odabir izvora vremena (NTP, DCF ili ručno), bilježi izbor u EEPROM-u i pokreće kompenzaciju kazaljki i okretne ploče toranjskog sata.【F:src/synchronizacija.cpp†L9-L30】
+- `otkucavanje` planira i ispaljuje udarce čekića za sate i polasate, poštujući blokade, vremenske intervale i stanje zvonjenja kako bi mehanički sklopovi toranjskog sata ostali zaštićeni.【F:src/otkucavanje.cpp†L61-L131】
+- `postavke` sprema trajanja udaraca, zvona i vremenske raspone otkucavanja u EEPROM te osigurava sigurne granice za toranjski ormar (čekići, slavljenje, radni/nedjeljni režim).【F:src/postavke.cpp†L6-L153】
+- `tipke` debounca šest tipki, otvara zaslon postavki i omogućuje uređivanje kazaljki, vremena i trajanja zvona u hodu, uz jasne LCD poruke za tehničara toranjskog sata.【F:src/tipke.cpp†L69-L446】
+- `watchdog` uključuje i osvježava AVR watchdog timer (8 s) kako bi toranjski upravljač pouzdano resetirao u slučaju zastoja petlje.【F:src/watchdog.cpp†L10-L27】
 
 ---
 
