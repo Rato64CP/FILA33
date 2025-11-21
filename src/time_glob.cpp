@@ -1,13 +1,13 @@
 // time_glob.cpp
 #include <Arduino.h>
 #include <RTClib.h>
-#include <EEPROM.h>
 #include "time_glob.h"
 #include "vrijeme_izvor.h"
+#include "eeprom_konstante.h"
+#include "wear_leveling.h"
 
 RTC_DS3231 rtc;
 
-static constexpr int EEPROM_ADRESA_IZVOR = 30;
 static constexpr size_t MAKS_DULJINA_IZVORA = 4; // ukljucuje nul terminator
 
 String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
@@ -47,8 +47,11 @@ static void oznaciRTCPouzdanSaVremenom(const DateTime& referenca) {
 
 static void procitajIzvorVremena() {
   char spremljeniIzvor[MAKS_DULJINA_IZVORA] = {0};
-  EEPROM.get(EEPROM_ADRESA_IZVOR, spremljeniIzvor);
-  spremljeniIzvor[MAKS_DULJINA_IZVORA - 1] = '\0';
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_IZVOR_VREMENA, EepromLayout::SLOTOVI_IZVOR_VREMENA, spremljeniIzvor)) {
+    spremljeniIzvor[0] = '\0';
+  } else {
+    spremljeniIzvor[MAKS_DULJINA_IZVORA - 1] = '\0';
+  }
 
   String ucitani = String(spremljeniIzvor);
   if (ucitani == "NTP" || ucitani == "RU" || ucitani == "DCF") {
@@ -61,7 +64,7 @@ static void procitajIzvorVremena() {
 static void spremiIzvorVremena() {
   char spremi[MAKS_DULJINA_IZVORA] = {0};
   izvorVremena.toCharArray(spremi, MAKS_DULJINA_IZVORA);
-  EEPROM.put(EEPROM_ADRESA_IZVOR, spremi);
+  WearLeveling::spremi(EepromLayout::BAZA_IZVOR_VREMENA, EepromLayout::SLOTOVI_IZVOR_VREMENA, spremi);
 }
 
 void azurirajVrijemeIzNTP(const DateTime& dt) {

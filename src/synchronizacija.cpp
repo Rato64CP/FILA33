@@ -1,6 +1,5 @@
 // synchronizacija.cpp
 #include <RTClib.h>
-#include <EEPROM.h>
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "vrijeme_izvor.h"
@@ -21,8 +20,7 @@ void sinkronizirajVrijemeIzvora(const DateTime& novoVrijeme, IzvorVremena izvor)
       break;
   }
 
-  // Spremi izvor
-  EEPROM.put(0, (int)izvor);
+  setZadnjaSinkronizacija(izvor, novoVrijeme);
 
   // Pametna kompenzacija kazaljki i ploce
   kompenzirajKazaljke(true);
