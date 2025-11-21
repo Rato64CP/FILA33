@@ -45,14 +45,6 @@ void inicijalizirajDCF() {
   zadnjaProvjeraMillis = 0;
 }
 
-bool jeDCFSpreman() {
-  return dcfPokrenut && dcfStabiliziran();
-}
-
-DateTime dohvatiPosljednjeDCFVrijeme() {
-  return zadnjeDCF;
-}
-
 void osvjeziDCFSinkronizaciju() {
   if (!dcfPokrenut) return;
 

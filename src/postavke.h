@@ -4,7 +4,6 @@
 
 void ucitajPostavke();
 void spremiPostavke();
-void resetPostavke();
 
 extern int satOd;
 extern int satDo;

@@ -12,7 +12,6 @@ enum IzvorVremena {
 };
 
 void setZadnjaSinkronizacija(IzvorVremena izvor, const DateTime& vrijeme);
-IzvorVremena getZadnjiIzvor();
 DateTime getZadnjeSinkroniziranoVrijeme();
 bool jeSinkronizacijaZastarjela();
 

@@ -270,6 +270,7 @@ void upravljajPlocom() {
 void postaviTrenutniPolozajPloce(int pozicija) {
   pozicijaPloce = constrain(pozicija, 0, 63);
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
+  zadnjaAktiviranaMinuta = -1; // dopusti odmah ručnu korekciju ako je potrebno
 }
 
 void postaviOffsetMinuta(int offset) {
@@ -277,12 +278,12 @@ void postaviOffsetMinuta(int offset) {
   WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA, EepromLayout::SLOTOVI_OFFSET_MINUTA, offsetMinuta);
 }
 
-int dohvatiOffsetMinuta() {
-  return offsetMinuta;
-}
-
 int dohvatiPozicijuPloce() {
   return pozicijaPloce;
+}
+
+int dohvatiOffsetMinuta() {
+  return offsetMinuta;
 }
 
 bool jePlocaUSinkronu() {
