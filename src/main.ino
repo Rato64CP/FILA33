@@ -11,6 +11,7 @@
 #include "esp_serial.h"
 #include "vrijeme_izvor.h"
 #include "dcf_sync.h"
+#include "watchdog.h"
 
 static void prikaziPocetneInformacije() {
   prikaziPoruku("RZV Ver 1.0", "WIFI MQTT");
@@ -49,8 +50,10 @@ void setup() {
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
   inicijalizirajDCF();
+  inicijalizirajWatchdog();
 
   prikaziPocetneInformacije();
+  osvjeziWatchdog();
 
   bool trebaKazaljke = !suKazaljkeUSinkronu();
   bool trebaPlocu = !jePlocaUSinkronu();
@@ -72,6 +75,7 @@ void setup() {
 }
 
 void loop() {
+  osvjeziWatchdog();
   obradiESPSerijskuKomunikaciju();
 
   if (uPostavkama()) prikaziPostavke();
@@ -83,4 +87,5 @@ void loop() {
   upravljajKazaljkama();
   upravljajPlocom();
   osvjeziDCFSinkronizaciju();
+  osvjeziWatchdog();
 }
