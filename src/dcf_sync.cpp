@@ -21,10 +21,16 @@ static DateTime zadnjeDCF = DateTime((uint32_t)0);
 static bool jeNocniDCFInterval() {
   DateTime sada = dohvatiTrenutnoVrijeme(); // koristimo RTC iz time_glob modula
   uint8_t sat = sada.hour();
-  if (DCF_SAT_NOC_OD < DCF_SAT_NOC_DO) {
-    return sat >= DCF_SAT_NOC_OD && sat < DCF_SAT_NOC_DO;
+  if (DCF_SAT_NOC_OD == DCF_SAT_NOC_DO) {
+    return false; // nema smislenog prozora ako su granice iste
   }
-  return sat >= DCF_SAT_NOC_OD || sat < DCF_SAT_NOC_DO;
+
+  if (DCF_SAT_NOC_OD > DCF_SAT_NOC_DO) {
+    return sat >= DCF_SAT_NOC_OD || sat < DCF_SAT_NOC_DO; // prelazak preko ponoci
+  }
+
+  // cppcheck-suppress incorrectLogicOperator
+  return sat >= DCF_SAT_NOC_OD && sat < DCF_SAT_NOC_DO;
 }
 
 static bool dcfStabiliziran() {
