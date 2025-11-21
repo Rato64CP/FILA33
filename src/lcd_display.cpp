@@ -6,6 +6,7 @@
 #include <cstring>
 #include "time_glob.h"
 #include "tipke.h"
+#include "watchdog.h"
 
 static LiquidCrystal_I2C lcd(0x27, 16, 2); // prilagodi adresu po potrebi
 
@@ -150,6 +151,7 @@ void odradiPauzuSaLCD(unsigned long trajanjeMs) {
   unsigned long start = millis();
   while (millis() - start < trajanjeMs) {
     azurirajLCDPrikaz();
+    osvjeziWatchdog();
     delay(10);
   }
 }
