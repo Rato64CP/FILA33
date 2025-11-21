@@ -1,13 +1,14 @@
 // okretna_ploca.cpp
 #include <Arduino.h>
 #include <RTClib.h>
-#include <EEPROM.h>
 #include "okretna_ploca.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "lcd_display.h"
 #include "zvonjenje.h"
 #include "postavke.h"
+#include "eeprom_konstante.h"
+#include "wear_leveling.h"
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
@@ -70,7 +71,7 @@ static void zavrsiCiklusPloce() {
   ciklusUTijeku = false;
   drugaFaza = false;
   pozicijaPloce = (pozicijaPloce + 1) % 64;
-  EEPROM.put(20, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
 }
 
 static void odradiJedanKorakPloceBlokirajuci() {
@@ -83,7 +84,7 @@ static void odradiJedanKorakPloceBlokirajuci() {
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   odradiPauzuSaLCD(400);
   pozicijaPloce = (pozicijaPloce + 1) % 64;
-  EEPROM.put(20, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
 }
 
 static bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
@@ -202,9 +203,13 @@ void inicijalizirajPlocu() {
     pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
   }
 
-  EEPROM.get(20, pozicijaPloce);
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce)) {
+    pozicijaPloce = 0;
+  }
   if (pozicijaPloce < 0 || pozicijaPloce > 63) pozicijaPloce = 0;
-  EEPROM.get(22, offsetMinuta);
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA, EepromLayout::SLOTOVI_OFFSET_MINUTA, offsetMinuta)) {
+    offsetMinuta = MAKS_OFFSET_MINUTA;
+  }
   if (offsetMinuta < 0 || offsetMinuta > MAKS_OFFSET_MINUTA) offsetMinuta = MAKS_OFFSET_MINUTA;
 
   vrijemeStarta = 0;
@@ -264,12 +269,12 @@ void upravljajPlocom() {
 
 void postaviTrenutniPolozajPloce(int pozicija) {
   pozicijaPloce = constrain(pozicija, 0, 63);
-  EEPROM.put(20, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
 }
 
 void postaviOffsetMinuta(int offset) {
   offsetMinuta = constrain(offset, 0, MAKS_OFFSET_MINUTA);
-  EEPROM.put(22, offsetMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA, EepromLayout::SLOTOVI_OFFSET_MINUTA, offsetMinuta);
 }
 
 int dohvatiOffsetMinuta() {
@@ -304,7 +309,7 @@ void kompenzirajPlocu(bool pametniMod) {
   }
 
   pozicijaPloce = ciljPozicija;
-  EEPROM.put(20, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
 
   zadnjaAktiviranaMinuta = now.minute();
   ciklusUTijeku = false;

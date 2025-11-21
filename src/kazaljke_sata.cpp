@@ -1,11 +1,12 @@
 // kazaljke_sata.cpp
 #include <Arduino.h>
 #include <RTClib.h>
-#include <EEPROM.h>
 #include "kazaljke_sata.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "lcd_display.h"
+#include "eeprom_konstante.h"
+#include "wear_leveling.h"
 
 const unsigned long TRAJANJE_IMPULSA = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15;
@@ -31,7 +32,7 @@ static void zavrsiImpuls()
   impulsUTijeku = false;
   drugaFaza = false;
   memoriraneKazaljkeMinuta = (memoriraneKazaljkeMinuta + 1) % BROJ_MINUTA_CIKLUS;
-  EEPROM.put(10, memoriraneKazaljkeMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, memoriraneKazaljkeMinuta);
 }
 
 static void pokreniPrvuFazu()
@@ -48,7 +49,9 @@ void inicijalizirajKazaljke() {
   pinMode(PIN_RELEJ_NEPARNE_KAZALJKE, OUTPUT);
   digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-  EEPROM.get(10, memoriraneKazaljkeMinuta);
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, memoriraneKazaljkeMinuta)) {
+    memoriraneKazaljkeMinuta = 0;
+  }
   if (memoriraneKazaljkeMinuta < 0) {
     memoriraneKazaljkeMinuta = 0;
   } else {
@@ -84,7 +87,7 @@ void upravljajKazaljkama() {
 
 void postaviTrenutniPolozajKazaljki(int trenutnaMinuta) {
   memoriraneKazaljkeMinuta = constrain(trenutnaMinuta, 0, BROJ_MINUTA_CIKLUS - 1);
-  EEPROM.put(10, memoriraneKazaljkeMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, memoriraneKazaljkeMinuta);
 }
 
 static void odradiJedanPomakBlokirajuci() {
@@ -97,7 +100,7 @@ static void odradiJedanPomakBlokirajuci() {
   digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
   odradiPauzuSaLCD(400);
   memoriraneKazaljkeMinuta = (memoriraneKazaljkeMinuta + 1) % BROJ_MINUTA_CIKLUS;
-  EEPROM.put(10, memoriraneKazaljkeMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, memoriraneKazaljkeMinuta);
 }
 
 void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod) {
@@ -112,7 +115,7 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod) {
   }
 
   memoriraneKazaljkeMinuta = ciljMinuta;
-  EEPROM.put(10, memoriraneKazaljkeMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, memoriraneKazaljkeMinuta);
 }
 
 void kompenzirajKazaljke(bool pametanMod) {

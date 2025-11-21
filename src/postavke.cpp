@@ -1,17 +1,9 @@
 #include "postavke.h"
 #include <Arduino.h>
-#include <EEPROM.h>
+#include "eeprom_konstante.h"
+#include "wear_leveling.h"
 
 namespace {
-const int EEPROM_ADRESA_SAT_OD = 40;
-const int EEPROM_ADRESA_SAT_DO = 42;
-const int EEPROM_ADRESA_TRAJANJE = 44;
-const int EEPROM_ADRESA_PAUZA = 46;
-const int EEPROM_ADRESA_ZVONO_RADNI = 48;
-const int EEPROM_ADRESA_ZVONO_NEDJELJA = 52;
-const int EEPROM_ADRESA_SLAVLJENJE = 56;
-const int EEPROM_ADRESA_BROJ_ZVONA = 60;
-
 const int SAT_OD_DEFAULT = 6;
 const int SAT_DO_DEFAULT = 22;
 const unsigned int TRAJANJE_CEKIC_DEFAULT = 150;
@@ -20,6 +12,30 @@ const unsigned long TRAJANJE_ZVONJENJA_RADNI_DEFAULT = 120000UL; // 2 minute
 const unsigned long TRAJANJE_ZVONJENJA_NEDJELJA_DEFAULT = 180000UL; // 3 minute
 const unsigned long TRAJANJE_SLAVLJENJA_DEFAULT = 120000UL; // 2 minute
 const uint8_t BROJ_ZVONA_DEFAULT = 2;
+
+EepromLayout::PostavkeSpremnik napraviSpremnik() {
+    EepromLayout::PostavkeSpremnik spremnik{};
+    spremnik.satOd = satOd;
+    spremnik.satDo = satDo;
+    spremnik.trajanjeImpulsaCekicaMs = trajanjeImpulsaCekicaMs;
+    spremnik.pauzaIzmeduUdaraca = pauzaIzmeduUdaraca;
+    spremnik.trajanjeZvonjenjaRadniMs = trajanjeZvonjenjaRadniMs;
+    spremnik.trajanjeZvonjenjaNedjeljaMs = trajanjeZvonjenjaNedjeljaMs;
+    spremnik.trajanjeSlavljenjaMs = trajanjeSlavljenjaMs;
+    spremnik.brojZvona = brojZvona;
+    return spremnik;
+}
+
+void primijeniSpremnik(const EepromLayout::PostavkeSpremnik& spremnik) {
+    satOd = spremnik.satOd;
+    satDo = spremnik.satDo;
+    trajanjeImpulsaCekicaMs = spremnik.trajanjeImpulsaCekicaMs;
+    pauzaIzmeduUdaraca = spremnik.pauzaIzmeduUdaraca;
+    trajanjeZvonjenjaRadniMs = spremnik.trajanjeZvonjenjaRadniMs;
+    trajanjeZvonjenjaNedjeljaMs = spremnik.trajanjeZvonjenjaNedjeljaMs;
+    trajanjeSlavljenjaMs = spremnik.trajanjeSlavljenjaMs;
+    brojZvona = spremnik.brojZvona;
+}
 }
 
 int satOd = SAT_OD_DEFAULT;
@@ -64,14 +80,10 @@ static void provjeriRasponZvona() {
 }
 
 void ucitajPostavke() {
-    EEPROM.get(EEPROM_ADRESA_SAT_OD, satOd);
-    EEPROM.get(EEPROM_ADRESA_SAT_DO, satDo);
-    EEPROM.get(EEPROM_ADRESA_TRAJANJE, trajanjeImpulsaCekicaMs);
-    EEPROM.get(EEPROM_ADRESA_PAUZA, pauzaIzmeduUdaraca);
-    EEPROM.get(EEPROM_ADRESA_ZVONO_RADNI, trajanjeZvonjenjaRadniMs);
-    EEPROM.get(EEPROM_ADRESA_ZVONO_NEDJELJA, trajanjeZvonjenjaNedjeljaMs);
-    EEPROM.get(EEPROM_ADRESA_SLAVLJENJE, trajanjeSlavljenjaMs);
-    EEPROM.get(EEPROM_ADRESA_BROJ_ZVONA, brojZvona);
+    EepromLayout::PostavkeSpremnik spremnik{};
+    if (WearLeveling::ucitaj(EepromLayout::BAZA_POSTAVKE, EepromLayout::SLOTOVI_POSTAVKE, spremnik)) {
+        primijeniSpremnik(spremnik);
+    }
     provjeriRasponSati();
     provjeriRasponTrajanja();
     provjeriRasponZvonjenja();
@@ -82,14 +94,8 @@ void spremiPostavke() {
     provjeriRasponSati();
     provjeriRasponTrajanja();
     provjeriRasponZvonjenja();
-    EEPROM.put(EEPROM_ADRESA_SAT_OD, satOd);
-    EEPROM.put(EEPROM_ADRESA_SAT_DO, satDo);
-    EEPROM.put(EEPROM_ADRESA_TRAJANJE, trajanjeImpulsaCekicaMs);
-    EEPROM.put(EEPROM_ADRESA_PAUZA, pauzaIzmeduUdaraca);
-    EEPROM.put(EEPROM_ADRESA_ZVONO_RADNI, trajanjeZvonjenjaRadniMs);
-    EEPROM.put(EEPROM_ADRESA_ZVONO_NEDJELJA, trajanjeZvonjenjaNedjeljaMs);
-    EEPROM.put(EEPROM_ADRESA_SLAVLJENJE, trajanjeSlavljenjaMs);
-    EEPROM.put(EEPROM_ADRESA_BROJ_ZVONA, brojZvona);
+    EepromLayout::PostavkeSpremnik spremnik = napraviSpremnik();
+    WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE, EepromLayout::SLOTOVI_POSTAVKE, spremnik);
 }
 
 void resetPostavke() {
