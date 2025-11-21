@@ -154,8 +154,8 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   }
 
   bool jeNedjelja = now.dayOfTheWeek() == 0;
-  bool pokreniMusko = jeNedjelja ? ulaziAktivni[2] : ulaziAktivni[0];
-  bool pokreniZensko = jeNedjelja ? ulaziAktivni[3] : ulaziAktivni[1];
+  bool pokreniZvono1 = jeNedjelja ? ulaziAktivni[2] : ulaziAktivni[0];
+  bool pokreniZvono2 = jeNedjelja ? ulaziAktivni[3] : ulaziAktivni[1];
   bool pokreniSlavljenjePin = ulaziAktivni[4];
 
   unsigned long trajanjeMs = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs() : dohvatiTrajanjeZvonjenjaRadniMs();
@@ -168,11 +168,11 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   }
 
   bool imaZvono = false;
-  if (pokreniMusko) {
+  if (pokreniZvono1) {
     pokreniAutomatskoZvonjenje(0, sadaMs, trajanjeMs);
     imaZvono = true;
   }
-  if (pokreniZensko) {
+  if (pokreniZvono2) {
     pokreniAutomatskoZvonjenje(1, sadaMs, trajanjeMs);
     imaZvono = true;
   }

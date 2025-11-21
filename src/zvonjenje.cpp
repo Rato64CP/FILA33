@@ -2,10 +2,10 @@
 #include "podesavanja_piny.h"
 #include <Arduino.h>
 
-static bool zvonoMusko = false;
-static bool zvonoZensko = false;
-static unsigned long zadnjeIskljucenjeMusko = 0;
-static unsigned long zadnjeIskljucenjeZensko = 0;
+static bool zvonoPrvo = false;
+static bool zvonoDrugo = false;
+static unsigned long zadnjeIskljucenjePrvo = 0;
+static unsigned long zadnjeIskljucenjeDrugo = 0;
 
 static bool slavljenje = false;
 static bool mrtvacko = false;
@@ -92,44 +92,44 @@ static void azurirajMrtvackuSekvencu(unsigned long sadaMs) {
 }
 
 void inicijalizirajZvona() {
-    pinMode(PIN_ZVONO_MUSKO, OUTPUT);
-    pinMode(PIN_ZVONO_ZENSKO, OUTPUT);
+    pinMode(PIN_ZVONO_1, OUTPUT);
+    pinMode(PIN_ZVONO_2, OUTPUT);
     pinMode(PIN_CEKIC_MUSKI, OUTPUT);
     pinMode(PIN_CEKIC_ZENSKI, OUTPUT);
     pinMode(PIN_SLAVLJENJE_SIGNAL, INPUT_PULLUP);
-    digitalWrite(PIN_ZVONO_MUSKO, LOW);
-    digitalWrite(PIN_ZVONO_ZENSKO, LOW);
+    digitalWrite(PIN_ZVONO_1, LOW);
+    digitalWrite(PIN_ZVONO_2, LOW);
     postaviCekice(false, false);
     slavljenjeSignalAktivno = false;
 }
 
 void aktivirajZvonjenje(int koje) {
     if (koje == 1) {
-        digitalWrite(PIN_ZVONO_MUSKO, HIGH);
-        zvonoMusko = true;
+        digitalWrite(PIN_ZVONO_1, HIGH);
+        zvonoPrvo = true;
     } else if (koje == 2) {
-        digitalWrite(PIN_ZVONO_ZENSKO, HIGH);
-        zvonoZensko = true;
+        digitalWrite(PIN_ZVONO_2, HIGH);
+        zvonoDrugo = true;
     }
 }
 
 void deaktivirajZvonjenje(int koje) {
     if (koje == 1) {
-        digitalWrite(PIN_ZVONO_MUSKO, LOW);
-        zvonoMusko = false;
-        zadnjeIskljucenjeMusko = millis();
+        digitalWrite(PIN_ZVONO_1, LOW);
+        zvonoPrvo = false;
+        zadnjeIskljucenjePrvo = millis();
     } else if (koje == 2) {
-        digitalWrite(PIN_ZVONO_ZENSKO, LOW);
-        zvonoZensko = false;
-        zadnjeIskljucenjeZensko = millis();
+        digitalWrite(PIN_ZVONO_2, LOW);
+        zvonoDrugo = false;
+        zadnjeIskljucenjeDrugo = millis();
     }
 }
 
 bool jeZvonoUTijeku() {
     unsigned long m = millis();
-    if (zvonoMusko || zvonoZensko) return true;
-    if (m - zadnjeIskljucenjeMusko < 60000UL) return true;
-    if (m - zadnjeIskljucenjeZensko < 40000UL) return true;
+    if (zvonoPrvo || zvonoDrugo) return true;
+    if (m - zadnjeIskljucenjePrvo < 60000UL) return true;
+    if (m - zadnjeIskljucenjeDrugo < 40000UL) return true;
     return false;
 }
 
