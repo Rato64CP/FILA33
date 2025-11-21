@@ -46,6 +46,7 @@ enum PostavkeEkran : uint8_t {
     EKRAN_ZVONO_RADNI,
     EKRAN_ZVONO_NEDJELJA,
     EKRAN_SLAVLJENJE,
+    EKRAN_BROJ_ZVONA,
     EKRAN_REZERVA,
     EKRAN_BROJ
 };
@@ -64,6 +65,7 @@ int privSatDo = 0;
 unsigned long privRadniZvono = 0;
 unsigned long privNedjeljaZvono = 0;
 unsigned long privSlavljenje = 0;
+uint8_t privBrojZvona = 0;
 
 char prikazRedak1[17];
 char prikazRedak2[17];
@@ -150,6 +152,9 @@ void zapocniUredjivanjeTrenutnogEkrana() {
         case EKRAN_SLAVLJENJE:
             privSlavljenje = dohvatiTrajanjeSlavljenjaMs();
             break;
+        case EKRAN_BROJ_ZVONA:
+            privBrojZvona = dohvatiBrojZvona();
+            break;
         case EKRAN_REZERVA:
             break;
     }
@@ -182,6 +187,9 @@ void spremiPromjene() {
             break;
         case EKRAN_SLAVLJENJE:
             postaviTrajanjeSlavljenja(privSlavljenje);
+            break;
+        case EKRAN_BROJ_ZVONA:
+            postaviBrojZvona(privBrojZvona);
             break;
         case EKRAN_REZERVA:
             break;
@@ -282,6 +290,18 @@ void azurirajTrajanjeMs(unsigned long& vrijednost, bool lijevo, bool desno, unsi
     if (vrijednost < minimum) vrijednost = minimum;
 }
 
+void azurirajBrojZvonaNaTipkama(bool lijevo, bool desno) {
+    if (!uEditModu) return;
+    int broj = static_cast<int>(privBrojZvona);
+    if (lijevo) {
+        broj = broj <= 1 ? 5 : broj - 1;
+    }
+    if (desno) {
+        broj = broj >= 5 ? 1 : broj + 1;
+    }
+    privBrojZvona = static_cast<uint8_t>(broj);
+}
+
 void pripremiPrikaz() {
     // Sastavi dvoredni prikaz koji lcd_display.cpp prikazuje dok su postavke aktivne
     memset(prikazRedak1, ' ', sizeof(prikazRedak1));
@@ -377,6 +397,16 @@ void pripremiPrikaz() {
             }
             break;
         }
+        case EKRAN_BROJ_ZVONA: {
+            uint8_t aktivnih = uEditModu ? privBrojZvona : dohvatiBrojZvona();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "Broj zvona %u%c", aktivnih, uEditModu ? '*' : ' ');
+            if (uEditModu) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R 1-5 DA=Sp ");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+            }
+            break;
+        }
         case EKRAN_REZERVA:
             snprintf(prikazRedak1, sizeof(prikazRedak1), "Rezerva     ");
             snprintf(prikazRedak2, sizeof(prikazRedak2), "NE=Izlaz    ");
@@ -439,6 +469,9 @@ void provjeriTipke() {
             break;
         case EKRAN_SLAVLJENJE:
             azurirajTrajanjeMs(privSlavljenje, lijevo, desno, 5000UL, 10000UL);
+            break;
+        case EKRAN_BROJ_ZVONA:
+            azurirajBrojZvonaNaTipkama(lijevo, desno);
             break;
         case EKRAN_REZERVA:
             break;

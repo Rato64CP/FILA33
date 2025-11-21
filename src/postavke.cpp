@@ -10,6 +10,7 @@ const int EEPROM_ADRESA_PAUZA = 46;
 const int EEPROM_ADRESA_ZVONO_RADNI = 48;
 const int EEPROM_ADRESA_ZVONO_NEDJELJA = 52;
 const int EEPROM_ADRESA_SLAVLJENJE = 56;
+const int EEPROM_ADRESA_BROJ_ZVONA = 60;
 
 const int SAT_OD_DEFAULT = 6;
 const int SAT_DO_DEFAULT = 22;
@@ -18,6 +19,7 @@ const unsigned int PAUZA_UDARCI_DEFAULT = 850;
 const unsigned long TRAJANJE_ZVONJENJA_RADNI_DEFAULT = 120000UL; // 2 minute
 const unsigned long TRAJANJE_ZVONJENJA_NEDJELJA_DEFAULT = 180000UL; // 3 minute
 const unsigned long TRAJANJE_SLAVLJENJA_DEFAULT = 120000UL; // 2 minute
+const uint8_t BROJ_ZVONA_DEFAULT = 2;
 }
 
 int satOd = SAT_OD_DEFAULT;
@@ -27,6 +29,7 @@ unsigned int trajanjeImpulsaCekicaMs = TRAJANJE_CEKIC_DEFAULT;
 unsigned long trajanjeZvonjenjaRadniMs = TRAJANJE_ZVONJENJA_RADNI_DEFAULT;
 unsigned long trajanjeZvonjenjaNedjeljaMs = TRAJANJE_ZVONJENJA_NEDJELJA_DEFAULT;
 unsigned long trajanjeSlavljenjaMs = TRAJANJE_SLAVLJENJA_DEFAULT;
+uint8_t brojZvona = BROJ_ZVONA_DEFAULT;
 
 static void provjeriRasponSati() {
     if (satOd < 0 || satOd > 23) satOd = SAT_OD_DEFAULT;
@@ -54,6 +57,12 @@ static void provjeriRasponZvonjenja() {
     }
 }
 
+static void provjeriRasponZvona() {
+    if (brojZvona < 1 || brojZvona > 5) {
+        brojZvona = BROJ_ZVONA_DEFAULT;
+    }
+}
+
 void ucitajPostavke() {
     EEPROM.get(EEPROM_ADRESA_SAT_OD, satOd);
     EEPROM.get(EEPROM_ADRESA_SAT_DO, satDo);
@@ -62,9 +71,11 @@ void ucitajPostavke() {
     EEPROM.get(EEPROM_ADRESA_ZVONO_RADNI, trajanjeZvonjenjaRadniMs);
     EEPROM.get(EEPROM_ADRESA_ZVONO_NEDJELJA, trajanjeZvonjenjaNedjeljaMs);
     EEPROM.get(EEPROM_ADRESA_SLAVLJENJE, trajanjeSlavljenjaMs);
+    EEPROM.get(EEPROM_ADRESA_BROJ_ZVONA, brojZvona);
     provjeriRasponSati();
     provjeriRasponTrajanja();
     provjeriRasponZvonjenja();
+    provjeriRasponZvona();
 }
 
 void spremiPostavke() {
@@ -78,6 +89,7 @@ void spremiPostavke() {
     EEPROM.put(EEPROM_ADRESA_ZVONO_RADNI, trajanjeZvonjenjaRadniMs);
     EEPROM.put(EEPROM_ADRESA_ZVONO_NEDJELJA, trajanjeZvonjenjaNedjeljaMs);
     EEPROM.put(EEPROM_ADRESA_SLAVLJENJE, trajanjeSlavljenjaMs);
+    EEPROM.put(EEPROM_ADRESA_BROJ_ZVONA, brojZvona);
 }
 
 void resetPostavke() {
@@ -88,6 +100,7 @@ void resetPostavke() {
     trajanjeZvonjenjaRadniMs = TRAJANJE_ZVONJENJA_RADNI_DEFAULT;
     trajanjeZvonjenjaNedjeljaMs = TRAJANJE_ZVONJENJA_NEDJELJA_DEFAULT;
     trajanjeSlavljenjaMs = TRAJANJE_SLAVLJENJA_DEFAULT;
+    brojZvona = BROJ_ZVONA_DEFAULT;
     spremiPostavke();
 }
 
@@ -127,6 +140,11 @@ unsigned long dohvatiTrajanjeSlavljenjaMs() {
     return trajanjeSlavljenjaMs;
 }
 
+uint8_t dohvatiBrojZvona() {
+    provjeriRasponZvona();
+    return brojZvona;
+}
+
 void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs) {
     trajanjeImpulsaCekicaMs = constrain(trajanjeMs, 50U, 2000U);
     spremiPostavke();
@@ -150,5 +168,10 @@ void postaviTrajanjeZvonjenjaNedjelja(unsigned long trajanjeMs) {
 
 void postaviTrajanjeSlavljenja(unsigned long trajanjeMs) {
     trajanjeSlavljenjaMs = constrain(trajanjeMs, 10000UL, 600000UL);
+    spremiPostavke();
+}
+
+void postaviBrojZvona(uint8_t broj) {
+    brojZvona = constrain(broj, static_cast<uint8_t>(1), static_cast<uint8_t>(5));
     spremiPostavke();
 }

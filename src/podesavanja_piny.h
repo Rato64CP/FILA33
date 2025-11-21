@@ -35,8 +35,8 @@
 #define PIN_SLAVLJENJE_SIGNAL       2
 
 // Zvona
-#define PIN_ZVONO_MUSKO             4
-#define PIN_ZVONO_ZENSKO            5
+#define PIN_ZVONO_1                 4
+#define PIN_ZVONO_2                 5
 
 // ESP komunikacija za toranjski sat (na Mega 2560 WiFi koristi se Serial3, inače softverski UART)
 #define PIN_ESP_RX                  6
