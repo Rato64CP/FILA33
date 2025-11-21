@@ -7,6 +7,9 @@
 
 RTC_DS3231 rtc;
 
+static constexpr int EEPROM_ADRESA_IZVOR = 30;
+static constexpr size_t MAKS_DULJINA_IZVORA = 4; // ukljucuje nul terminator
+
 String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
 char oznakaDana = 'R';
 
@@ -42,6 +45,25 @@ static void oznaciRTCPouzdanSaVremenom(const DateTime& referenca) {
   fallbackMillis = millis();
 }
 
+static void procitajIzvorVremena() {
+  char spremljeniIzvor[MAKS_DULJINA_IZVORA] = {0};
+  EEPROM.get(EEPROM_ADRESA_IZVOR, spremljeniIzvor);
+  spremljeniIzvor[MAKS_DULJINA_IZVORA - 1] = '\0';
+
+  String ucitani = String(spremljeniIzvor);
+  if (ucitani == "NTP" || ucitani == "RU" || ucitani == "DCF") {
+    izvorVremena = ucitani;
+  } else {
+    izvorVremena = "RTC";
+  }
+}
+
+static void spremiIzvorVremena() {
+  char spremi[MAKS_DULJINA_IZVORA] = {0};
+  izvorVremena.toCharArray(spremi, MAKS_DULJINA_IZVORA);
+  EEPROM.put(EEPROM_ADRESA_IZVOR, spremi);
+}
+
 void azurirajVrijemeIzNTP(const DateTime& dt) {
   postaviVrijemeIzNTP(dt);
   azurirajOznakuDana();
@@ -61,11 +83,10 @@ void inicijalizirajRTC() {
   } else {
     oznaciRTCPouzdanSaVremenom(trenutno);
   }
-  EEPROM.get(30, izvorVremena);
-  if (izvorVremena != "NTP" && izvorVremena != "RU" && izvorVremena != "DCF") izvorVremena = "RTC";
+  procitajIzvorVremena();
   if (!rtcPouzdan) {
     izvorVremena = fallbackImaReferencu ? "CEK" : "ERR";
-    EEPROM.put(30, izvorVremena);
+    spremiIzvorVremena();
   }
 }
 
@@ -80,7 +101,7 @@ void postaviVrijemeIzNTP(const DateTime& dt) {
   rtc.adjust(dt);
   oznaciRTCPouzdanSaVremenom(dt);
   izvorVremena = "NTP";
-  EEPROM.put(30, izvorVremena);
+  spremiIzvorVremena();
   setZadnjaSinkronizacija(NTP_VRIJEME, dt);
 }
 
@@ -88,7 +109,7 @@ void postaviVrijemeIzDCF(const DateTime& dt) {
   rtc.adjust(dt);
   oznaciRTCPouzdanSaVremenom(dt);
   izvorVremena = "DCF";
-  EEPROM.put(30, izvorVremena);
+  spremiIzvorVremena();
   setZadnjaSinkronizacija(DCF_VRIJEME, dt);
 }
 
@@ -96,7 +117,7 @@ void postaviVrijemeRucno(const DateTime& dt) {
   rtc.adjust(dt);
   oznaciRTCPouzdanSaVremenom(dt);
   izvorVremena = "RU";
-  EEPROM.put(30, izvorVremena);
+  spremiIzvorVremena();
   setZadnjaSinkronizacija(RTC_VRIJEME, dt);
 }
 
@@ -122,12 +143,12 @@ char dohvatiOznakuDana() {
 void oznaciPovratakNaRTC() {
   if (!rtcPouzdan) {
     izvorVremena = fallbackImaReferencu ? "CEK" : "ERR";
-    EEPROM.put(30, izvorVremena);
+    spremiIzvorVremena();
     return;
   }
   if (izvorVremena == "RTC") return;
   izvorVremena = "RTC";
-  EEPROM.put(30, izvorVremena);
+  spremiIzvorVremena();
   setZadnjaSinkronizacija(RTC_VRIJEME, dohvatiTrenutnoVrijeme());
 }
 
