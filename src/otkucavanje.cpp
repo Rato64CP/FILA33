@@ -125,7 +125,3 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
         ponistiAktivnoOtkucavanje();
     }
 }
-
-bool jeOtkucavanjeBlokirano() {
-    return blokadaOtkucavanja;
-}

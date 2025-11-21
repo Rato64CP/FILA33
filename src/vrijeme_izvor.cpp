@@ -12,15 +12,6 @@ void setZadnjaSinkronizacija(IzvorVremena izvor, const DateTime& vrijeme) {
   WearLeveling::spremi(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA, EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA, zapis);
 }
 
-IzvorVremena getZadnjiIzvor() {
-  EepromLayout::ZadnjaSinkronizacija zapis{};
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA, EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA, zapis)) {
-    return NEPOZNATO_VRIJEME;
-  }
-  if (zapis.izvor < 0 || zapis.izvor > 3) return NEPOZNATO_VRIJEME;
-  return (IzvorVremena)zapis.izvor;
-}
-
 DateTime getZadnjeSinkroniziranoVrijeme() {
   EepromLayout::ZadnjaSinkronizacija zapis{};
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA, EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA, zapis)) {

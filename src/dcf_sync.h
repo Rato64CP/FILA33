@@ -3,5 +3,3 @@
 
 void inicijalizirajDCF();
 void osvjeziDCFSinkronizaciju();
-DateTime dohvatiPosljednjeDCFVrijeme();
-bool jeDCFSpreman();

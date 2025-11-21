@@ -98,18 +98,6 @@ void spremiPostavke() {
     WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE, EepromLayout::SLOTOVI_POSTAVKE, spremnik);
 }
 
-void resetPostavke() {
-    satOd = SAT_OD_DEFAULT;
-    satDo = SAT_DO_DEFAULT;
-    trajanjeImpulsaCekicaMs = TRAJANJE_CEKIC_DEFAULT;
-    pauzaIzmeduUdaraca = PAUZA_UDARCI_DEFAULT;
-    trajanjeZvonjenjaRadniMs = TRAJANJE_ZVONJENJA_RADNI_DEFAULT;
-    trajanjeZvonjenjaNedjeljaMs = TRAJANJE_ZVONJENJA_NEDJELJA_DEFAULT;
-    trajanjeSlavljenjaMs = TRAJANJE_SLAVLJENJA_DEFAULT;
-    brojZvona = BROJ_ZVONA_DEFAULT;
-    spremiPostavke();
-}
-
 bool jeDozvoljenoOtkucavanjeUSatu(int sat) {
     sat %= 24;
     provjeriRasponSati();
