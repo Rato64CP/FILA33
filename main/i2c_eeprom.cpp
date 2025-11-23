@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <algorithm>
+// #include <SparkFun_External_EEPROM.h>  // nije ti potreban, slobodno izbriši
 
 namespace {
 constexpr uint8_t EEPROM_ADRESA = 0x57;           // Tipična adresa 24C32 na RTC pločici
@@ -43,7 +43,8 @@ bool procitaj(int adresa, void* odrediste, size_t duljina) {
   size_t preostalo = duljina;
 
   while (preostalo > 0) {
-    size_t blok = std::min<size_t>(preostalo, VELICINA_STRANICE);
+    // umjesto std::min
+    size_t blok = (preostalo < VELICINA_STRANICE) ? preostalo : VELICINA_STRANICE;
 
     Wire.beginTransmission(EEPROM_ADRESA);
     Wire.write(static_cast<uint8_t>((adresa >> 8) & 0xFF));
@@ -84,9 +85,15 @@ bool zapisi(int adresa, const void* izvor, size_t duljina) {
   while (preostalo > 0) {
     size_t offset = static_cast<size_t>(adresa % static_cast<int>(VELICINA_STRANICE));
     size_t prostor = VELICINA_STRANICE - offset;
-    size_t blok = std::min(preostalo, prostor);
+
+    // prvo ograničimo blok na kraj stranice
+    size_t blok = (preostalo < prostor) ? preostalo : prostor;
+
+    // dodatno ograničenje da ne pređemo kraj EEPROM-a
     size_t preostaliKapacitet = UKUPNI_KAPACITET - static_cast<size_t>(adresa);
-    blok = std::min(blok, preostaliKapacitet);
+    if (blok > preostaliKapacitet) {
+      blok = preostaliKapacitet;
+    }
 
     Wire.beginTransmission(EEPROM_ADRESA);
     Wire.write(static_cast<uint8_t>((adresa >> 8) & 0xFF));
@@ -110,4 +117,3 @@ bool zapisi(int adresa, const void* izvor, size_t duljina) {
 }
 
 }  // namespace VanjskiEEPROM
-
