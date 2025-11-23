@@ -118,11 +118,11 @@ static void azurirajLCDPrikaz() {
         strncpy(sekunde, "  ", sizeof(sekunde));
       }
 
-      snprintf(red1, sizeof(red1), "%02d:%02d:%s %-3s%c",
+      snprintf(red1, sizeof(red1), "%02d:%02d:%s %s  %c",
         now.hour(), now.minute(), sekunde,
         dohvatiIzvorVremena().c_str(), dohvatiOznakuDana());
 
-      snprintf(red2, sizeof(red2), "%s %02d.%02d.%04d",
+      snprintf(red2, sizeof(red2), "%s %02d.%02d.%04d.",
         dani[now.dayOfTheWeek()], now.day(), now.month(), now.year());
 
       lcd.setCursor(0, 0);
