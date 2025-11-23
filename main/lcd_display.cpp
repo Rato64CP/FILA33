@@ -23,6 +23,8 @@ static bool lcdVidljiv = true;
 static unsigned long zadnjeBlinkanje = 0;
 static bool prikazanaRTCObavijest = false;
 static unsigned long rtcObavijestPocetak = 0;
+static unsigned long zadnjePostavljenaPoruka = 0;
+static const unsigned long MAKS_TRAJANJE_PORUKE = 3000UL; // automatski vrati sat nakon isteka poruke
 
 static void postaviStandardniPrikaz() {
   prikazPoruke = false;
@@ -40,6 +42,7 @@ static void postaviPorukuNaLCD(const char* red1, const char* red2) {
   strncpy(zadnjaPorukaRed2, red2, sizeof(zadnjaPorukaRed2) - 1);
   zadnjaPorukaRed2[sizeof(zadnjaPorukaRed2) - 1] = '\0';
   prikazPoruke = true;
+  zadnjePostavljenaPoruka = millis();
   lcd.display();
   lcdVidljiv = true;
   lcd.clear();
@@ -72,6 +75,12 @@ static void upravljajBlinkanjem() {
 
 static void azurirajLCDPrikaz() {
   unsigned long sada = millis();
+  if (prikazPoruke) {
+    if (sada - zadnjePostavljenaPoruka >= MAKS_TRAJANJE_PORUKE) {
+      postaviStandardniPrikaz();
+    }
+  }
+
   if (!prikazPoruke) {
     if (!jeRTCPouzdan() && !fallbackImaPouzdanuReferencu()) {
       if (!prikazanaRTCObavijest) {
