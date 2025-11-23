@@ -76,7 +76,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - **Slavljenje i eksterni signali**
   - PIN_SLAVLJENJE_SIGNAL (D2) prati ulaz s procesne logike (aktivno LOW) za ručno pokretanje slavljenja.【F:src/podesavanja_piny.h†L34-L35】
 - **ESP komunikacija**
-  - ESP-01/ESP-12 se spaja na hardware UART1 (RX1=D19, TX1=D18) uz level shifting na 3.3 V; `Serial1` se inicijalizira na 9600 bps u `esp_serial` modulu.【F:src/esp_serial.cpp†L8-L26】
+  - ESP-01/ESP-12 se spaja na hardware UART3 (RX3=D15, TX3=D14) uz level shifting na 3.3 V; `Serial3` se inicijalizira na 9600 bps u `esp_serial` modulu, usklađeno s jumperom RX3/TX3 na Mega ploči.【F:src/esp_serial.cpp†L8-L26】
 - **DCF77 sinkronizacija**
   - PIN_DCF_SIGNAL (D18) povezuje se na izlaz DCF antene koja radi kao otvoreni kolektor; masa (DCF−) ide na GND, a napajanje (smeđa žica) na +5 V preko vanjskog otpornika od 10 kΩ koji drži liniju u stanju HIGH dok antena ne zatvori tranzistor.
 
@@ -84,7 +84,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 
 ## 🔌 ESP serijska komunikacija
 
-- Serial1 (9600 bps) prima `NTP:` vremenske oznake i `CMD:` naredbe za zvona, svaka završena novim redom.
+- Serial3 (9600 bps) prima `NTP:` vremenske oznake i `CMD:` naredbe za zvona, svaka završena novim redom.
 - Nakon uspješne obrade Arduino vraća `ACK:NTP` ili `ACK:CMD_OK`, dok pogreške daju `ERR:CMD` ili `ERR:FORMAT`, čime toranjski sustav olakšava integraciju s Home Assistantom ili vlastitim nadzornim serverom.【F:src/esp_serial.cpp†L17-L38】
 - Dostupne `CMD:` naredbe omogućuju udaljeni nadzor toranjskog sata preko Home Assistanta i MQTT-a:
   - `ZVONO1_ON` / `ZVONO1_OFF` – aktivacija i deaktivacija muškog zvona.
