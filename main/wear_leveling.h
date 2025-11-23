@@ -1,8 +1,8 @@
 #pragma once
 
-#include <EEPROM.h>
 #include <stdint.h>
 #include <string.h>
+#include "i2c_eeprom.h"
 
 // Jednostavan wear-leveling sloj za EEPROM zapis povezan s toranjskim satom.
 namespace WearLeveling {
@@ -32,7 +32,9 @@ bool ucitaj(int baznaAdresa, int brojSlotova, T& vrijednost) {
   for (int i = 0; i < brojSlotova; ++i) {
     WearRecord<T> kandidat{};
     int adresa = baznaAdresa + i * velicina;
-    EEPROM.get(adresa, kandidat);
+    if (!VanjskiEEPROM::get(adresa, kandidat)) {
+      continue;
+    }
     uint16_t crc = izracunajCRC(reinterpret_cast<uint8_t*>(&kandidat.brojac), sizeof(kandidat.brojac) + sizeof(T));
     if (crc != kandidat.crc || kandidat.brojac == 0xFFFFFFFF || kandidat.brojac == 0) {
       continue;
@@ -59,7 +61,9 @@ void spremi(int baznaAdresa, int brojSlotova, const T& vrijednost) {
   for (int i = 0; i < brojSlotova; ++i) {
     WearRecord<T> kandidat{};
     int adresa = baznaAdresa + i * velicina;
-    EEPROM.get(adresa, kandidat);
+    if (!VanjskiEEPROM::get(adresa, kandidat)) {
+      continue;
+    }
     uint16_t crc = izracunajCRC(reinterpret_cast<uint8_t*>(&kandidat.brojac), sizeof(kandidat.brojac) + sizeof(T));
     if (crc != kandidat.crc || kandidat.brojac == 0xFFFFFFFF || kandidat.brojac == 0) {
       continue;
@@ -77,7 +81,7 @@ void spremi(int baznaAdresa, int brojSlotova, const T& vrijednost) {
   novi.crc = izracunajCRC(reinterpret_cast<uint8_t*>(&novi.brojac), sizeof(novi.brojac) + sizeof(T));
 
   int adresa = baznaAdresa + sljedeciSlot * velicina;
-  EEPROM.put(adresa, novi);
+  VanjskiEEPROM::put(adresa, novi);
 }
 
 }  // namespace WearLeveling
