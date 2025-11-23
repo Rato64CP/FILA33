@@ -21,6 +21,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - `okretna_ploca` čita pet ulaza ploče, pokreće releje za smjer rotacije te automatizira zvona i slavljenje u koordinaciji s toranjskim rasporedom (`inicijalizirajPlocu()`, `kompenzirajPlocu(bool)`, `obradiUlazePloce(...)`). Ručne korekcije toranjskog vremena moguće su kroz spremanje pozicije ploče i 15-minutnog offseta (`postaviTrenutniPolozajPloce(int)`, `postaviOffsetMinuta(int)`, `dohvatiOffsetMinuta()`).【F:src/okretna_ploca.cpp†L92-L219】【F:src/okretna_ploca.cpp†L235-L307】
 - `zvonjenje` definira sekvence čekića, upravlja trajanjima i sigurnosnim odgodama te sinkronizira slavljenje i mrtvačko zvono (`inicijalizirajZvona()`, `upravljajZvonom()`, `zapocniSlavljenje()`).【F:src/zvonjenje.cpp†L61-L153】
 - `esp_serial` otvara UART1 prema ESP-01/ESP-12 te obrađuje NTP i naredbe zvona (`inicijalizirajESP()`, `obradiESPSerijskuKomunikaciju()`).【F:src/esp_serial.cpp†L8-L45】
+- `pc_serial` otvara USB serijski port prema PC-u i ispisuje vremenski označene logove za lakše praćenje integracije s toranjskim satom (`inicijalizirajPCSerijsku()`, `posaljiPCLog(...)`).【F:src/pc_serial.cpp†L1-L39】
 - `time_glob` i `vrijeme_izvor` spremaju izvor vremena, ručna i NTP ažuriranja te nadziru starost sinkronizacije, što je ključno za toranjski raspored zvona.【F:src/time_glob.cpp†L12-L44】【F:src/vrijeme_izvor.cpp†L7-L34】
 - `dcf_sync` nadzire DCF77 antenu samo u noćnom prozoru, provjerava stabilizaciju signala i šalje vrijeme toranjskog sata u `time_glob` kada NTP nije dostupan.【F:src/dcf_sync.cpp†L9-L80】
 - `otkucavanje` planira i ispaljuje udarce čekića za sate i polasate, poštujući blokade, vremenske intervale i stanje zvonjenja kako bi mehanički sklopovi toranjskog sata ostali zaštićeni.【F:src/otkucavanje.cpp†L61-L131】
@@ -88,6 +89,11 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
   - `SLAVLJENJE_ON` / `SLAVLJENJE_OFF` – ručno pokretanje ili gašenje slavljenja.
   - `MRTVACKO_ON` / `MRTVACKO_OFF` – pokretanje ili zaustavljanje mrtvačkog brecanja preko modula `zvonjenje`.
 
+## 🖨️ PC serijska komunikacija
+
+- USB serijski port (`Serial`, 115200 bps) otvara se u `setup()` preko `inicijalizirajPCSerijsku()` kako bi tehničar mogao gledati logove na računalu.
+- Svaka pristigla NTP poruka ili `CMD:` naredba iz ESP-a dobiva vremenski označen zapis (`[LOG] YYYY-MM-DD HH:MM:SS - ...`) preko `posaljiPCLog(...)`, što olakšava otklanjanje grešaka pri sinkronizaciji i upravljanju zvonima toranjskog sata.【F:src/esp_serial.cpp†L23-L78】【F:src/pc_serial.cpp†L12-L39】
+
 ---
 
 ## 📁 Struktura projekta (src/)
@@ -96,6 +102,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 src/
 ├── main.ino               # Glavna petlja i inicijalizacija toranjskog sustava
 ├── esp_serial.*           # NTP sinkronizacija i udaljene naredbe
+├── pc_serial.*            # USB serijski logovi prema servisnom PC-u
 ├── kazaljke_sata.*        # Upravljanje kazaljkama
 ├── lcd_display.*          # Prikaz poruka i menija
 ├── okretna_ploca.*        # Rotacija ploče i vanjski ulazi
