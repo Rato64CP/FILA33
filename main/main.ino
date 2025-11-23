@@ -12,6 +12,7 @@
 #include "vrijeme_izvor.h"
 #include "dcf_sync.h"
 #include "watchdog.h"
+#include "i2c_eeprom.h"
 
 static void prikaziPocetneInformacije() {
   prikaziPoruku("RZV Ver 1.0", "WIFI MQTT");
@@ -42,6 +43,7 @@ static void prikaziPocetneInformacije() {
 
 void setup() {
   inicijalizirajLCD();
+  VanjskiEEPROM::inicijaliziraj();
   inicijalizirajRTC();
   ucitajPostavke();
   inicijalizirajTipke();

@@ -10,7 +10,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - Upravljanje kazaljkama toranjskog sata dvostrukim impulsima
 - Upravljanje zvonima (muško, žensko, slavljenje, mrtvačko) i čekićima
 - Automatsko zakazivanje zvona i slavljenja prema ulazima okretne ploče
-- Praćenje izvora vremena (RTC, NTP, ručno) i spremanje u EEPROM
+- Praćenje izvora vremena (RTC, NTP, ručno) i spremanje u vanjski 24C32 EEPROM na I2C sabirnici
 - Tipkovnica s 6 tipki za lokalne postavke i servisne komande
 
 ---
