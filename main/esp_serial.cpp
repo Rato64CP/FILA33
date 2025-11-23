@@ -24,12 +24,15 @@ void inicijalizirajESP() {
 }
 
 static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
-  if (iso.length() != 19) return false;
+  const int osnovnaDuljina = 19;
+  bool imaZuluneSufiks = iso.length() == 20 && iso.charAt(19) == 'Z';
+
+  if (!(iso.length() == osnovnaDuljina || imaZuluneSufiks)) return false;
   if (iso.charAt(4) != '-' || iso.charAt(7) != '-' || iso.charAt(10) != 'T' || iso.charAt(13) != ':' || iso.charAt(16) != ':') {
     return false;
   }
 
-  for (int i = 0; i < iso.length(); ++i) {
+  for (int i = 0; i < osnovnaDuljina; ++i) {
     if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16) continue;
     if (!isDigit(iso.charAt(i))) return false;
   }
