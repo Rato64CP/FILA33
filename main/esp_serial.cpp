@@ -8,7 +8,7 @@
 #include "otkucavanje.h"
 
 #if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA)
-static HardwareSerial &espSerijskiPort = Serial3;  // Ugrađeni WiFi modul na Mega 2560 WiFi
+static HardwareSerial &espSerijskiPort = Serial1;  // Hardverski UART1 (RX1/TX1) prema ESP-01/ESP-12
 #else
 #include <SoftwareSerial.h>
 static SoftwareSerial espSerijskiPort(PIN_ESP_RX, PIN_ESP_TX);  // Modul za toranjski sat na softverskom UART-u
