@@ -23,6 +23,35 @@ void inicijalizirajESP() {
   ulazniBuffer.reserve(128);
 }
 
+static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
+  const int osnovnaDuljina = 19;
+  bool imaZuluneSufiks = iso.length() == 20 && iso.charAt(19) == 'Z';
+
+  if (!(iso.length() == osnovnaDuljina || imaZuluneSufiks)) return false;
+  if (iso.charAt(4) != '-' || iso.charAt(7) != '-' || iso.charAt(10) != 'T' || iso.charAt(13) != ':' || iso.charAt(16) != ':') {
+    return false;
+  }
+
+  for (int i = 0; i < osnovnaDuljina; ++i) {
+    if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16) continue;
+    if (!isDigit(iso.charAt(i))) return false;
+  }
+
+  int godina = iso.substring(0, 4).toInt();
+  int mjesec = iso.substring(5, 7).toInt();
+  int dan = iso.substring(8, 10).toInt();
+  int sat = iso.substring(11, 13).toInt();
+  int minuta = iso.substring(14, 16).toInt();
+  int sekunda = iso.substring(17, 19).toInt();
+
+  bool poljaIspravna = godina >= 2024 && mjesec >= 1 && mjesec <= 12 && dan >= 1 && dan <= 31 &&
+                       sat >= 0 && sat <= 23 && minuta >= 0 && minuta <= 59 && sekunda >= 0 && sekunda <= 59;
+  if (!poljaIspravna) return false;
+
+  dt = DateTime(godina, mjesec, dan, sat, minuta, sekunda);
+  return true;
+}
+
 void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
@@ -30,9 +59,13 @@ void obradiESPSerijskuKomunikaciju() {
       ulazniBuffer.trim();
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
-        DateTime ntpVrijeme = DateTime(iso.c_str());
-        azurirajVrijemeIzNTP(ntpVrijeme);
-        espSerijskiPort.println("ACK:NTP");
+        DateTime ntpVrijeme;
+        if (parsirajISOVrijeme(iso, ntpVrijeme)) {
+          azurirajVrijemeIzNTP(ntpVrijeme);
+          espSerijskiPort.println("ACK:NTP");
+        } else {
+          espSerijskiPort.println("ERR:NTP");
+        }
       }
       else if (ulazniBuffer.startsWith("CMD:")) {
         String komanda = ulazniBuffer.substring(4);
