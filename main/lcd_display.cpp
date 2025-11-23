@@ -17,6 +17,7 @@ static bool prikazPoruke = false;
 static char zadnjaPorukaRed1[17];
 static char zadnjaPorukaRed2[17];
 static bool prikaziSekunde = true;
+static bool sekundeBlinkaju = false;
 static unsigned long zadnjiRefresh = 0;
 static bool blinkanjeAktivno = false;
 static bool lcdVidljiv = true;
@@ -112,10 +113,15 @@ static void azurirajLCDPrikaz() {
       }
 
       char sekunde[3];
-      if (prikaziSekunde) {
-        snprintf(sekunde, sizeof(sekunde), "%02d", now.second());
+      if (sekundeBlinkaju) {
+        if (prikaziSekunde) {
+          snprintf(sekunde, sizeof(sekunde), "%02d", now.second());
+        } else {
+          strncpy(sekunde, "  ", sizeof(sekunde));
+        }
+        prikaziSekunde = !prikaziSekunde;
       } else {
-        strncpy(sekunde, "  ", sizeof(sekunde));
+        snprintf(sekunde, sizeof(sekunde), "%02d", now.second());
       }
 
       snprintf(red1, sizeof(red1), "%02d:%02d:%s %s  %c",
@@ -134,7 +140,6 @@ static void azurirajLCDPrikaz() {
       lcd.setCursor(0, 1);
       lcd.print(red2);
 
-      prikaziSekunde = !prikaziSekunde;
     }
   }
 
@@ -167,6 +172,8 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
 
 void postaviLCDBlinkanje(bool omoguci) {
   blinkanjeAktivno = omoguci;
+  sekundeBlinkaju = omoguci;
+  prikaziSekunde = true;
   zadnjeBlinkanje = millis();
   if (!omoguci && !lcdVidljiv) {
     lcd.display();
