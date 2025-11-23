@@ -26,7 +26,8 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
   bool imaZuluneSufiks = iso.length() == 20 && iso.charAt(19) == 'Z';
 
   if (!(iso.length() == osnovnaDuljina || imaZuluneSufiks)) return false;
-  if (iso.charAt(4) != '-' || iso.charAt(7) != '-' || iso.charAt(10) != 'T' || iso.charAt(13) != ':' || iso.charAt(16) != ':') {
+  if (iso.charAt(4) != '-' || iso.charAt(7) != '-' || iso.charAt(10) != 'T' ||
+      iso.charAt(13) != ':' || iso.charAt(16) != ':') {
     return false;
   }
 
@@ -37,13 +38,14 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
 
   int godina = iso.substring(0, 4).toInt();
   int mjesec = iso.substring(5, 7).toInt();
-  int dan = iso.substring(8, 10).toInt();
-  int sat = iso.substring(11, 13).toInt();
+  int dan    = iso.substring(8, 10).toInt();
+  int sat    = iso.substring(11, 13).toInt();
   int minuta = iso.substring(14, 16).toInt();
-  int sekunda = iso.substring(17, 19).toInt();
+  int sekunda= iso.substring(17, 19).toInt();
 
-  bool poljaIspravna = godina >= 2024 && mjesec >= 1 && mjesec <= 12 && dan >= 1 && dan <= 31 &&
-                       sat >= 0 && sat <= 23 && minuta >= 0 && minuta <= 59 && sekunda >= 0 && sekunda <= 59;
+  bool poljaIspravna =
+      godina >= 2024 && mjesec >= 1 && mjesec <= 12 && dan >= 1 && dan <= 31 &&
+      sat >= 0 && sat <= 23 && minuta >= 0 && minuta <= 59 && sekunda >= 0 && sekunda <= 59;
   if (!poljaIspravna) return false;
 
   dt = DateTime(godina, mjesec, dan, sat, minuta, sekunda);
@@ -54,21 +56,20 @@ void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
 
-    // RAW debug: svaki primljeni znak pošalji na PC
-    String s = F("ESP RX RAW: '");
-    if (znak == '\n')      s += "\\n";
-    else if (znak == '\r') s += "\\r";
-    else                   s += znak;
-    s += "' (";
-    s += (int)znak;
-    s += ")";
-    posaljiPCLog(s);
+    // preskoči \r, linije završavaju s '\n'
+    if (znak == '\r') {
+      continue;
+    }
 
     if (znak == '\n') {
       ulazniBuffer.trim();
 
       if (ulazniBuffer.length() > 0) {
+        // logiraj cijelu liniju
         posaljiPCLog(String(F("ESP linija: ")) + ulazniBuffer);
+      } else {
+        ulazniBuffer = "";
+        continue;
       }
 
       if (ulazniBuffer.startsWith("NTP:")) {
@@ -76,10 +77,10 @@ void obradiESPSerijskuKomunikaciju() {
         DateTime ntpVrijeme;
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
           azurirajVrijemeIzNTP(ntpVrijeme);
-          espSerijskiPort.println("ACK:NTP");
+          espSerijskiPort.println(F("ACK:NTP"));
           posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
         } else {
-          espSerijskiPort.println("ERR:NTP");
+          espSerijskiPort.println(F("ERR:NTP"));
           posaljiPCLog(String(F("Neispravan NTP format: ")) + iso);
         }
       }
@@ -100,15 +101,15 @@ void obradiESPSerijskuKomunikaciju() {
         else uspjeh = false;
 
         if (uspjeh) {
-          espSerijskiPort.println("ACK:CMD_OK");
+          espSerijskiPort.println(F("ACK:CMD_OK"));
           posaljiPCLog(String(F("Izvrsena CMD naredba: ")) + komanda);
         } else {
-          espSerijskiPort.println("ERR:CMD");
+          espSerijskiPort.println(F("ERR:CMD"));
           posaljiPCLog(String(F("Nepoznata CMD naredba: ")) + komanda);
         }
       }
       else {
-        // sve ostalo je samo log s ESP-a
+        // sve ostalo tretiramo kao običan log s ESP-a
         posaljiPCLog(String(F("ESP LOG: ")) + ulazniBuffer);
       }
 
