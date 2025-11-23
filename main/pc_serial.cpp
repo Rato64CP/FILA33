@@ -4,7 +4,7 @@
 #include "time_glob.h"
 #include "pc_serial.h"
 
-static const unsigned long PC_BRZINA = 115200;
+static const unsigned long PC_BRZINA = 9600;
 static bool serijskiSpreman = false;
 
 static String formatirajVremenskuOznaku() {

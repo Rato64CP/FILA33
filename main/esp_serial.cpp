@@ -59,7 +59,6 @@ void obradiESPSerijskuKomunikaciju() {
     char znak = espSerijskiPort.read();
     if (znak == '\n') {
       ulazniBuffer.trim();
-
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         DateTime ntpVrijeme;
@@ -75,30 +74,19 @@ void obradiESPSerijskuKomunikaciju() {
       else if (ulazniBuffer.startsWith("CMD:")) {
         String komanda = ulazniBuffer.substring(4);
         bool uspjeh = true;
-
-        if      (komanda == "ZVONO1_ON")        aktivirajZvonjenje(1);
-        else if (komanda == "ZVONO1_OFF")       deaktivirajZvonjenje(1);
-        else if (komanda == "ZVONO2_ON")        aktivirajZvonjenje(2);
-        else if (komanda == "ZVONO2_OFF")       deaktivirajZvonjenje(2);
-        else if (komanda == "OTKUCAVANJE_OFF")  postaviBlokaduOtkucavanja(true);
-        else if (komanda == "OTKUCAVANJE_ON")   postaviBlokaduOtkucavanja(false);
-        else if (komanda == "SLAVLJENJE_ON")    zapocniSlavljenje();
-        else if (komanda == "SLAVLJENJE_OFF")   zaustaviSlavljenje();
-        else if (komanda == "MRTVACKO_ON")      zapocniMrtvacko();
-        else if (komanda == "MRTVACKO_OFF")     zaustaviZvonjenje();
+        if (komanda == "ZVONO1_ON") aktivirajZvonjenje(1);
+        else if (komanda == "ZVONO1_OFF") deaktivirajZvonjenje(1);
+        else if (komanda == "ZVONO2_ON") aktivirajZvonjenje(2);
+        else if (komanda == "ZVONO2_OFF") deaktivirajZvonjenje(2);
+        else if (komanda == "OTKUCAVANJE_OFF") postaviBlokaduOtkucavanja(true);
+        else if (komanda == "OTKUCAVANJE_ON") postaviBlokaduOtkucavanja(false);
+        else if (komanda == "SLAVLJENJE_ON") zapocniSlavljenje();
+        else if (komanda == "SLAVLJENJE_OFF") zaustaviSlavljenje();
+        else if (komanda == "MRTVACKO_ON") zapocniMrtvacko();
+        else if (komanda == "MRTVACKO_OFF") zaustaviZvonjenje();
         else uspjeh = false;
 
         if (uspjeh) espSerijskiPort.println("ACK:CMD_OK");
-<<<<<<< HEAD
-        else        espSerijskiPort.println("ERR:CMD");
-      }
-      else {
-        // Sve ostale linije (FAZA:, WIFI:, WEB:, NTP: Prvi put...) IGNORIRAMO.
-        // Ako želiš, ovdje možeš slati u debug Serial na USB, ali ne nazad na ESP.
-        // npr.:
-        // Serial.print(F("ESP LOG: "));
-        // Serial.println(ulazniBuffer);
-=======
         else espSerijskiPort.println("ERR:CMD");
 
         if (uspjeh) {
@@ -110,9 +98,7 @@ void obradiESPSerijskuKomunikaciju() {
       else {
         espSerijskiPort.println("ERR:FORMAT");
         posaljiPCLog(String(F("Neprepoznat format s ESP-a: ")) + ulazniBuffer);
->>>>>>> 2b6cbb07843d6b7cd76face8c9a84e0d9c532689
       }
-
       ulazniBuffer = "";
     } else {
       ulazniBuffer += znak;
