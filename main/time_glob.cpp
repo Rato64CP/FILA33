@@ -19,6 +19,42 @@ static bool fallbackImaReferencu = false;
 static DateTime fallbackVrijeme = DateTime((uint32_t)0);
 static unsigned long fallbackMillis = 0;
 
+// ---------------------------------------------------------------------------
+// Pomoćne funkcije za DST (CET/CEST, Hrvatska / EU)
+// ---------------------------------------------------------------------------
+
+// Određuje je li zadani UTC trenutak unutar razdoblja ljetnog računanja vremena
+static bool jeLjetnoVrijeme(const DateTime& t) {
+  int godina = t.year();
+
+  // Zadnja nedjelja u ožujku u 2:00 (po UTC-u)
+  DateTime zadnjaNedOzu(godina, 3, 31, 2, 0, 0);
+  while (zadnjaNedOzu.dayOfTheWeek() != 0) { // 0 = nedjelja
+    zadnjaNedOzu = zadnjaNedOzu - TimeSpan(24 * 3600);
+  }
+
+  // Zadnja nedjelja u listopadu u 3:00 (po UTC-u)
+  DateTime zadnjaNedLis(godina, 10, 31, 3, 0, 0);
+  while (zadnjaNedLis.dayOfTheWeek() != 0) {
+    zadnjaNedLis = zadnjaNedLis - TimeSpan(24 * 3600);
+  }
+
+  uint32_t unixT = t.unixtime();
+  return (unixT >= zadnjaNedOzu.unixtime() && unixT < zadnjaNedLis.unixtime());
+}
+
+// Pretvara UTC DateTime u lokalno vrijeme (CET/CEST)
+static DateTime pretvoriUTCULokalno(const DateTime& utc) {
+  // CET = UTC+1, CEST = UTC+2
+  if (jeLjetnoVrijeme(utc)) {
+    return utc + TimeSpan(2 * 3600);
+  } else {
+    return utc + TimeSpan(1 * 3600);
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 static void aktivirajFallbackVrijeme() {
   fallbackVrijeme = getZadnjeSinkroniziranoVrijeme();
   fallbackImaReferencu = fallbackVrijeme.unixtime() > 0;
@@ -67,8 +103,9 @@ static void spremiIzvorVremena() {
   WearLeveling::spremi(EepromLayout::BAZA_IZVOR_VREMENA, EepromLayout::SLOTOVI_IZVOR_VREMENA, spremi);
 }
 
-void azurirajVrijemeIzNTP(const DateTime& dt) {
-  postaviVrijemeIzNTP(dt);
+void azurirajVrijemeIzNTP(const DateTime& dtUTC) {
+  // dtUTC je *UTC* vrijeme koje dolazi s ESP-a
+  postaviVrijemeIzNTP(dtUTC);
   azurirajOznakuDana();
 }
 
@@ -105,12 +142,17 @@ DateTime dohvatiTrenutnoVrijeme() {
   return izracunajFallbackVrijeme();
 }
 
-void postaviVrijemeIzNTP(const DateTime& dt) {
-  rtc.adjust(dt);
-  oznaciRTCPouzdanSaVremenom(dt);
+// dt (NTP) dolazi u UTC formatu; ovdje ga prevodimo u lokalno vrijeme i spremamo u RTC
+void postaviVrijemeIzNTP(const DateTime& dtUTC) {
+  // 1) Pretvori UTC → lokalno (CET/CEST)
+  DateTime lokalno = pretvoriUTCULokalno(dtUTC);
+
+  // 2) Spremaj u RTC lokalno vrijeme
+  rtc.adjust(lokalno);
+  oznaciRTCPouzdanSaVremenom(lokalno);
   izvorVremena = "NTP";
   spremiIzvorVremena();
-  setZadnjaSinkronizacija(NTP_VRIJEME, dt);
+  setZadnjaSinkronizacija(NTP_VRIJEME, lokalno);
 }
 
 void postaviVrijemeIzDCF(const DateTime& dt) {
