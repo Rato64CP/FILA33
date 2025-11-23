@@ -1,9 +1,12 @@
 #include "tipke.h"
 #include <Arduino.h>
 #include <RTClib.h>
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
+// #include <cstring>
+// #include <cstdio>
+// #include <cstdlib>
+#include <string.h>   // memset, size_t, itd.
+#include <stdio.h>    // snprintf
+#include <stdlib.h>   // abs, malloc, free (ako ikad zatreba)
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "kazaljke_sata.h"
