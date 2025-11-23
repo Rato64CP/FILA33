@@ -13,6 +13,7 @@
 #include "dcf_sync.h"
 #include "watchdog.h"
 #include "i2c_eeprom.h"
+#include "pc_serial.h"
 
 static void prikaziPocetneInformacije() {
   prikaziPoruku("RZV Ver 1.0", "WIFI MQTT");
@@ -45,6 +46,7 @@ void setup() {
   inicijalizirajLCD();
   VanjskiEEPROM::inicijaliziraj();
   inicijalizirajRTC();
+  inicijalizirajPCSerijsku();
   ucitajPostavke();
   inicijalizirajTipke();
   inicijalizirajESP();
