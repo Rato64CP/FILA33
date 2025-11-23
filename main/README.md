@@ -28,6 +28,11 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - `tipke` debounca šest tipki, otvara zaslon postavki i omogućuje uređivanje kazaljki, vremena i trajanja zvona u hodu, uz jasne LCD poruke za tehničara toranjskog sata.【F:src/tipke.cpp†L69-L446】
 - `watchdog` uključuje i osvježava AVR watchdog timer (8 s) kako bi toranjski upravljač pouzdano resetirao u slučaju zastoja petlje.【F:src/watchdog.cpp†L10-L27】
 
+## ⏱️ Sinkronizacija vremena i kazaljki
+
+- NTP i DCF77 sinkronizacije rade neovisno o trenutnom položaju kazaljki: `loop()` svake iteracije poziva serijsku obradu ESP-a i DCF77 nadzor bez provjere jesu li kazaljke već kompenzirane, pa RTC dobiva novo vrijeme čim stigne valjana oznaka.【F:src/main.ino†L52-L72】【F:src/esp_serial.cpp†L24-L73】【F:src/dcf_sync.cpp†L34-L74】
+- Kazaljke se pri pokretanju poravnavaju prema RTC-u (`kompenzirajKazaljke`) i tek nakon toga označavaju usklađenima, no kasnija NTP/DCF osvježenja ne zaustavljaju rad kazaljki niti čekaju novo poravnanje; rukuju se paralelno s upravljanjem relejima kazaljki i okretne ploče u glavnoj petlji.【F:src/main.ino†L28-L72】【F:src/kazaljke_sata.cpp†L92-L146】
+
 ---
 
 ## 📦 Komponente
