@@ -73,19 +73,24 @@ void azurirajVrijemeIzNTP(const DateTime& dt) {
 }
 
 void inicijalizirajRTC() {
-  rtc.begin();
-  bool trebaSinkronizaciju = rtc.lostPower();
-  DateTime trenutno = rtc.now();
-  if (trenutno.year() < 2024) {
-    trebaSinkronizaciju = true;
-  }
-  if (trebaSinkronizaciju) {
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // privremeno vrijeme dok cekamo sinkronizaciju
+  if (!rtc.begin()) {
     rtcPouzdan = false;
     aktivirajFallbackVrijeme();
   } else {
-    oznaciRTCPouzdanSaVremenom(trenutno);
+    bool trebaSinkronizaciju = rtc.lostPower();
+    DateTime trenutno = rtc.now();
+    if (trenutno.year() < 2024) {
+      trebaSinkronizaciju = true;
+    }
+    if (trebaSinkronizaciju) {
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // privremeno vrijeme dok cekamo sinkronizaciju
+      rtcPouzdan = false;
+      aktivirajFallbackVrijeme();
+    } else {
+      oznaciRTCPouzdanSaVremenom(trenutno);
+    }
   }
+
   procitajIzvorVremena();
   if (!rtcPouzdan) {
     izvorVremena = fallbackImaReferencu ? "CEK" : "ERR";

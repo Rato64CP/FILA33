@@ -93,8 +93,15 @@ static void azurirajLCDPrikaz() {
         azurirajOznakuDana();
       }
 
-      snprintf(red1, sizeof(red1), "%02d:%02d:%02d %-3s%c",
-        now.hour(), now.minute(), prikaziSekunde ? now.second() : 32,
+      char sekunde[3];
+      if (prikaziSekunde) {
+        snprintf(sekunde, sizeof(sekunde), "%02d", now.second());
+      } else {
+        strncpy(sekunde, "  ", sizeof(sekunde));
+      }
+
+      snprintf(red1, sizeof(red1), "%02d:%02d:%s %-3s%c",
+        now.hour(), now.minute(), sekunde,
         dohvatiIzvorVremena().c_str(), dohvatiOznakuDana());
 
       snprintf(red2, sizeof(red2), "%s %02d.%02d.%04d",
