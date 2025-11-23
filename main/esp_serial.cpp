@@ -6,6 +6,7 @@
 #include "zvonjenje.h"
 #include "podesavanja_piny.h"
 #include "otkucavanje.h"
+#include "pc_serial.h"
 
 #if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA)
 static HardwareSerial &espSerijskiPort = Serial3;  // Hardverski UART3 (RX3/TX3) prema ESP-01/ESP-12
@@ -21,6 +22,7 @@ String ulazniBuffer = "";
 void inicijalizirajESP() {
   espSerijskiPort.begin(ESP_BRZINA);
   ulazniBuffer.reserve(128);
+  posaljiPCLog(F("ESP serijska veza inicijalizirana"));
 }
 
 static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
@@ -63,8 +65,10 @@ void obradiESPSerijskuKomunikaciju() {
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
           azurirajVrijemeIzNTP(ntpVrijeme);
           espSerijskiPort.println("ACK:NTP");
+          posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
         } else {
           espSerijskiPort.println("ERR:NTP");
+          posaljiPCLog(String(F("Neispravan NTP format: ")) + iso);
         }
       }
       else if (ulazniBuffer.startsWith("CMD:")) {
@@ -84,9 +88,16 @@ void obradiESPSerijskuKomunikaciju() {
 
         if (uspjeh) espSerijskiPort.println("ACK:CMD_OK");
         else espSerijskiPort.println("ERR:CMD");
+
+        if (uspjeh) {
+          posaljiPCLog(String(F("Izvrsena CMD naredba: ")) + komanda);
+        } else {
+          posaljiPCLog(String(F("Nepoznata CMD naredba: ")) + komanda);
+        }
       }
       else {
         espSerijskiPort.println("ERR:FORMAT");
+        posaljiPCLog(String(F("Neprepoznat format s ESP-a: ")) + ulazniBuffer);
       }
       ulazniBuffer = "";
     } else {
