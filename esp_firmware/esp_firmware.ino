@@ -5,8 +5,8 @@
 #include <time.h>
 
 // Konfiguracija WiFi mreže (zamijeni stvarnim podacima prije spremanja na modul)
-const char *WIFI_SSID = "upisi_ssid";
-const char *WIFI_LOZINKA = "upisi_lozinku";
+const char *WIFI_SSID = "SVETI PETAR";
+const char *WIFI_LOZINKA = "cista2906";
 
 // Parametri NTP klijenta usklađeni s očekivanjima modula u src/esp_serial.cpp
 static const char *NTP_POSLUZITELJ = "pool.ntp.org";
