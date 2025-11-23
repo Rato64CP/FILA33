@@ -21,6 +21,8 @@ static unsigned long zadnjiRefresh = 0;
 static bool blinkanjeAktivno = false;
 static bool lcdVidljiv = true;
 static unsigned long zadnjeBlinkanje = 0;
+static bool prikazanaRTCObavijest = false;
+static unsigned long rtcObavijestPocetak = 0;
 
 static void postaviStandardniPrikaz() {
   prikazPoruke = false;
@@ -71,14 +73,21 @@ static void upravljajBlinkanjem() {
 static void azurirajLCDPrikaz() {
   unsigned long sada = millis();
   if (!prikazPoruke) {
-    if (!jeRTCPouzdan()) {
-      if (!fallbackImaPouzdanuReferencu()) {
+    if (!jeRTCPouzdan() && !fallbackImaPouzdanuReferencu()) {
+      if (!prikazanaRTCObavijest) {
         postaviPorukuNaLCD("RTC baterija", "treba zamjenu");
-      } else {
-        postaviPorukuNaLCD("Cekam sinkron.", "RTC nije valjan");
+        prikazanaRTCObavijest = true;
+        rtcObavijestPocetak = sada;
       }
-      upravljajBlinkanjem();
-      return;
+
+      if (sada - rtcObavijestPocetak < 2500UL) {
+        upravljajBlinkanjem();
+        return;
+      }
+
+      postaviStandardniPrikaz();
+    } else {
+      prikazanaRTCObavijest = false;
     }
     if (sada - zadnjiRefresh >= 500UL) {
       zadnjiRefresh = sada;
@@ -93,8 +102,15 @@ static void azurirajLCDPrikaz() {
         azurirajOznakuDana();
       }
 
-      snprintf(red1, sizeof(red1), "%02d:%02d:%02d %-3s%c",
-        now.hour(), now.minute(), prikaziSekunde ? now.second() : 32,
+      char sekunde[3];
+      if (prikaziSekunde) {
+        snprintf(sekunde, sizeof(sekunde), "%02d", now.second());
+      } else {
+        strncpy(sekunde, "  ", sizeof(sekunde));
+      }
+
+      snprintf(red1, sizeof(red1), "%02d:%02d:%s %-3s%c",
+        now.hour(), now.minute(), sekunde,
         dohvatiIzvorVremena().c_str(), dohvatiOznakuDana());
 
       snprintf(red2, sizeof(red2), "%s %02d.%02d.%04d",
