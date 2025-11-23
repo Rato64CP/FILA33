@@ -38,10 +38,6 @@
 #define PIN_ZVONO_1                 4
 #define PIN_ZVONO_2                 5
 
-// ESP komunikacija za toranjski sat (na Mega 2560 WiFi koristi se Serial3, inače softverski UART)
-#define PIN_ESP_RX                  6
-#define PIN_ESP_TX                  7
-
 // DCF77 antena (koristi digitalni pin s hardverskim prekidom)
 #define PIN_DCF_SIGNAL              18
 

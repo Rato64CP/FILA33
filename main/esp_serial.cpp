@@ -8,12 +8,8 @@
 #include "otkucavanje.h"
 #include "pc_serial.h"
 
-#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA)
-static HardwareSerial &espSerijskiPort = Serial3;  // Hardverski UART3 (RX3/TX3) prema ESP-01/ESP-12
-#else
-#include <SoftwareSerial.h>
-static SoftwareSerial espSerijskiPort(PIN_ESP_RX, PIN_ESP_TX);  // Modul za toranjski sat na softverskom UART-u
-#endif
+// Uvijek koristi Serial3 (za Mega 2560 toranjski sat)
+static HardwareSerial &espSerijskiPort = Serial3;
 
 static const unsigned long ESP_BRZINA = 9600;
 
@@ -57,8 +53,24 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
 void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
+
+    // RAW debug: svaki primljeni znak pošalji na PC
+    String s = F("ESP RX RAW: '");
+    if (znak == '\n')      s += "\\n";
+    else if (znak == '\r') s += "\\r";
+    else                   s += znak;
+    s += "' (";
+    s += (int)znak;
+    s += ")";
+    posaljiPCLog(s);
+
     if (znak == '\n') {
       ulazniBuffer.trim();
+
+      if (ulazniBuffer.length() > 0) {
+        posaljiPCLog(String(F("ESP linija: ")) + ulazniBuffer);
+      }
+
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         DateTime ntpVrijeme;
@@ -74,31 +86,32 @@ void obradiESPSerijskuKomunikaciju() {
       else if (ulazniBuffer.startsWith("CMD:")) {
         String komanda = ulazniBuffer.substring(4);
         bool uspjeh = true;
-        if (komanda == "ZVONO1_ON") aktivirajZvonjenje(1);
-        else if (komanda == "ZVONO1_OFF") deaktivirajZvonjenje(1);
-        else if (komanda == "ZVONO2_ON") aktivirajZvonjenje(2);
-        else if (komanda == "ZVONO2_OFF") deaktivirajZvonjenje(2);
+
+        if      (komanda == "ZVONO1_ON")       aktivirajZvonjenje(1);
+        else if (komanda == "ZVONO1_OFF")      deaktivirajZvonjenje(1);
+        else if (komanda == "ZVONO2_ON")       aktivirajZvonjenje(2);
+        else if (komanda == "ZVONO2_OFF")      deaktivirajZvonjenje(2);
         else if (komanda == "OTKUCAVANJE_OFF") postaviBlokaduOtkucavanja(true);
-        else if (komanda == "OTKUCAVANJE_ON") postaviBlokaduOtkucavanja(false);
-        else if (komanda == "SLAVLJENJE_ON") zapocniSlavljenje();
-        else if (komanda == "SLAVLJENJE_OFF") zaustaviSlavljenje();
-        else if (komanda == "MRTVACKO_ON") zapocniMrtvacko();
-        else if (komanda == "MRTVACKO_OFF") zaustaviZvonjenje();
+        else if (komanda == "OTKUCAVANJE_ON")  postaviBlokaduOtkucavanja(false);
+        else if (komanda == "SLAVLJENJE_ON")   zapocniSlavljenje();
+        else if (komanda == "SLAVLJENJE_OFF")  zaustaviSlavljenje();
+        else if (komanda == "MRTVACKO_ON")     zapocniMrtvacko();
+        else if (komanda == "MRTVACKO_OFF")    zaustaviZvonjenje();
         else uspjeh = false;
 
-        if (uspjeh) espSerijskiPort.println("ACK:CMD_OK");
-        else espSerijskiPort.println("ERR:CMD");
-
         if (uspjeh) {
+          espSerijskiPort.println("ACK:CMD_OK");
           posaljiPCLog(String(F("Izvrsena CMD naredba: ")) + komanda);
         } else {
+          espSerijskiPort.println("ERR:CMD");
           posaljiPCLog(String(F("Nepoznata CMD naredba: ")) + komanda);
         }
       }
       else {
-        espSerijskiPort.println("ERR:FORMAT");
-        posaljiPCLog(String(F("Neprepoznat format s ESP-a: ")) + ulazniBuffer);
+        // sve ostalo je samo log s ESP-a
+        posaljiPCLog(String(F("ESP LOG: ")) + ulazniBuffer);
       }
+
       ulazniBuffer = "";
     } else {
       ulazniBuffer += znak;

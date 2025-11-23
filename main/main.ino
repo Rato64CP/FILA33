@@ -15,6 +15,37 @@
 #include "i2c_eeprom.h"
 #include "pc_serial.h"
 
+static String formatirajDatumVrijeme(const DateTime& dt) {
+  char buff[20];
+  snprintf(buff, sizeof(buff), "%02d.%02d.%04d %02d:%02d:%02d", dt.day(), dt.month(), dt.year(), dt.hour(), dt.minute(), dt.second());
+  return String(buff);
+}
+
+static void posaljiPocetniPregledNaPC() {
+  DateTime sada = dohvatiTrenutnoVrijeme();
+  posaljiPCLog(String(F("Pokretanje u ")) + formatirajDatumVrijeme(sada) + String(F(" (izvor: ")) + dohvatiIzvorVremena() + F(")"));
+
+  DateTime zadnjaSync = getZadnjeSinkroniziranoVrijeme();
+  if (zadnjaSync.unixtime() > 0) {
+    posaljiPCLog(String(F("Zadnja sinkronizacija: ")) + formatirajDatumVrijeme(zadnjaSync));
+  } else {
+    posaljiPCLog(F("Zadnja sinkronizacija: nema zapisa"));
+  }
+
+  int memorKazMin = dohvatiMemoriraneKazaljkeMinuta();
+  int satKaz = memorKazMin / 60;
+  int minKaz = memorKazMin % 60;
+  posaljiPCLog(String(F("Memorirane kazaljke: ")) + satKaz + F(":") + minKaz);
+
+  int pozPloca = dohvatiPozicijuPloce();
+  posaljiPCLog(String(F("Pozicija okretne ploce: ")) + pozPloca);
+
+  bool kazSink = suKazaljkeUSinkronu();
+  bool plocaSink = jePlocaUSinkronu();
+  posaljiPCLog(String(F("Stanje sinkronizacije - kazaljke: ")) + (kazSink ? F("DA") : F("NE")) +
+               F(", ploca: ") + (plocaSink ? F("DA") : F("NE")));
+}
+
 static void prikaziPocetneInformacije() {
   prikaziPoruku("RZV Ver 1.0", "WIFI MQTT");
   odradiPauzuSaLCD(2000);
