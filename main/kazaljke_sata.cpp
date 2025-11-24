@@ -180,3 +180,22 @@ void oznaciKazaljkeKaoSinkronizirane() {
   DateTime now = dohvatiTrenutnoVrijeme();
   zadnjaAktiviranaMinuta = now.minute();
 }
+
+void obavijestiKazaljkeDSTPromjena(int pomakMinuta) {
+    if (pomakMinuta <= 0) {
+        // Kod vraćanja sata unatrag (CEST → CET),
+        // NE RADIMO ništa. Kazaljke nastavljaju normalno.
+        posaljiPCLog(F("DST: pomak unatrag - kazaljke NE korigiramo"));
+        return;
+    }
+
+    // Ako je ljetno → zimsko (pomak +60 min)
+    int brojKoraka = pomakMinuta;
+
+    String log = F("DST: kazaljke pomičem za +");
+    log += brojKoraka;
+    log += F(" minuta");
+    posaljiPCLog(log);
+
+    pomakniKazaljkeZa(brojKoraka);
+}

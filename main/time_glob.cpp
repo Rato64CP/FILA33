@@ -19,6 +19,32 @@ static bool fallbackImaReferencu = false;
 static DateTime fallbackVrijeme = DateTime((uint32_t)0);
 static unsigned long fallbackMillis = 0;
 
+// ---- NOVO: praćenje skoka vremena (za kazaljke/ploču) ---------------------
+
+// Zadnje poznato lokalno vrijeme (ono koje je bilo važeće prije najnovijeg postavljanja)
+static DateTime zadnjeLokalnoVrijeme = DateTime((uint32_t)0);
+static bool imaZadnjeLokalno = false;
+
+// Skok vremena u minutama (novo_lokalno - staro_lokalno)
+static int zadnjiSkokMinuta = 0;
+static bool imaZadnjiSkok = false;
+static unsigned long zadnjiSkokMillis = 0;
+
+static void registrirajSkokVremena(const DateTime& novoLokalno) {
+  if (imaZadnjeLokalno) {
+    long diffSec = (long)novoLokalno.unixtime() - (long)zadnjeLokalnoVrijeme.unixtime();
+    int diffMin = (int)(diffSec / 60);
+
+    if (diffMin != 0) {
+      zadnjiSkokMinuta = diffMin;
+      imaZadnjiSkok = true;
+      zadnjiSkokMillis = millis();
+    }
+  }
+  zadnjeLokalnoVrijeme = novoLokalno;
+  imaZadnjeLokalno = true;
+}
+
 // ---------------------------------------------------------------------------
 // Pomoćne funkcije za DST (CET/CEST, Hrvatska / EU)
 // ---------------------------------------------------------------------------
@@ -73,7 +99,12 @@ static DateTime izracunajFallbackVrijeme() {
   return fallbackVrijeme + TimeSpan(proteklo / 1000);
 }
 
+// ---- OVDJE SMO PROŠIRILI FUNKCIJU: sada registrira i skok vremena ---------
+
 static void oznaciRTCPouzdanSaVremenom(const DateTime& referenca) {
+  // referenca je LOKALNO vrijeme koje sada smatramo točnim
+  registrirajSkokVremena(referenca);
+
   rtcPouzdan = true;
   fallbackAktivan = false;
   fallbackImaReferencu = true;
@@ -83,7 +114,9 @@ static void oznaciRTCPouzdanSaVremenom(const DateTime& referenca) {
 
 static void procitajIzvorVremena() {
   char spremljeniIzvor[MAKS_DULJINA_IZVORA] = {0};
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_IZVOR_VREMENA, EepromLayout::SLOTOVI_IZVOR_VREMENA, spremljeniIzvor)) {
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_IZVOR_VREMENA,
+                            EepromLayout::SLOTOVI_IZVOR_VREMENA,
+                            spremljeniIzvor)) {
     spremljeniIzvor[0] = '\0';
   } else {
     spremljeniIzvor[MAKS_DULJINA_IZVORA - 1] = '\0';
@@ -100,7 +133,9 @@ static void procitajIzvorVremena() {
 static void spremiIzvorVremena() {
   char spremi[MAKS_DULJINA_IZVORA] = {0};
   izvorVremena.toCharArray(spremi, MAKS_DULJINA_IZVORA);
-  WearLeveling::spremi(EepromLayout::BAZA_IZVOR_VREMENA, EepromLayout::SLOTOVI_IZVOR_VREMENA, spremi);
+  WearLeveling::spremi(EepromLayout::BAZA_IZVOR_VREMENA,
+                       EepromLayout::SLOTOVI_IZVOR_VREMENA,
+                       spremi);
 }
 
 void azurirajVrijemeIzNTP(const DateTime& dtUTC) {
@@ -124,6 +159,7 @@ void inicijalizirajRTC() {
       rtcPouzdan = false;
       aktivirajFallbackVrijeme();
     } else {
+      // Ovo je prvo pouzdano lokalno vrijeme iz RTC-a nakon boot-a
       oznaciRTCPouzdanSaVremenom(trenutno);
     }
   }
@@ -208,4 +244,20 @@ bool jeRTCPouzdan() {
 
 bool fallbackImaPouzdanuReferencu() {
   return fallbackImaReferencu;
+}
+
+// ---- JAVNI API za kazaljke/plocu (skok vremena) ---------------------------
+
+bool postojiSvjeziSkokVremena(unsigned long pragMs) {
+  if (!imaZadnjiSkok) return false;
+  unsigned long sada = millis();
+  return (sada - zadnjiSkokMillis) <= pragMs;
+}
+
+int dohvatiZadnjiSkokVremenaMinuta() {
+  return zadnjiSkokMinuta;
+}
+
+void ocistiZadnjiSkokVremena() {
+  imaZadnjiSkok = false;
 }

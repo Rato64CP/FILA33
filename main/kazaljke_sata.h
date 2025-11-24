@@ -14,4 +14,4 @@ void pomakniKazaljkeZa(int brojMinuta);
 bool suKazaljkeUSinkronu();
 int dohvatiMemoriraneKazaljkeMinuta();
 void oznaciKazaljkeKaoSinkronizirane();
-
+void obavijestiKazaljkeDSTPromjena(int pomakMinuta);

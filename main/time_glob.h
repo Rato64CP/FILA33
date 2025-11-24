@@ -14,3 +14,6 @@ char dohvatiOznakuDana();
 void oznaciPovratakNaRTC();
 bool jeRTCPouzdan();
 bool fallbackImaPouzdanuReferencu();
+bool postojiSvjeziSkokVremena(unsigned long pragMs);
+int  dohvatiZadnjiSkokVremenaMinuta();
+void ocistiZadnjiSkokVremena();
