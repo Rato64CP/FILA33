@@ -7,6 +7,7 @@
 #include "lcd_display.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
+#include "pc_serial.h"   // ➕ za logiranje na PC
 
 const unsigned long TRAJANJE_IMPULSA = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15;
@@ -66,7 +67,19 @@ void upravljajKazaljkama() {
   DateTime now = dohvatiTrenutnoVrijeme();
   int trenutnaMinuta = now.minute();
 
-  if (!impulsUTijeku && now.second() <= 1 && trenutnaMinuta != zadnjaAktiviranaMinuta) {
+  // STARI UVJET:
+  // if (!impulsUTijeku && now.second() <= 1 && trenutnaMinuta != zadnjaAktiviranaMinuta) {
+
+  // NOVI, ROBUSTNIJI UVJET:
+  if (!impulsUTijeku && trenutnaMinuta != zadnjaAktiviranaMinuta) {
+    // ➕ log za svaku novu minutu kad pokrećemo impuls
+    String log = F("Kazaljke: minutni impuls za minutu ");
+    log += trenutnaMinuta;
+    log += F(" (mem=");
+    log += memoriraneKazaljkeMinuta;
+    log += F(")");
+    posaljiPCLog(log);
+
     pokreniPrvuFazu();
     zadnjaAktiviranaMinuta = trenutnaMinuta;
   }

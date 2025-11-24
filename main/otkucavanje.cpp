@@ -3,6 +3,7 @@
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "postavke.h"
+#include "pc_serial.h"      // ➕ dodano za logiranje
 #include <Arduino.h>
 
 namespace {
@@ -62,13 +63,19 @@ void upravljajOtkucavanjem() {
     if (sada != zadnjeMjereneVrijeme) {
         zadnjeMjereneVrijeme = sada;
 
-        if (!blokadaOtkucavanja && aktivnoOtkucavanje == OTKUCAVANJE_NONE && !jeZvonoUTijeku() && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
+        if (!blokadaOtkucavanja && aktivnoOtkucavanje == OTKUCAVANJE_NONE &&
+            !jeZvonoUTijeku() && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
+
             if (sada.second() == 0 && jeUIntervalu(sada.hour())) {
                 if (sada.minute() == 0) {
                     int broj = sada.hour() % 12;
                     if (broj == 0) broj = 12;
+                    // ➕ log prije pokretanja otkucaja
+                    posaljiPCLog(String(F("Otkucavanje: puni sat, broj udaraca = ")) + broj);
                     otkucajSate(broj);
                 } else if (sada.minute() == 30) {
+                    // ➕ log za pol sata
+                    posaljiPCLog(F("Otkucavanje: pola sata, 1 udarac"));
                     otkucajPolasata();
                 }
             }
@@ -77,6 +84,7 @@ void upravljajOtkucavanjem() {
 
     if (blokadaOtkucavanja) {
         if (aktivnoOtkucavanje != OTKUCAVANJE_NONE) {
+            posaljiPCLog(F("Otkucavanje: prekinuto zbog blokade"));
             ponistiAktivnoOtkucavanje();
         }
         return;
@@ -120,8 +128,13 @@ void otkucajPolasata() {
 
 void postaviBlokaduOtkucavanja(bool blokiraj) {
     if (blokadaOtkucavanja == blokiraj) return;
+
     blokadaOtkucavanja = blokiraj;
+
     if (blokadaOtkucavanja) {
+        posaljiPCLog(F("Blokada otkucavanja: UKLJUČENA"));
         ponistiAktivnoOtkucavanje();
+    } else {
+        posaljiPCLog(F("Blokada otkucavanja: ISKLJUČENA"));
     }
 }

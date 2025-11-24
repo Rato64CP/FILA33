@@ -7,6 +7,7 @@
 #include "podesavanja_piny.h"
 #include "otkucavanje.h"
 #include "pc_serial.h"
+#include "kazaljke_sata.h"  // ➕ dodano za rad s kazaljkama
 
 // Uvijek koristi Serial3 (za Mega 2560 toranjski sat)
 static HardwareSerial &espSerijskiPort = Serial3;
@@ -36,12 +37,12 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
     if (!isDigit(iso.charAt(i))) return false;
   }
 
-  int godina = iso.substring(0, 4).toInt();
-  int mjesec = iso.substring(5, 7).toInt();
-  int dan    = iso.substring(8, 10).toInt();
-  int sat    = iso.substring(11, 13).toInt();
-  int minuta = iso.substring(14, 16).toInt();
-  int sekunda= iso.substring(17, 19).toInt();
+  int godina  = iso.substring(0, 4).toInt();
+  int mjesec  = iso.substring(5, 7).toInt();
+  int dan     = iso.substring(8, 10).toInt();
+  int sat     = iso.substring(11, 13).toInt();
+  int minuta  = iso.substring(14, 16).toInt();
+  int sekunda = iso.substring(17, 19).toInt();
 
   bool poljaIspravna =
       godina >= 2024 && mjesec >= 1 && mjesec <= 12 && dan >= 1 && dan <= 31 &&
@@ -72,6 +73,7 @@ void obradiESPSerijskuKomunikaciju() {
         continue;
       }
 
+      // NTP poruka
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         DateTime ntpVrijeme;
@@ -79,11 +81,23 @@ void obradiESPSerijskuKomunikaciju() {
           azurirajVrijemeIzNTP(ntpVrijeme);
           espSerijskiPort.println(F("ACK:NTP"));
           posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
+
+          // ➕ DODANO: provjera i kompenzacija kazaljki nakon nove NTP sinkronizacije
+          if (!suKazaljkeUSinkronu()) {
+            posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP – pokrećem kompenzaciju."));
+            kompenzirajKazaljke(false);
+            oznaciKazaljkeKaoSinkronizirane();
+            posaljiPCLog(F("Kompenzacija kazaljki dovršena nakon NTP sinkronizacije."));
+          } else {
+            posaljiPCLog(F("Kazaljke su već u sinkronu s vremenom nakon NTP."));
+          }
+
         } else {
           espSerijskiPort.println(F("ERR:NTP"));
           posaljiPCLog(String(F("Neispravan NTP format: ")) + iso);
         }
       }
+      // CMD poruka
       else if (ulazniBuffer.startsWith("CMD:")) {
         String komanda = ulazniBuffer.substring(4);
         bool uspjeh = true;
@@ -108,8 +122,8 @@ void obradiESPSerijskuKomunikaciju() {
           posaljiPCLog(String(F("Nepoznata CMD naredba: ")) + komanda);
         }
       }
+      // Ostale linije – samo log
       else {
-        // sve ostalo tretiramo kao običan log s ESP-a
         posaljiPCLog(String(F("ESP LOG: ")) + ulazniBuffer);
       }
 

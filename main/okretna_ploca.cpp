@@ -9,10 +9,11 @@
 #include "postavke.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
+#include "pc_serial.h"   // ➕ logiranje na PC
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
-const int MAKS_OFFSET_MINUTA = 14; // offset mora ostati u okviru 0-14 kako bi modulo provjera uspjela
+const int MAKS_OFFSET_MINUTA = 14;        // offset mora ostati u okviru 0-14 kako bi modulo provjera uspjela
 
 static unsigned long vrijemeStarta = 0;
 static bool ciklusUTijeku = false;
@@ -40,14 +41,16 @@ static unsigned long autoSlavljenjeKraj = 0;
 int pozicijaPloce = 0; // 0-63
 int offsetMinuta = 14; // podesivo u postavkama, 0–14
 
+// -------------------- POMOĆNE FUNKCIJE --------------------
+
 static int izracunajCiljnuPoziciju(const DateTime& now) {
   int ukupnoMinuta = now.hour() * 60 + now.minute();
-  int pocetak = 5 * 60 + offsetMinuta;
+  int pocetak = 5 * 60 + offsetMinuta;  // start u 5:offsetMinuta
   int diff = ukupnoMinuta - pocetak;
   if (diff < 0) return 0;
   int pozicija = diff / 15;
   if (pozicija > 63) pozicija = 63;
-  if (pozicija < 0) pozicija = 0;
+  if (pozicija < 0)  pozicija = 0;
   return pozicija;
 }
 
@@ -71,7 +74,13 @@ static void zavrsiCiklusPloce() {
   ciklusUTijeku = false;
   drugaFaza = false;
   pozicijaPloce = (pozicijaPloce + 1) % 64;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+
+  String log = F("Ploca: zavrsen jedan korak, nova pozicija=");
+  log += pozicijaPloce;
+  posaljiPCLog(log);
 }
 
 static void odradiJedanKorakPloceBlokirajuci() {
@@ -84,39 +93,65 @@ static void odradiJedanKorakPloceBlokirajuci() {
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   odradiPauzuSaLCD(400);
   pozicijaPloce = (pozicijaPloce + 1) % 64;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+
+  String log = F("Ploca (blokirajuci): odradjen korak, pozicija=");
+  log += pozicijaPloce;
+  posaljiPCLog(log);
 }
 
 static bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
   return static_cast<long>(sada - cilj) >= 0;
 }
 
+// -------------------- AUTO ZVONA / SLAVLJENJE --------------------
+
 static void azurirajAutomatskaZvonjenja(unsigned long sadaMs) {
+  // završetak auto zvona
   for (int i = 0; i < 2; ++i) {
     if (autoZvonoAktivno[i] && vrijemeProslo(sadaMs, autoZvonoKraj[i])) {
       deaktivirajZvonjenje(i + 1);
       autoZvonoAktivno[i] = false;
+      String log = F("Ploca auto-zvono: zvono ");
+      log += (i + 1);
+      log += F(" zaustavljeno");
+      posaljiPCLog(log);
     }
   }
 
+  // sinkronizacija stanja slavljenja
   if (autoSlavljenjeAktivno && !jeSlavljenjeUTijeku()) {
     autoSlavljenjeAktivno = false;
+    posaljiPCLog(F("Ploca auto-slavljenje: otkriveno da slavljenje vise ne traje (vanjski stop)."));
   }
 
+  // start zakazanog slavljenja
   if (autoSlavljenjeZakazano && vrijemeProslo(sadaMs, autoSlavljenjeStart)) {
     autoSlavljenjeZakazano = false;
     if (!jeSlavljenjeUTijeku()) {
       zapocniSlavljenje();
       autoSlavljenjeAktivno = true;
       autoSlavljenjeKraj = sadaMs + autoSlavljenjeTrajanje;
+
+      String log = F("Ploca auto-slavljenje: pokretanje zakazanog slavljenja, trajanje(ms)=");
+      log += autoSlavljenjeTrajanje;
+      posaljiPCLog(log);
     } else if (autoSlavljenjeAktivno) {
       autoSlavljenjeKraj = sadaMs + autoSlavljenjeTrajanje;
+
+      String log = F("Ploca auto-slavljenje: produzenje trajanja zbog vec aktivnog slavljenja, novo trajanje(ms)=");
+      log += autoSlavljenjeTrajanje;
+      posaljiPCLog(log);
     }
   }
 
+  // završetak slavljenja
   if (autoSlavljenjeAktivno && vrijemeProslo(sadaMs, autoSlavljenjeKraj)) {
     zaustaviSlavljenje();
     autoSlavljenjeAktivno = false;
+    posaljiPCLog(F("Ploca auto-slavljenje: zaustavljeno po isteku vremena."));
   }
 }
 
@@ -124,6 +159,11 @@ static void pokreniAutomatskoZvonjenje(int index, unsigned long sadaMs, unsigned
   if (index < 0 || index > 1) return;
   if (!autoZvonoAktivno[index]) {
     aktivirajZvonjenje(index + 1);
+    String log = F("Ploca auto-zvono: pokretanje zvona ");
+    log += (index + 1);
+    log += F(", trajanje(ms)=");
+    log += trajanjeMs;
+    posaljiPCLog(log);
   }
   autoZvonoAktivno[index] = true;
   autoZvonoKraj[index] = sadaMs + trajanjeMs;
@@ -133,6 +173,12 @@ static void zakaziSlavljenje(unsigned long startMs, unsigned long trajanjeMs) {
   autoSlavljenjeZakazano = true;
   autoSlavljenjeStart = startMs;
   autoSlavljenjeTrajanje = trajanjeMs;
+
+  String log = F("Ploca auto-slavljenje: zakazano odg adjeno slavljenje, startMs=");
+  log += startMs;
+  log += F(" trajanje(ms)=");
+  log += trajanjeMs;
+  posaljiPCLog(log);
 }
 
 static void pokreniSlavljenjeOdmah(unsigned long sadaMs, unsigned long trajanjeMs) {
@@ -142,24 +188,46 @@ static void pokreniSlavljenjeOdmah(unsigned long sadaMs, unsigned long trajanjeM
     autoSlavljenjeAktivno = true;
     autoSlavljenjeTrajanje = trajanjeMs;
     autoSlavljenjeKraj = sadaMs + trajanjeMs;
+
+    String log = F("Ploca auto-slavljenje: pokrenuto odmah, trajanje(ms)=");
+    log += trajanjeMs;
+    posaljiPCLog(log);
   } else if (autoSlavljenjeAktivno) {
     autoSlavljenjeTrajanje = trajanjeMs;
     autoSlavljenjeKraj = sadaMs + trajanjeMs;
+
+    String log = F("Ploca auto-slavljenje: vec aktivno, produzeno trajanje(ms)=");
+    log += trajanjeMs;
+    posaljiPCLog(log);
   }
 }
+
+// -------------------- OBRADA ULAZA PLOČE --------------------
 
 static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   bool ulaziAktivni[BROJ_ULAZA_PLOCE];
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
-    ulaziAktivni[i] = digitalRead(PIN_ULAZA_PLOCE[i]) == LOW;
+    ulaziAktivni[i] = (digitalRead(PIN_ULAZA_PLOCE[i]) == LOW);
   }
+
+  String dbg = F("Ploca ulazi: ");
+  for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
+    dbg += ulaziAktivni[i] ? '1' : '0';
+  }
+  dbg += F(" (sat=");
+  dbg += now.hour();
+  dbg += F(" min=");
+  dbg += now.minute();
+  dbg += F(")");
+  posaljiPCLog(dbg);
 
   bool jeNedjelja = now.dayOfTheWeek() == 0;
   bool pokreniZvono1 = jeNedjelja ? ulaziAktivni[2] : ulaziAktivni[0];
   bool pokreniZvono2 = jeNedjelja ? ulaziAktivni[3] : ulaziAktivni[1];
   bool pokreniSlavljenjePin = ulaziAktivni[4];
 
-  unsigned long trajanjeMs = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs() : dohvatiTrajanjeZvonjenjaRadniMs();
+  unsigned long trajanjeMs = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs()
+                                        : dohvatiTrajanjeZvonjenjaRadniMs();
   if (trajanjeMs == 0) {
     trajanjeMs = jeNedjelja ? 180000UL : 120000UL;
   }
@@ -193,6 +261,8 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   }
 }
 
+// -------------------- JAVNE FUNKCIJE --------------------
+
 void inicijalizirajPlocu() {
   pinMode(PIN_RELEJ_PARNE_PLOCE, OUTPUT);
   pinMode(PIN_RELEJ_NEPARNE_PLOCE, OUTPUT);
@@ -203,14 +273,21 @@ void inicijalizirajPlocu() {
     pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
   }
 
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce)) {
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_POZICIJA_PLOCE,
+                            EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                            pozicijaPloce)) {
     pozicijaPloce = 0;
   }
   if (pozicijaPloce < 0 || pozicijaPloce > 63) pozicijaPloce = 0;
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA, EepromLayout::SLOTOVI_OFFSET_MINUTA, offsetMinuta)) {
+
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA,
+                            EepromLayout::SLOTOVI_OFFSET_MINUTA,
+                            offsetMinuta)) {
     offsetMinuta = MAKS_OFFSET_MINUTA;
   }
-  if (offsetMinuta < 0 || offsetMinuta > MAKS_OFFSET_MINUTA) offsetMinuta = MAKS_OFFSET_MINUTA;
+  if (offsetMinuta < 0 || offsetMinuta > MAKS_OFFSET_MINUTA) {
+    offsetMinuta = MAKS_OFFSET_MINUTA;
+  }
 
   vrijemeStarta = 0;
   ciklusUTijeku = false;
@@ -226,6 +303,12 @@ void inicijalizirajPlocu() {
   autoSlavljenjeTrajanje = 0;
   autoSlavljenjeAktivno = false;
   autoSlavljenjeKraj = 0;
+
+  String log = F("Ploca init: pozicija=");
+  log += pozicijaPloce;
+  log += F(" offsetMin=");
+  log += offsetMinuta;
+  posaljiPCLog(log);
 }
 
 void upravljajPlocom() {
@@ -234,10 +317,12 @@ void upravljajPlocom() {
 
   azurirajAutomatskaZvonjenja(sadaMs);
 
+  // svakih 15 min, nakon 30. sekunde, očitaj ploču (čavle)
   if (now.minute() % 15 == 0 && now.second() >= 30) {
     int slot = now.hour() * 4 + (now.minute() / 15);
     if (slot != zadnjiSlotUlaza) {
       zadnjiSlotUlaza = slot;
+      posaljiPCLog(String(F("Ploca: obrada ulaza za slot=")) + slot);
       obradiUlazePloce(now, sadaMs);
     }
   }
@@ -248,8 +333,27 @@ void upravljajPlocom() {
   int razlika = cilj - pozicijaPloce;
   if (razlika < 0) razlika += 64;
 
-  bool trebaPokrenuti = (!ciklusUTijeku && now.second() <= 1 && minuta != zadnjaAktiviranaMinuta && (minuta % 15 == offsetMinuta) && razlika > 0);
+  // STARI UVJET je imao now.second() <= 1, što je bilo nesigurno
+  // NOVI, ROBUSTNIJI UVJET: reagiramo na novu minutu s odgovarajućim offsetom
+  bool trebaPokrenuti =
+      (!ciklusUTijeku &&
+       minuta != zadnjaAktiviranaMinuta &&
+       (minuta % 15 == offsetMinuta) &&
+       razlika > 0);
+
   if (trebaPokrenuti) {
+    String log = F("Ploca: pokretanje koraka – sat=");
+    log += now.hour();
+    log += F(" min=");
+    log += minuta;
+    log += F(" pozicija=");
+    log += pozicijaPloce;
+    log += F(" cilj=");
+    log += cilj;
+    log += F(" razlika=");
+    log += razlika;
+    posaljiPCLog(log);
+
     pokreniPrvuFazuPloce();
     zadnjaAktiviranaMinuta = minuta;
   }
@@ -262,6 +366,7 @@ void upravljajPlocom() {
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
     vrijemeStarta = millis();
     drugaFaza = true;
+    posaljiPCLog(F("Ploca: faza 2 koraka (druga polovica okreta)."));
   } else if (drugaFaza && proteklo >= POLA_OKRETA_MS) {
     zavrsiCiklusPloce();
   }
@@ -269,13 +374,26 @@ void upravljajPlocom() {
 
 void postaviTrenutniPolozajPloce(int pozicija) {
   pozicijaPloce = constrain(pozicija, 0, 63);
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+
   zadnjaAktiviranaMinuta = -1; // dopusti odmah ručnu korekciju ako je potrebno
+
+  String log = F("Ploca: rucno postavljena pozicija=");
+  log += pozicijaPloce;
+  posaljiPCLog(log);
 }
 
 void postaviOffsetMinuta(int offset) {
   offsetMinuta = constrain(offset, 0, MAKS_OFFSET_MINUTA);
-  WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA, EepromLayout::SLOTOVI_OFFSET_MINUTA, offsetMinuta);
+  WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA,
+                       EepromLayout::SLOTOVI_OFFSET_MINUTA,
+                       offsetMinuta);
+
+  String log = F("Ploca: postavljen offsetMinuta=");
+  log += offsetMinuta;
+  posaljiPCLog(log);
 }
 
 int dohvatiPozicijuPloce() {
@@ -288,7 +406,8 @@ int dohvatiOffsetMinuta() {
 
 bool jePlocaUSinkronu() {
   DateTime now = dohvatiTrenutnoVrijeme();
-  return pozicijaPloce == izracunajCiljnuPoziciju(now);
+  bool sink = (pozicijaPloce == izracunajCiljnuPoziciju(now));
+  return sink;
 }
 
 void kompenzirajPlocu(bool pametniMod) {
@@ -296,12 +415,26 @@ void kompenzirajPlocu(bool pametniMod) {
   int ciljPozicija = izracunajCiljnuPoziciju(now);
   int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
 
-  if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) return; // čekaj sljedeći impuls ako je blizu
+  String log = F("Ploca kompenzacija: poz=");
+  log += pozicijaPloce;
+  log += F(" cilj=");
+  log += ciljPozicija;
+  log += F(" razlika=");
+  log += razlika;
+  log += F(" pametniMod=");
+  log += pametniMod ? '1' : '0';
+  posaljiPCLog(log);
+
+  if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) {
+    posaljiPCLog(F("Ploca kompenzacija: pametniMod aktivan, razlika mala – cekam prirodno dovodenje."));
+    return; // čekaj sljedeći impuls ako je blizu
+  }
 
   if (razlika == 0) {
     zadnjaAktiviranaMinuta = now.minute();
     ciklusUTijeku = false;
     drugaFaza = false;
+    posaljiPCLog(F("Ploca kompenzacija: vec u sinkronu, nema rotacije."));
     return;
   }
 
@@ -310,14 +443,21 @@ void kompenzirajPlocu(bool pametniMod) {
   }
 
   pozicijaPloce = ciljPozicija;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE, EepromLayout::SLOTOVI_POZICIJA_PLOCE, pozicijaPloce);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
 
   zadnjaAktiviranaMinuta = now.minute();
   ciklusUTijeku = false;
   drugaFaza = false;
+
+  log = F("Ploca kompenzacija: zavrsena, nova pozicija=");
+  log += pozicijaPloce;
+  posaljiPCLog(log);
 }
 
 void oznaciPlocuKaoSinkroniziranu() {
   DateTime now = dohvatiTrenutnoVrijeme();
   zadnjaAktiviranaMinuta = now.minute();
+  posaljiPCLog(F("Ploca: oznacena kao sinkronizirana."));
 }
