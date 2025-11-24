@@ -88,6 +88,8 @@ void setup() {
   inicijalizirajWatchdog();
 
   prikaziPocetneInformacije();
+  // Pošalji početni pregled stanja na PC serijski port radi lakšeg nadzora
+  posaljiPocetniPregledNaPC();
   osvjeziWatchdog();
 
   bool trebaKazaljke = !suKazaljkeUSinkronu();
