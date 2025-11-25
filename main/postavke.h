@@ -7,6 +7,8 @@ void spremiPostavke();
 
 extern int satOd;
 extern int satDo;
+extern int plocaPocetakMinuta;
+extern int plocaKrajMinuta;
 extern unsigned int pauzaIzmeduUdaraca;
 extern unsigned int trajanjeImpulsaCekicaMs;
 extern unsigned long trajanjeZvonjenjaRadniMs;
@@ -21,6 +23,9 @@ unsigned long dohvatiTrajanjeZvonjenjaRadniMs();
 unsigned long dohvatiTrajanjeZvonjenjaNedjeljaMs();
 unsigned long dohvatiTrajanjeSlavljenjaMs();
 uint8_t dohvatiBrojZvona();
+int dohvatiPocetakPloceMinute();
+int dohvatiKrajPloceMinute();
+bool jePlocaKonfigurirana();
 
 void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs);
 void postaviRasponOtkucavanja(int odSat, int doSat);
@@ -28,3 +33,4 @@ void postaviTrajanjeZvonjenjaRadni(unsigned long trajanjeMs);
 void postaviTrajanjeZvonjenjaNedjelja(unsigned long trajanjeMs);
 void postaviTrajanjeSlavljenja(unsigned long trajanjeMs);
 void postaviBrojZvona(uint8_t broj);
+void postaviRasponPloce(int pocetakMinuta, int krajMinuta);

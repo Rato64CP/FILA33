@@ -28,6 +28,8 @@ constexpr int BAZA_ZADNJA_SINKRONIZACIJA = BAZA_IZVOR_VREMENA + WearLeveling::ve
 struct PostavkeSpremnik {
   int satOd;
   int satDo;
+  int plocaPocetakMinuta;
+  int plocaKrajMinuta;
   unsigned int trajanjeImpulsaCekicaMs;
   unsigned int pauzaIzmeduUdaraca;
   unsigned long trajanjeZvonjenjaRadniMs;

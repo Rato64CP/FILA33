@@ -6,6 +6,8 @@
 namespace {
 const int SAT_OD_DEFAULT = 6;
 const int SAT_DO_DEFAULT = 22;
+const int PLOCA_POCETAK_DEFAULT = 4 * 60 + 59;  // 04:59
+const int PLOCA_KRAJ_DEFAULT = 20 * 60 + 44;     // 20:44
 const unsigned int TRAJANJE_CEKIC_DEFAULT = 150;
 const unsigned int PAUZA_UDARCI_DEFAULT = 850;
 const unsigned long TRAJANJE_ZVONJENJA_RADNI_DEFAULT = 120000UL; // 2 minute
@@ -17,6 +19,8 @@ EepromLayout::PostavkeSpremnik napraviSpremnik() {
     EepromLayout::PostavkeSpremnik spremnik{};
     spremnik.satOd = satOd;
     spremnik.satDo = satDo;
+    spremnik.plocaPocetakMinuta = plocaPocetakMinuta;
+    spremnik.plocaKrajMinuta = plocaKrajMinuta;
     spremnik.trajanjeImpulsaCekicaMs = trajanjeImpulsaCekicaMs;
     spremnik.pauzaIzmeduUdaraca = pauzaIzmeduUdaraca;
     spremnik.trajanjeZvonjenjaRadniMs = trajanjeZvonjenjaRadniMs;
@@ -29,6 +33,8 @@ EepromLayout::PostavkeSpremnik napraviSpremnik() {
 void primijeniSpremnik(const EepromLayout::PostavkeSpremnik& spremnik) {
     satOd = spremnik.satOd;
     satDo = spremnik.satDo;
+    plocaPocetakMinuta = spremnik.plocaPocetakMinuta;
+    plocaKrajMinuta = spremnik.plocaKrajMinuta;
     trajanjeImpulsaCekicaMs = spremnik.trajanjeImpulsaCekicaMs;
     pauzaIzmeduUdaraca = spremnik.pauzaIzmeduUdaraca;
     trajanjeZvonjenjaRadniMs = spremnik.trajanjeZvonjenjaRadniMs;
@@ -40,6 +46,8 @@ void primijeniSpremnik(const EepromLayout::PostavkeSpremnik& spremnik) {
 
 int satOd = SAT_OD_DEFAULT;
 int satDo = SAT_DO_DEFAULT;
+int plocaPocetakMinuta = PLOCA_POCETAK_DEFAULT;
+int plocaKrajMinuta = PLOCA_KRAJ_DEFAULT;
 unsigned int pauzaIzmeduUdaraca = PAUZA_UDARCI_DEFAULT;
 unsigned int trajanjeImpulsaCekicaMs = TRAJANJE_CEKIC_DEFAULT;
 unsigned long trajanjeZvonjenjaRadniMs = TRAJANJE_ZVONJENJA_RADNI_DEFAULT;
@@ -50,6 +58,21 @@ uint8_t brojZvona = BROJ_ZVONA_DEFAULT;
 static void provjeriRasponSati() {
     if (satOd < 0 || satOd > 23) satOd = SAT_OD_DEFAULT;
     if (satDo < 0 || satDo > 23) satDo = SAT_DO_DEFAULT;
+}
+
+static void provjeriRasponPloce() {
+    auto ogranicenaMinuta = [](int vrijednost) {
+        if (vrijednost < 0 || vrijednost > 1439) return -1;
+        return vrijednost;
+    };
+
+    plocaPocetakMinuta = ogranicenaMinuta(plocaPocetakMinuta);
+    plocaKrajMinuta = ogranicenaMinuta(plocaKrajMinuta);
+
+    if (plocaPocetakMinuta == -1 || plocaKrajMinuta == -1) {
+        plocaPocetakMinuta = PLOCA_POCETAK_DEFAULT;
+        plocaKrajMinuta = PLOCA_KRAJ_DEFAULT;
+    }
 }
 
 static void provjeriRasponTrajanja() {
@@ -85,6 +108,7 @@ void ucitajPostavke() {
         primijeniSpremnik(spremnik);
     }
     provjeriRasponSati();
+    provjeriRasponPloce();
     provjeriRasponTrajanja();
     provjeriRasponZvonjenja();
     provjeriRasponZvona();
@@ -92,6 +116,7 @@ void ucitajPostavke() {
 
 void spremiPostavke() {
     provjeriRasponSati();
+    provjeriRasponPloce();
     provjeriRasponTrajanja();
     provjeriRasponZvonjenja();
     EepromLayout::PostavkeSpremnik spremnik = napraviSpremnik();
@@ -139,6 +164,21 @@ uint8_t dohvatiBrojZvona() {
     return brojZvona;
 }
 
+int dohvatiPocetakPloceMinute() {
+    provjeriRasponPloce();
+    return plocaPocetakMinuta;
+}
+
+int dohvatiKrajPloceMinute() {
+    provjeriRasponPloce();
+    return plocaKrajMinuta;
+}
+
+bool jePlocaKonfigurirana() {
+    provjeriRasponPloce();
+    return !(plocaPocetakMinuta == 0 && plocaKrajMinuta == 0);
+}
+
 void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs) {
     trajanjeImpulsaCekicaMs = constrain(trajanjeMs, 50U, 2000U);
     spremiPostavke();
@@ -167,5 +207,11 @@ void postaviTrajanjeSlavljenja(unsigned long trajanjeMs) {
 
 void postaviBrojZvona(uint8_t broj) {
     brojZvona = constrain(broj, static_cast<uint8_t>(1), static_cast<uint8_t>(5));
+    spremiPostavke();
+}
+
+void postaviRasponPloce(int pocetakMinuta, int krajMinuta) {
+    plocaPocetakMinuta = constrain(pocetakMinuta, 0, 1439);
+    plocaKrajMinuta = constrain(krajMinuta, 0, 1439);
     spremiPostavke();
 }

@@ -14,6 +14,7 @@
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
 const int MAKS_OFFSET_MINUTA = 14;        // offset mora ostati u okviru 0-14 kako bi modulo provjera uspjela
+const int MINUTA_U_DANU = 24 * 60;
 
 static unsigned long vrijemeStarta = 0;
 static bool ciklusUTijeku = false;
@@ -37,6 +38,7 @@ static unsigned long autoSlavljenjeStart = 0;
 static unsigned long autoSlavljenjeTrajanje = 0;
 static bool autoSlavljenjeAktivno = false;
 static unsigned long autoSlavljenjeKraj = 0;
+static bool plocaAktivnaRanije = true;
 
 int pozicijaPloce = 0; // 0-63
 int offsetMinuta = 14; // podesivo u postavkama, 0–14
@@ -44,14 +46,31 @@ int offsetMinuta = 14; // podesivo u postavkama, 0–14
 // -------------------- POMOĆNE FUNKCIJE --------------------
 
 static int izracunajCiljnuPoziciju(const DateTime& now) {
+  if (!jePlocaKonfigurirana()) return pozicijaPloce;
   int ukupnoMinuta = now.hour() * 60 + now.minute();
-  int pocetak = 5 * 60 + offsetMinuta;  // start u 5:offsetMinuta
+  int pocetak = (dohvatiPocetakPloceMinute() + offsetMinuta) % MINUTA_U_DANU;
   int diff = ukupnoMinuta - pocetak;
-  if (diff < 0) return 0;
+  if (diff < 0) diff += MINUTA_U_DANU;
   int pozicija = diff / 15;
   if (pozicija > 63) pozicija = 63;
   if (pozicija < 0)  pozicija = 0;
   return pozicija;
+}
+
+static bool jeVrijemeUPlocnomIntervalu(const DateTime& now) {
+  if (!jePlocaKonfigurirana()) return false;
+
+  int minutaDana = now.hour() * 60 + now.minute();
+  int pocetak = dohvatiPocetakPloceMinute();
+  int kraj = dohvatiKrajPloceMinute();
+
+  if (pocetak == kraj) return true; // puni dan osim ako je oba nula (pokrito je gore)
+
+  if (pocetak < kraj) {
+    return minutaDana >= pocetak && minutaDana <= kraj;
+  }
+
+  return minutaDana >= pocetak || minutaDana <= kraj;
 }
 
 static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija) {
@@ -317,6 +336,27 @@ void upravljajPlocom() {
 
   azurirajAutomatskaZvonjenja(sadaMs);
 
+  bool plocaAktivna = jeVrijemeUPlocnomIntervalu(now);
+  if (!plocaAktivna) {
+    if (ciklusUTijeku) {
+      digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+      digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+      ciklusUTijeku = false;
+      drugaFaza = false;
+      posaljiPCLog(F("Ploca: zaustavljena jer je izvan dozvoljenog termina."));
+    } else if (plocaAktivnaRanije) {
+      posaljiPCLog(F("Ploca: onemogucena (raspon 00:00-00:00) ili izvan zadanog intervala."));
+    }
+    plocaAktivnaRanije = false;
+    zadnjiSlotUlaza = -1;
+    return;
+  }
+
+  if (!plocaAktivnaRanije) {
+    posaljiPCLog(F("Ploca: ponovno aktivna u dozvoljenom intervalu."));
+  }
+  plocaAktivnaRanije = true;
+
   // svakih 15 min, nakon 30. sekunde, očitaj ploču (čavle)
   if (now.minute() % 15 == 0 && now.second() >= 30) {
     int slot = now.hour() * 4 + (now.minute() / 15);
@@ -405,12 +445,17 @@ int dohvatiOffsetMinuta() {
 }
 
 bool jePlocaUSinkronu() {
+  if (!jePlocaKonfigurirana()) return true;
   DateTime now = dohvatiTrenutnoVrijeme();
   bool sink = (pozicijaPloce == izracunajCiljnuPoziciju(now));
   return sink;
 }
 
 void kompenzirajPlocu(bool pametniMod) {
+  if (!jePlocaKonfigurirana()) {
+    posaljiPCLog(F("Ploca kompenzacija: ploca onemogucena postavkama."));
+    return;
+  }
   DateTime now = dohvatiTrenutnoVrijeme();
   int ciljPozicija = izracunajCiljnuPoziciju(now);
   int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
