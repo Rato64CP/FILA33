@@ -38,7 +38,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - LCD 2x16 s I2C adapterom (vizualne informacije u ormaru)
 - ULN2803 i optokapleri (izolacija i pogon toranjskih releja)
 - Relejna pločica 5 V (kazaljke, okretna ploča, zvona)
-- Tipkovnica: 6 tipki (GORE, DOLJE, LIJEVO, DESNO, DA, NE)
+- Tipkovnica: 4x4 matricna tipkovnica (0–9, *, #, A–D) s držanjem tipke `0` za ulazak u servisni izbornik
 - ESP-01 / ESP-12 (NTP i udaljene naredbe)
 - Napajanje: 5 V / 10 A SMPS + spuštanje na 3.3 V za ESP
 
@@ -66,7 +66,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - **Ulazi okretne ploče**
   - PIN_PLOCA_ULAZ_1–5 (D30–D34) koriste interno povlačenje i čitaju reed sklopke / čavle koji najavljuju raspored zvona i slavljenja.【F:src/podesavanja_piny.h†L15-L20】
 - **Tipkovnica**
-  - PIN_TIPKA_GORE–PIN_TIPKA_NE (D40–D45) se povezuju na tipke prema masi; aktiviraj `INPUT_PULLUP` u `tipke` modulu kako bi toranjski tehničar mogao upravljati postavkama bez vanjskih otpornika.【F:src/podesavanja_piny.h†L22-L28】
+  - PIN_TIPKOVNICA_RED1–PIN_TIPKOVNICA_RED4 (D40–D43) nose redove, a PIN_TIPKOVNICA_STUPAC1–PIN_TIPKOVNICA_STUPAC4 (D44–D47) stupce 4x4 tipkovnice; `tipke` modul koristi `Keypad` biblioteku i čeka držanje tipke `0` dvije sekunde za ulazak u izbornik, dok tipke B/C navigiraju, A potvrđuje, a D izlazi iz postavki toranjskog sata.【F:src/podesavanja_piny.h†L22-L29】【F:src/tipke.cpp†L17-L108】【F:src/tipke.cpp†L747-L787】
 - **Zvonjenja i čekići**
   - PIN_ZVONO_MUSKO (D4) i PIN_ZVONO_ZENSKO (D5) vode zavojnice zvona, dok PIN_CEKIC_MUSKI (D12) i PIN_CEKIC_ZENSKI (D3) upravljaju čekićima preko releja ili SSR-a.【F:src/podesavanja_piny.h†L30-L39】
 - **Slavljenje i eksterni signali**

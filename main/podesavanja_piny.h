@@ -19,13 +19,15 @@
 #define PIN_PLOCA_ULAZ_4           33
 #define PIN_PLOCA_ULAZ_5           34
 
-// Tipkovnica (6 tipki s internim pull-upom)
-#define PIN_TIPKA_GORE              40
-#define PIN_TIPKA_DOLJE             41
-#define PIN_TIPKA_LIJEVO            42
-#define PIN_TIPKA_DESNO             43
-#define PIN_TIPKA_DA                44
-#define PIN_TIPKA_NE                45
+// Tipkovnica (4x4 matrica, redovi i stupci)
+#define PIN_TIPKOVNICA_RED1         40
+#define PIN_TIPKOVNICA_RED2         41
+#define PIN_TIPKOVNICA_RED3         42
+#define PIN_TIPKOVNICA_RED4         43
+#define PIN_TIPKOVNICA_STUPAC1      44
+#define PIN_TIPKOVNICA_STUPAC2      45
+#define PIN_TIPKOVNICA_STUPAC3      46
+#define PIN_TIPKOVNICA_STUPAC4      47
 
 // Čekići
 #define PIN_CEKIC_MUSKI             12
