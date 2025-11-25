@@ -81,6 +81,7 @@ void setup() {
   ucitajPostavke();
   inicijalizirajTipke();
   inicijalizirajESP();
+  posaljiWifiPostavkeESP();
   inicijalizirajZvona();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
