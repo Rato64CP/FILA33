@@ -3,7 +3,6 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <RTClib.h>
-// #include <cstring>      // ovo makni
 #include <string.h>        // za strncpy, strncmp
 #include <stdio.h>         // za snprintf
 #include "time_glob.h"

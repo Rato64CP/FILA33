@@ -9,7 +9,7 @@
 #include "postavke.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
-#include "pc_serial.h"   // ➕ logiranje na PC
+#include "pc_serial.h"   
 
 const unsigned long POLA_OKRETA_MS = 6000UL;
 const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
