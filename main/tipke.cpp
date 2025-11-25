@@ -12,6 +12,7 @@
 #include "time_glob.h"
 #include "kazaljke_sata.h"
 #include "postavke.h"
+#include "esp_serial.h"
 
 namespace {
 
@@ -344,6 +345,7 @@ void zapocniUredjivanjeTrenutnogEkrana() {
 
 void spremiPromjene() {
     // Spremi potvrđene vrijednosti natrag u odgovarajuće module toranjskog sustava
+    bool mrezaPromijenjena = false;
     switch (aktivniEkran) {
         case EKRAN_KAZALJKE:
             postaviTrenutniPolozajKazaljki(privKazaljkeMinuta);
@@ -380,22 +382,31 @@ void spremiPromjene() {
             break;
         case EKRAN_WIFI_SSID:
             postaviWifiSsid(privWifiSsid);
+            mrezaPromijenjena = true;
             break;
         case EKRAN_WIFI_LOZINKA:
             postaviWifiLozinku(privWifiLozinka);
+            mrezaPromijenjena = true;
             break;
         case EKRAN_MREZA_DHCP:
             postaviDhcp(privDhcp);
+            mrezaPromijenjena = true;
             break;
         case EKRAN_MREZA_IP:
             postaviStatickuIP(privStatickaIp);
+            mrezaPromijenjena = true;
             break;
         case EKRAN_MREZA_MASKA:
             postaviMreznuMasku(privMreznaMaska);
+            mrezaPromijenjena = true;
             break;
         case EKRAN_MREZA_GATEWAY:
             postaviZadaniGateway(privGateway);
+            mrezaPromijenjena = true;
             break;
+    }
+    if (mrezaPromijenjena) {
+        posaljiWifiPostavkeESP();
     }
     resetirajUredjivanje();
 }
