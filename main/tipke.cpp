@@ -18,6 +18,10 @@ constexpr unsigned long DEBOUNCE_MS = 40UL;
 constexpr unsigned int DOZVOLJENA_TRAJANJA_CEKICA[] = {100U, 200U, 500U, 1000U};
 constexpr size_t BROJ_TRAJANJA_CEKICA = sizeof(DOZVOLJENA_TRAJANJA_CEKICA) / sizeof(DOZVOLJENA_TRAJANJA_CEKICA[0]);
 constexpr int MINUTA_DAN = 24 * 60;
+constexpr size_t IPV4_DULJINA = 15;
+constexpr char DOZVOLJENI_ZNAKOVI[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_";
+constexpr size_t BROJ_DOZVOLJENIH_ZNAKOVA = sizeof(DOZVOLJENI_ZNAKOVI) - 1;
+constexpr char IPV4_PREDLOZAK[] = "000.000.000.000";
 
 enum TipkaIndex : uint8_t {
     TIPKA_GORE = 0,
@@ -52,6 +56,13 @@ enum PostavkeEkran : uint8_t {
     EKRAN_SLAVLJENJE,
     EKRAN_BROJ_ZVONA,
     EKRAN_PLOCA_RASPON,
+    EKRAN_PRISTUP_LOZINKA,
+    EKRAN_WIFI_SSID,
+    EKRAN_WIFI_LOZINKA,
+    EKRAN_MREZA_DHCP,
+    EKRAN_MREZA_IP,
+    EKRAN_MREZA_MASKA,
+    EKRAN_MREZA_GATEWAY,
     EKRAN_BROJ
 };
 
@@ -72,6 +83,15 @@ unsigned long privSlavljenje = 0;
 uint8_t privBrojZvona = 0;
 int privPlocaPocetak = 0;
 int privPlocaKraj = 0;
+char privPristupLozinka[9];
+char privWifiSsid[33];
+char privWifiLozinka[33];
+bool privDhcp = true;
+char privStatickaIp[16];
+char privMreznaMaska[16];
+char privGateway[16];
+uint8_t kursorTekst = 0;
+uint8_t kursorIPv4 = 0;
 
 char prikazRedak1[17];
 char prikazRedak2[17];
@@ -109,9 +129,92 @@ unsigned int normalizirajTrajanjeCekica(unsigned int vrijednost) {
     return najblize;
 }
 
+void kopirajTekstPolje(const char* izvor, char* odrediste, size_t velicina) {
+    memset(odrediste, 0, velicina);
+    strncpy(odrediste, izvor, velicina - 1);
+}
+
+char promijeniZnak(char trenutni, int pomak) {
+    size_t indeks = 0;
+    for (; indeks < BROJ_DOZVOLJENIH_ZNAKOVA; ++indeks) {
+        if (DOZVOLJENI_ZNAKOVI[indeks] == trenutni) {
+            break;
+        }
+    }
+    if (indeks == BROJ_DOZVOLJENIH_ZNAKOVA) indeks = 0;
+    indeks = (indeks + BROJ_DOZVOLJENIH_ZNAKOVA + pomak) % BROJ_DOZVOLJENIH_ZNAKOVA;
+    return DOZVOLJENI_ZNAKOVI[indeks];
+}
+
+void azurirajTekstualnoPoljeNaTipkama(char* polje, size_t maxVelicina, bool lijevo, bool desno, bool gore, bool dolje) {
+    if (!uEditModu) return;
+    size_t duljina = maxVelicina - 1;
+    if (lijevo) {
+        kursorTekst = (kursorTekst + duljina - 1) % duljina;
+    }
+    if (desno) {
+        kursorTekst = (kursorTekst + 1) % duljina;
+    }
+    if (gore) {
+        polje[kursorTekst] = promijeniZnak(polje[kursorTekst], -1);
+    }
+    if (dolje) {
+        polje[kursorTekst] = promijeniZnak(polje[kursorTekst], 1);
+    }
+    polje[duljina] = '\0';
+}
+
+void osigurajIPv4Predlozak(char* polje) {
+    if (strlen(polje) != IPV4_DULJINA) {
+        strncpy(polje, IPV4_PREDLOZAK, IPV4_DULJINA);
+        polje[IPV4_DULJINA] = '\0';
+    }
+    for (size_t i = 0; i < IPV4_DULJINA; ++i) {
+        if (IPV4_PREDLOZAK[i] == '.') {
+            polje[i] = '.';
+        } else if (polje[i] < '0' || polje[i] > '9') {
+            polje[i] = '0';
+        }
+    }
+    polje[IPV4_DULJINA] = '\0';
+}
+
+void pomakniIPv4Kursor(int pomak) {
+    do {
+        kursorIPv4 = (kursorIPv4 + IPV4_DULJINA + pomak) % IPV4_DULJINA;
+    } while (IPV4_PREDLOZAK[kursorIPv4] == '.');
+}
+
+void azurirajIPv4NaTipkama(char* polje, bool lijevo, bool desno, bool gore, bool dolje) {
+    if (!uEditModu) return;
+    if (lijevo) {
+        pomakniIPv4Kursor(-1);
+    }
+    if (desno) {
+        pomakniIPv4Kursor(1);
+    }
+    if (gore || dolje) {
+        if (polje[kursorIPv4] < '0' || polje[kursorIPv4] > '9') polje[kursorIPv4] = '0';
+        int smjer = gore ? -1 : 1;
+        int vrijednost = polje[kursorIPv4] - '0';
+        vrijednost = (vrijednost + 10 + smjer) % 10;
+        polje[kursorIPv4] = static_cast<char>('0' + vrijednost);
+    }
+    polje[IPV4_DULJINA] = '\0';
+}
+
+void azurirajDhcpNaTipkama(bool lijevo, bool desno, bool gore, bool dolje) {
+    if (!uEditModu) return;
+    if (lijevo || desno || gore || dolje) {
+        privDhcp = !privDhcp;
+    }
+}
+
 void resetirajUredjivanje() {
     uEditModu = false;
     sekundarnoPolje = false;
+    kursorTekst = 0;
+    kursorIPv4 = 0;
 }
 
 void aktivirajPostavke() {
@@ -166,6 +269,36 @@ void zapocniUredjivanjeTrenutnogEkrana() {
             privPlocaKraj = dohvatiKrajPloceMinute();
             sekundarnoPolje = false;
             break;
+        case EKRAN_PRISTUP_LOZINKA:
+            kopirajTekstPolje(dohvatiPristupnuLozinku(), privPristupLozinka, sizeof(privPristupLozinka));
+            kursorTekst = 0;
+            break;
+        case EKRAN_WIFI_SSID:
+            kopirajTekstPolje(dohvatiWifiSsid(), privWifiSsid, sizeof(privWifiSsid));
+            kursorTekst = 0;
+            break;
+        case EKRAN_WIFI_LOZINKA:
+            kopirajTekstPolje(dohvatiWifiLozinku(), privWifiLozinka, sizeof(privWifiLozinka));
+            kursorTekst = 0;
+            break;
+        case EKRAN_MREZA_DHCP:
+            privDhcp = koristiDhcpMreza();
+            break;
+        case EKRAN_MREZA_IP:
+            kopirajTekstPolje(dohvatiStatickuIP(), privStatickaIp, sizeof(privStatickaIp));
+            osigurajIPv4Predlozak(privStatickaIp);
+            kursorIPv4 = 0;
+            break;
+        case EKRAN_MREZA_MASKA:
+            kopirajTekstPolje(dohvatiMreznuMasku(), privMreznaMaska, sizeof(privMreznaMaska));
+            osigurajIPv4Predlozak(privMreznaMaska);
+            kursorIPv4 = 0;
+            break;
+        case EKRAN_MREZA_GATEWAY:
+            kopirajTekstPolje(dohvatiZadaniGateway(), privGateway, sizeof(privGateway));
+            osigurajIPv4Predlozak(privGateway);
+            kursorIPv4 = 0;
+            break;
     }
     uEditModu = true;
 }
@@ -202,6 +335,27 @@ void spremiPromjene() {
             break;
         case EKRAN_PLOCA_RASPON:
             postaviRasponPloce(privPlocaPocetak, privPlocaKraj);
+            break;
+        case EKRAN_PRISTUP_LOZINKA:
+            postaviPristupnuLozinku(privPristupLozinka);
+            break;
+        case EKRAN_WIFI_SSID:
+            postaviWifiSsid(privWifiSsid);
+            break;
+        case EKRAN_WIFI_LOZINKA:
+            postaviWifiLozinku(privWifiLozinka);
+            break;
+        case EKRAN_MREZA_DHCP:
+            postaviDhcp(privDhcp);
+            break;
+        case EKRAN_MREZA_IP:
+            postaviStatickuIP(privStatickaIp);
+            break;
+        case EKRAN_MREZA_MASKA:
+            postaviMreznuMasku(privMreznaMaska);
+            break;
+        case EKRAN_MREZA_GATEWAY:
+            postaviZadaniGateway(privGateway);
             break;
     }
     resetirajUredjivanje();
@@ -469,6 +623,93 @@ void pripremiPrikaz() {
             }
             break;
         }
+        case EKRAN_PRISTUP_LOZINKA: {
+            const char* lozinka = uEditModu ? privPristupLozinka : dohvatiPristupnuLozinku();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "Pristup %.8s", lozinka);
+            if (uEditModu) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D zn");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+            }
+            break;
+        }
+        case EKRAN_WIFI_SSID: {
+            const char* ssid = uEditModu ? privWifiSsid : dohvatiWifiSsid();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "SSID %.10s", ssid);
+            if (uEditModu) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D zn");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+            }
+            break;
+        }
+        case EKRAN_WIFI_LOZINKA: {
+            const char* lozinka = uEditModu ? privWifiLozinka : dohvatiWifiLozinku();
+            char prikazLozinke[11];
+            strncpy(prikazLozinke, lozinka, sizeof(prikazLozinke) - 1);
+            prikazLozinke[sizeof(prikazLozinke) - 1] = '\0';
+            if (!uEditModu) {
+                for (size_t i = 0; i < strlen(prikazLozinke); ++i) {
+                    prikazLozinke[i] = '*';
+                }
+            }
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "WiFi loz %.7s", prikazLozinke);
+            if (uEditModu) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D zn");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+            }
+            break;
+        }
+        case EKRAN_MREZA_DHCP: {
+            bool dhcp = uEditModu ? privDhcp : koristiDhcpMreza();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "DHCP %s%c", dhcp ? "DA" : "NE", uEditModu ? '*' : ' ');
+            if (uEditModu) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R promjena DA");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+            }
+            break;
+        }
+        case EKRAN_MREZA_IP: {
+            const char* ip = uEditModu ? privStatickaIp : dohvatiStatickuIP();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "%s", ip);
+            if (uEditModu) {
+                prikazRedak1[sizeof(prikazRedak1) - 2] = '*';
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D br");
+            } else if (koristiDhcpMreza()) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DHCP ukljucen ");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "Stat IP DA=Uredi");
+            }
+            break;
+        }
+        case EKRAN_MREZA_MASKA: {
+            const char* maska = uEditModu ? privMreznaMaska : dohvatiMreznuMasku();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "%s", maska);
+            if (uEditModu) {
+                prikazRedak1[sizeof(prikazRedak1) - 2] = '*';
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D br");
+            } else if (koristiDhcpMreza()) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DHCP ukljucen ");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "Maska DA=Uredi");
+            }
+            break;
+        }
+        case EKRAN_MREZA_GATEWAY: {
+            const char* gateway = uEditModu ? privGateway : dohvatiZadaniGateway();
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "%s", gateway);
+            if (uEditModu) {
+                prikazRedak1[sizeof(prikazRedak1) - 2] = '*';
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "L/R poz G/D br");
+            } else if (koristiDhcpMreza()) {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "DHCP ukljucen ");
+            } else {
+                snprintf(prikazRedak2, sizeof(prikazRedak2), "Gateway DA=Uredi");
+            }
+            break;
+        }
     }
 }
 
@@ -533,6 +774,27 @@ void provjeriTipke() {
             break;
         case EKRAN_PLOCA_RASPON:
             azurirajRasponPloceNaTipkama(lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_PRISTUP_LOZINKA:
+            azurirajTekstualnoPoljeNaTipkama(privPristupLozinka, sizeof(privPristupLozinka), lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_WIFI_SSID:
+            azurirajTekstualnoPoljeNaTipkama(privWifiSsid, sizeof(privWifiSsid), lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_WIFI_LOZINKA:
+            azurirajTekstualnoPoljeNaTipkama(privWifiLozinka, sizeof(privWifiLozinka), lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_MREZA_DHCP:
+            azurirajDhcpNaTipkama(lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_MREZA_IP:
+            azurirajIPv4NaTipkama(privStatickaIp, lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_MREZA_MASKA:
+            azurirajIPv4NaTipkama(privMreznaMaska, lijevo, desno, gore, dolje);
+            break;
+        case EKRAN_MREZA_GATEWAY:
+            azurirajIPv4NaTipkama(privGateway, lijevo, desno, gore, dolje);
             break;
     }
 
