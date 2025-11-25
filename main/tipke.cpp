@@ -1,6 +1,7 @@
 #include "tipke.h"
 #include <Arduino.h>
 #include <RTClib.h>
+#include <Keypad.h>
 // #include <cstring>
 // #include <cstdio>
 // #include <cstdlib>
@@ -15,6 +16,7 @@
 namespace {
 
 constexpr unsigned long DEBOUNCE_MS = 40UL;
+constexpr unsigned long DRZANJE_ZA_POSTAVKE_MS = 2000UL;
 constexpr unsigned int DOZVOLJENA_TRAJANJA_CEKICA[] = {100U, 200U, 500U, 1000U};
 constexpr size_t BROJ_TRAJANJA_CEKICA = sizeof(DOZVOLJENA_TRAJANJA_CEKICA) / sizeof(DOZVOLJENA_TRAJANJA_CEKICA[0]);
 constexpr int MINUTA_DAN = 24 * 60;
@@ -23,28 +25,31 @@ constexpr char DOZVOLJENI_ZNAKOVI[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"
 constexpr size_t BROJ_DOZVOLJENIH_ZNAKOVA = sizeof(DOZVOLJENI_ZNAKOVI) - 1;
 constexpr char IPV4_PREDLOZAK[] = "000.000.000.000";
 
-enum TipkaIndex : uint8_t {
-    TIPKA_GORE = 0,
-    TIPKA_DOLJE,
-    TIPKA_LIJEVO,
-    TIPKA_DESNO,
-    TIPKA_DA,
-    TIPKA_NE,
-    TIPKA_BROJ
+constexpr byte BROJ_REDOVA = 4;
+constexpr byte BROJ_STUPACA = 4;
+
+const char TIPKOVNICA_TIPKE[BROJ_REDOVA][BROJ_STUPACA] = {
+    {'1', '2', '3', 'A'},
+    {'4', '5', '6', 'B'},
+    {'7', '8', '9', 'C'},
+    {'*', '0', '#', 'D'}
 };
 
-const uint8_t PINOVI[TIPKA_BROJ] = {
-    PIN_TIPKA_GORE,
-    PIN_TIPKA_DOLJE,
-    PIN_TIPKA_LIJEVO,
-    PIN_TIPKA_DESNO,
-    PIN_TIPKA_DA,
-    PIN_TIPKA_NE
+const byte PINOVI_RED[BROJ_REDOVA] = {
+    PIN_TIPKOVNICA_RED1,
+    PIN_TIPKOVNICA_RED2,
+    PIN_TIPKOVNICA_RED3,
+    PIN_TIPKOVNICA_RED4
 };
 
-bool stabilnoStanje[TIPKA_BROJ] = {false};
-bool zadnjeOcitano[TIPKA_BROJ] = {false};
-unsigned long vrijemePromjene[TIPKA_BROJ] = {0};
+const byte PINOVI_STUPAC[BROJ_STUPACA] = {
+    PIN_TIPKOVNICA_STUPAC1,
+    PIN_TIPKOVNICA_STUPAC2,
+    PIN_TIPKOVNICA_STUPAC3,
+    PIN_TIPKOVNICA_STUPAC4
+};
+
+Keypad tipkovnica = Keypad(makeKeymap(TIPKOVNICA_TIPKE), PINOVI_RED, PINOVI_STUPAC, BROJ_REDOVA, BROJ_STUPACA);
 
 enum PostavkeEkran : uint8_t {
     EKRAN_KAZALJKE = 0,
@@ -97,22 +102,56 @@ char prikazRedak1[17];
 char prikazRedak2[17];
 bool prikazAzuriran = false;
 
-bool ocitajPritisak(TipkaIndex index) {
-    bool trenutno = digitalRead(PINOVI[index]) == LOW;
-    if (trenutno != zadnjeOcitano[index]) {
-        zadnjeOcitano[index] = trenutno;
-        vrijemePromjene[index] = millis();
+struct StanjeTipki {
+    bool gore = false;
+    bool dolje = false;
+    bool lijevo = false;
+    bool desno = false;
+    bool da = false;
+    bool ne = false;
+    bool zahtjevPostavke = false;
+};
+
+StanjeTipki ocitajTipkovnicu() {
+    StanjeTipki stanje;
+    if (!tipkovnica.getKeys()) {
+        return stanje;
     }
 
-    if ((millis() - vrijemePromjene[index]) > DEBOUNCE_MS) {
-        if (stabilnoStanje[index] != trenutno) {
-            stabilnoStanje[index] = trenutno;
-            if (trenutno) {
-                return true;
-            }
+    for (uint8_t i = 0; i < LIST_MAX; ++i) {
+        Key& tipka = tipkovnica.key[i];
+        if (!tipka.stateChanged) continue;
+
+        if (tipka.kchar == '0' && tipka.kstate == HOLD) {
+            stanje.zahtjevPostavke = true;
+        }
+
+        if (tipka.kstate != PRESSED) continue;
+
+        switch (tipka.kchar) {
+            case 'B':
+                stanje.gore = true;
+                break;
+            case 'C':
+                stanje.dolje = true;
+                break;
+            case '*':
+                stanje.lijevo = true;
+                break;
+            case '#':
+                stanje.desno = true;
+                break;
+            case 'A':
+                stanje.da = true;
+                break;
+            case 'D':
+                stanje.ne = true;
+                break;
+            default:
+                break;
         }
     }
-    return false;
+    return stanje;
 }
 
 unsigned int normalizirajTrajanjeCekica(unsigned int vrijednost) {
@@ -716,28 +755,26 @@ void pripremiPrikaz() {
 } // namespace
 
 void inicijalizirajTipke() {
-    for (uint8_t i = 0; i < TIPKA_BROJ; ++i) {
-        pinMode(PINOVI[i], INPUT_PULLUP);
-        stabilnoStanje[i] = false;
-        zadnjeOcitano[i] = false;
-        vrijemePromjene[i] = millis();
-    }
+    tipkovnica.setDebounceTime(DEBOUNCE_MS);
+    tipkovnica.setHoldTime(DRZANJE_ZA_POSTAVKE_MS);
 }
 
 void provjeriTipke() {
-    bool gore = ocitajPritisak(TIPKA_GORE);
-    bool dolje = ocitajPritisak(TIPKA_DOLJE);
-    bool lijevo = ocitajPritisak(TIPKA_LIJEVO);
-    bool desno = ocitajPritisak(TIPKA_DESNO);
-    bool da = ocitajPritisak(TIPKA_DA);
-    bool ne = ocitajPritisak(TIPKA_NE);
+    StanjeTipki stanje = ocitajTipkovnicu();
 
     if (!postavkeMode) {
-        if (gore || dolje) {
+        if (stanje.zahtjevPostavke) {
             aktivirajPostavke();
         }
         return;
     }
+
+    bool gore = stanje.gore;
+    bool dolje = stanje.dolje;
+    bool lijevo = stanje.lijevo;
+    bool desno = stanje.desno;
+    bool da = stanje.da;
+    bool ne = stanje.ne;
 
     if (!uEditModu) {
         if (gore) {
