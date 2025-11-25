@@ -5,8 +5,13 @@
 #include <time.h>
 
 // Konfiguracija WiFi mreže
-const char *WIFI_SSID    = "SVETI PETAR";
-const char *WIFI_LOZINKA = "cista2906";
+String wifiSsid    = "SVETI PETAR";
+String wifiLozinka = "cista2906";
+bool koristiDhcp   = true;
+String statickaIp  = "192.168.1.200";
+String mreznaMaska = "255.255.255.0";
+String zadaniGateway = "192.168.1.1";
+bool primljenaWifiKonfiguracija = false;
 
 // Parametri NTP klijenta
 static const char *NTP_POSLUZITELJ       = "pool.ntp.org";
@@ -36,9 +41,11 @@ const char *DOZVOLJENE_NAREDBE[] = {
 const size_t BROJ_NAREDBI = sizeof(DOZVOLJENE_NAREDBE) / sizeof(DOZVOLJENE_NAREDBE[0]);
 
 void poveziNaWiFi();
+bool postaviStatickuKonfiguraciju();
 void osvjeziNTPSat();
 void posaljiNTPPremaMegai();
 void obradiSerijskiUlaz();
+void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout = 3000);
 void konfigurirajWebPosluzitelj();
 void saljiNaredbuMegai(const String &naredba);
 bool jeNaredbaDozvoljena(const String &naredba);
@@ -50,7 +57,10 @@ void setup() {
   Serial.println("ESP BOOT");                // DEBUG: start
   Serial.println("FAZA: Povezivanje na WiFi");
 
-  poveziNaWiFi();
+  pokupiWifiKonfiguracijuIzSerijske();
+  if (!primljenaWifiKonfiguracija || WiFi.status() != WL_CONNECTED) {
+    poveziNaWiFi();
+  }
 
   Serial.println("FAZA: Pokretanje NTP klijenta");
   ntpKlijent.begin();
@@ -87,10 +97,19 @@ void loop() {
 void poveziNaWiFi() {
   WiFi.mode(WIFI_STA);
 
-  Serial.print("WIFI: Spajam se na SSID: ");
-  Serial.println(WIFI_SSID);
+  if (koristiDhcp) {
+    WiFi.config(0U, 0U, 0U);
+    Serial.println("WIFI: DHCP konfiguracija aktivna");
+  } else if (!postaviStatickuKonfiguraciju()) {
+    Serial.println("WIFI: Staticka konfiguracija neispravna, prelazim na DHCP");
+    koristiDhcp = true;
+    WiFi.config(0U, 0U, 0U);
+  }
 
-  WiFi.begin(WIFI_SSID, WIFI_LOZINKA);
+  Serial.print("WIFI: Spajam se na SSID: ");
+  Serial.println(wifiSsid);
+
+  WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
 
   unsigned long pocetak = millis();
   while (WiFi.status() != WL_CONNECTED) {
@@ -101,7 +120,7 @@ void poveziNaWiFi() {
       Serial.println("WIFI: Timeout 20s, ponavljam pokušaj...");
       pocetak = millis();  // nastavi pokušavati svakih 20 s
       WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_LOZINKA);
+      WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
     }
   }
 
@@ -109,6 +128,35 @@ void poveziNaWiFi() {
   Serial.print("WIFI: Spojen, IP: ");
   Serial.println(WiFi.localIP());
   wifiIkadSpojen = true;
+}
+
+bool postaviStatickuKonfiguraciju() {
+  IPAddress ip;
+  IPAddress maska;
+  IPAddress gateway;
+
+  if (!ip.fromString(statickaIp) || !maska.fromString(mreznaMaska) || !gateway.fromString(zadaniGateway)) {
+    Serial.println("WIFI: Neispravan format staticke IP konfiguracije");
+    return false;
+  }
+
+  bool uspjeh = WiFi.config(ip, gateway, maska);
+  if (!uspjeh) {
+    Serial.println("WIFI: ESP8266 nije prihvatio staticku konfiguraciju");
+  }
+  return uspjeh;
+}
+
+void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout) {
+  unsigned long pocetak = millis();
+  while (millis() - pocetak < millisTimeout) {
+    obradiSerijskiUlaz();
+    if (primljenaWifiKonfiguracija) {
+      Serial.println("WIFI RX: konfiguracija primljena prije spajanja");
+      return;
+    }
+    delay(10);
+  }
 }
 
 void osvjeziNTPSat() {
@@ -163,6 +211,58 @@ void obradiSerijskiUlaz() {
         zadnjiOdgovorMega = prijemniBuffer;
         Serial.print("RX MEGA: ");
         Serial.println(zadnjiOdgovorMega);
+
+        if (prijemniBuffer.startsWith("WIFI:")) {
+          String payload = prijemniBuffer.substring(5);
+          bool uspjeh = false;
+
+          int granice[5];
+          int start = 0;
+          for (int i = 0; i < 5; ++i) {
+            granice[i] = payload.indexOf('|', start);
+            if (granice[i] == -1) {
+              Serial.println("WIFI RX: nedostaje separator | u postavkama");
+              granice[0] = -1;
+              break;
+            }
+            start = granice[i] + 1;
+          }
+
+          if (granice[0] != -1) {
+            String noviSsid     = payload.substring(0, granice[0]);
+            String novaLozinka  = payload.substring(granice[0] + 1, granice[1]);
+            String dhcpZastavica = payload.substring(granice[1] + 1, granice[2]);
+            String novaIp       = payload.substring(granice[2] + 1, granice[3]);
+            String novaMaska    = payload.substring(granice[3] + 1, granice[4]);
+            String noviGateway  = payload.substring(granice[4] + 1);
+
+            if (noviSsid.length() > 0 && novaLozinka.length() > 0 && dhcpZastavica.length() > 0) {
+              wifiSsid = noviSsid;
+              wifiLozinka = novaLozinka;
+              koristiDhcp = dhcpZastavica == "1";
+              statickaIp = novaIp;
+              mreznaMaska = novaMaska;
+              zadaniGateway = noviGateway;
+              primljenaWifiKonfiguracija = true;
+
+              Serial.print("WIFI RX: primljen SSID ");
+              Serial.print(wifiSsid);
+              Serial.print(", DHCP=");
+              Serial.println(koristiDhcp ? "DA" : "NE");
+
+              WiFi.disconnect();
+              wifiIkadSpojen = false;
+              ntpIkadPostavljen = false;
+              zadnjeSlanjeMillis = 0;
+              poveziNaWiFi();
+              uspjeh = true;
+            } else {
+              Serial.println("WIFI RX: neispravna duljina SSID/lozinke/DHCP oznake");
+            }
+          }
+
+          Serial.println(uspjeh ? "ACK:WIFI" : "ERR:WIFI");
+        }
       }
       prijemniBuffer = "";
     } else if (znak != '\r') {

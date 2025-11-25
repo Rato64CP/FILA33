@@ -8,6 +8,7 @@
 #include "otkucavanje.h"
 #include "pc_serial.h"
 #include "kazaljke_sata.h"  // ➕ dodano za rad s kazaljkama
+#include "postavke.h"
 
 // Uvijek koristi Serial3 (za Mega 2560 toranjski sat)
 static HardwareSerial &espSerijskiPort = Serial3;
@@ -20,6 +21,23 @@ void inicijalizirajESP() {
   espSerijskiPort.begin(ESP_BRZINA);
   ulazniBuffer.reserve(128);
   posaljiPCLog(F("ESP serijska veza inicijalizirana"));
+}
+
+void posaljiWifiPostavkeESP() {
+  espSerijskiPort.print(F("WIFI:"));
+  espSerijskiPort.print(dohvatiWifiSsid());
+  espSerijskiPort.print('|');
+  espSerijskiPort.print(dohvatiWifiLozinku());
+  espSerijskiPort.print('|');
+  espSerijskiPort.print(koristiDhcpMreza() ? '1' : '0');
+  espSerijskiPort.print('|');
+  espSerijskiPort.print(dohvatiStatickuIP());
+  espSerijskiPort.print('|');
+  espSerijskiPort.print(dohvatiMreznuMasku());
+  espSerijskiPort.print('|');
+  espSerijskiPort.println(dohvatiZadaniGateway());
+
+  posaljiPCLog(F("Poslane WiFi postavke ESP-u"));
 }
 
 static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
