@@ -6,12 +6,12 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 
 ## 🛠️ Glavne funkcionalnosti
 
-- Prikaz točnog vremena i datuma na LCD-u toranjskog ormara
-- Upravljanje kazaljkama toranjskog sata dvostrukim impulsima
-- Upravljanje zvonima (muško, žensko, slavljenje, mrtvačko) i čekićima
-- Automatsko zakazivanje zvona i slavljenja prema ulazima okretne ploče
-- Praćenje izvora vremena (RTC, NTP, ručno) i spremanje u vanjski 24C32 EEPROM na I2C sabirnici
-- Tipkovnica s 6 tipki za lokalne postavke i servisne komande
+- Prikaz točnog vremena i datuma na LCD-u toranjskog ormarića
+- Upravljanje kazaljkama toranjskog sata na način dvostrukih impulsa (1/2 + 1/2 = 1)
+- Upravljanje zvonima (zvonjenje, slavljenje, mrtvačko) i čekićima/batovima
+- Automatsko zakazivanje zvona i slavljenja prema ulazima/štapićima okretne ploče
+- Praćenje izvora vremena (RTC, DCF, NTP, ručno) i spremanje u vanjski 24C32 EEPROM na I2C sabirnici
+- Tipkovnica sa 16 tipki za lokalne postavke i servisne komande
 
 ---
 
@@ -19,7 +19,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 
 - `kazaljke_sata` inicijalizira relejne izlaze, vodi dnevnik položaja u EEPROM-u i kompenzira kazaljke na zadano vrijeme (`inicijalizirajKazaljke()`, `upravljajKazaljkama()`, `kompenzirajKazaljke(bool)`), čime toranjski sat ostaje sinkroniziran s RTC-om.【F:src/kazaljke_sata.cpp†L46-L147】
 - `okretna_ploca` čita pet ulaza ploče, pokreće releje za smjer rotacije te automatizira zvona i slavljenje u koordinaciji s toranjskim rasporedom (`inicijalizirajPlocu()`, `kompenzirajPlocu(bool)`, `obradiUlazePloce(...)`). Ručne korekcije toranjskog vremena moguće su kroz spremanje pozicije ploče i 15-minutnog offseta (`postaviTrenutniPolozajPloce(int)`, `postaviOffsetMinuta(int)`, `dohvatiOffsetMinuta()`). Vremenski raspon rada ploče sada se podešava u postavkama (zadano 05:00–20:45, 00:00–00:00 onemogućuje ploču).【F:src/okretna_ploca.cpp†L92-L219】【F:src/okretna_ploca.cpp†L235-L307】
-- `zvonjenje` definira sekvence čekića, upravlja trajanjima i sigurnosnim odgodama te sinkronizira slavljenje i mrtvačko zvono (`inicijalizirajZvona()`, `upravljajZvonom()`, `zapocniSlavljenje()`).【F:src/zvonjenje.cpp†L61-L153】
+- `zvonjenje` definira sekvence zvonjenja, upravlja trajanjima i sigurnosnim odgodama te sinkronizira slavljenje i mrtvačko zvono (`inicijalizirajZvona()`, `upravljajZvonom()`, `zapocniSlavljenje()`).【F:src/zvonjenje.cpp†L61-L153】
 - `esp_serial` otvara UART1 prema ESP-01/ESP-12 te obrađuje NTP i naredbe zvona (`inicijalizirajESP()`, `obradiESPSerijskuKomunikaciju()`).【F:src/esp_serial.cpp†L8-L45】
 - `pc_serial` otvara USB serijski port prema PC-u i ispisuje vremenski označene logove za lakše praćenje integracije s toranjskim satom (`inicijalizirajPCSerijsku()`, `posaljiPCLog(...)`).【F:src/pc_serial.cpp†L1-L39】
 - `time_glob` i `vrijeme_izvor` spremaju izvor vremena, ručna i NTP ažuriranja te nadziru starost sinkronizacije, što je ključno za toranjski raspored zvona.【F:src/time_glob.cpp†L12-L44】【F:src/vrijeme_izvor.cpp†L7-L34】
@@ -34,13 +34,13 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 ## 📦 Komponente
 
 - Arduino Mega 2560 (glavna kontrolna ploča)
-- RTC DS3231 s baterijom (rezervni izvor vremena)
+- ESP-01 / ESP-12 (NTP i udaljene naredbe) integriran na Arduinu
+- RTC DS3231 s baterijom (rezervni izvor vremena) + 24C32
 - LCD 2x16 s I2C adapterom (vizualne informacije u ormaru)
 - ULN2803 i optokapleri (izolacija i pogon toranjskih releja)
-- Relejna pločica 5 V (kazaljke, okretna ploča, zvona)
+- Relejna pločica 5 V (Finder releji na DIN šini) (kazaljke, okretna ploča, zvona)
 - Tipkovnica: 4x4 matricna tipkovnica (0–9, *, #, A–D) s držanjem tipke `0` za ulazak u servisni izbornik
-- ESP-01 / ESP-12 (NTP i udaljene naredbe)
-- Napajanje: 5 V / 10 A SMPS + spuštanje na 3.3 V za ESP
+- Napajanje: 5 V / 2 A Hi-Link na posebnoj pločici sa osiguračem T 500mA, zatim s MOV i TVS diodom
 
 ---
 
@@ -72,7 +72,7 @@ Ovaj projekt modernizira pogon toranjskog sata korištenjem Arduino Mega 2560, R
 - **Slavljenje i eksterni signali**
   - PIN_SLAVLJENJE_SIGNAL (D2) prati ulaz s procesne logike (aktivno LOW) za ručno pokretanje slavljenja.【F:src/podesavanja_piny.h†L34-L35】
 - **ESP komunikacija**
-  - ESP-01/ESP-12 se spaja na hardware UART1 (RX1=D19, TX1=D18) uz level shifting na 3.3 V; `Serial1` se inicijalizira na 9600 bps u `esp_serial` modulu.【F:src/esp_serial.cpp†L8-L26】
+  - ESP-01/ESP-12 se interno spaja na hardware UART3 (RX1=D19, TX1=D18) uz level shifting na 3.3 V; `Serial3` se inicijalizira na 9600 bps u `esp_serial` modulu.【F:src/esp_serial.cpp†L8-L26】
 - **DCF77 sinkronizacija**
   - PIN_DCF_SIGNAL (D18) povezuje se na izlaz DCF antene koja radi kao otvoreni kolektor; masa (DCF−) ide na GND, a napajanje (smeđa žica) na +5 V preko vanjskog otpornika od 10 kΩ koji drži liniju u stanju HIGH dok antena ne zatvori tranzistor.
 
@@ -118,17 +118,13 @@ src/
 
 ## 🔄 Buduće nadogradnje
 
-- Automatsko prepoznavanje najstabilnijeg izvora vremena (RTC, NTP, ručno)
 - Test mod s LED indikacijom umjesto releja za brzu provjeru u radionici
-- Web konfigurator preko ESP-01 za udaljeni raspored zvona toranjskog sata
-- Hardverska sinkronizacija sekundi putem SQW izlaza DS3231 i prekidnog ulaza kontrolera, uz prilagodbu ISR logike otkucavanja toranjskog sata
 
 ---
 
 ## 📝 Licenca
 
-Projekt je slobodan za edukaciju i osobnu upotrebu toranjskih sustava.
+Projekt je slobodan za edukaciju i osobnu upotrebu.
 
 ---
-
 Za sve komentare, prijedloge ili izmjene slobodno otvori issue na GitHubu ✍️
