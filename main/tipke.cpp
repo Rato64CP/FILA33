@@ -17,6 +17,7 @@ namespace {
 constexpr unsigned long DEBOUNCE_MS = 40UL;
 constexpr unsigned int DOZVOLJENA_TRAJANJA_CEKICA[] = {100U, 200U, 500U, 1000U};
 constexpr size_t BROJ_TRAJANJA_CEKICA = sizeof(DOZVOLJENA_TRAJANJA_CEKICA) / sizeof(DOZVOLJENA_TRAJANJA_CEKICA[0]);
+constexpr int MINUTA_DAN = 24 * 60;
 
 enum TipkaIndex : uint8_t {
     TIPKA_GORE = 0,
@@ -50,7 +51,7 @@ enum PostavkeEkran : uint8_t {
     EKRAN_ZVONO_NEDJELJA,
     EKRAN_SLAVLJENJE,
     EKRAN_BROJ_ZVONA,
-    EKRAN_REZERVA,
+    EKRAN_PLOCA_RASPON,
     EKRAN_BROJ
 };
 
@@ -69,6 +70,8 @@ unsigned long privRadniZvono = 0;
 unsigned long privNedjeljaZvono = 0;
 unsigned long privSlavljenje = 0;
 uint8_t privBrojZvona = 0;
+int privPlocaPocetak = 0;
+int privPlocaKraj = 0;
 
 char prikazRedak1[17];
 char prikazRedak2[17];
@@ -158,7 +161,10 @@ void zapocniUredjivanjeTrenutnogEkrana() {
         case EKRAN_BROJ_ZVONA:
             privBrojZvona = dohvatiBrojZvona();
             break;
-        case EKRAN_REZERVA:
+        case EKRAN_PLOCA_RASPON:
+            privPlocaPocetak = dohvatiPocetakPloceMinute();
+            privPlocaKraj = dohvatiKrajPloceMinute();
+            sekundarnoPolje = false;
             break;
     }
     uEditModu = true;
@@ -194,7 +200,8 @@ void spremiPromjene() {
         case EKRAN_BROJ_ZVONA:
             postaviBrojZvona(privBrojZvona);
             break;
-        case EKRAN_REZERVA:
+        case EKRAN_PLOCA_RASPON:
+            postaviRasponPloce(privPlocaPocetak, privPlocaKraj);
             break;
     }
     resetirajUredjivanje();
@@ -273,6 +280,36 @@ void azurirajOtkucavanjeNaTipkama(bool lijevo, bool desno, bool gore, bool dolje
             privSatDo = (privSatDo + 1) % 24;
         }
     }
+}
+
+void pomakniMinutu(int& vrijednost, int korak) {
+    vrijednost = (vrijednost + MINUTA_DAN + korak) % MINUTA_DAN;
+}
+
+void azurirajRasponPloceNaTipkama(bool lijevo, bool desno, bool gore, bool dolje) {
+    if (!uEditModu) return;
+    if (gore || dolje) {
+        sekundarnoPolje = !sekundarnoPolje;
+    }
+    if (lijevo) {
+        if (!sekundarnoPolje) {
+            pomakniMinutu(privPlocaPocetak, -1);
+        } else {
+            pomakniMinutu(privPlocaKraj, -1);
+        }
+    }
+    if (desno) {
+        if (!sekundarnoPolje) {
+            pomakniMinutu(privPlocaPocetak, 1);
+        } else {
+            pomakniMinutu(privPlocaKraj, 1);
+        }
+    }
+}
+
+void izdvojiSatMinutu(int minute, int& sat, int& min) {
+    sat = (minute / 60) % 24;
+    min = minute % 60;
 }
 
 void azurirajTrajanjeMs(unsigned long& vrijednost, bool lijevo, bool desno, unsigned long korak, unsigned long minimum) {
@@ -410,10 +447,28 @@ void pripremiPrikaz() {
             }
             break;
         }
-        case EKRAN_REZERVA:
-            snprintf(prikazRedak1, sizeof(prikazRedak1), "Rezerva     ");
-            snprintf(prikazRedak2, sizeof(prikazRedak2), "NE=Izlaz    ");
+        case EKRAN_PLOCA_RASPON: {
+            int odMin = uEditModu ? privPlocaPocetak : dohvatiPocetakPloceMinute();
+            int doMin = uEditModu ? privPlocaKraj : dohvatiKrajPloceMinute();
+            int odSat, odM, doSat, doM;
+            izdvojiSatMinutu(odMin, odSat, odM);
+            izdvojiSatMinutu(doMin, doSat, doM);
+            snprintf(prikazRedak1, sizeof(prikazRedak1), "Pl %02d:%02d-%02d:%02d%c", odSat, odM, doSat, doM, uEditModu ? '*' : ' ');
+            if (uEditModu) {
+                if (!sekundarnoPolje) {
+                    snprintf(prikazRedak2, sizeof(prikazRedak2), ">Od L/R DA=Sp");
+                } else {
+                    snprintf(prikazRedak2, sizeof(prikazRedak2), ">Do L/R DA=Sp");
+                }
+            } else {
+                if (odMin == 0 && doMin == 0) {
+                    snprintf(prikazRedak2, sizeof(prikazRedak2), "Onemogucena   ");
+                } else {
+                    snprintf(prikazRedak2, sizeof(prikazRedak2), "DA=Uredi NE=Izl");
+                }
+            }
             break;
+        }
     }
 }
 
@@ -476,7 +531,8 @@ void provjeriTipke() {
         case EKRAN_BROJ_ZVONA:
             azurirajBrojZvonaNaTipkama(lijevo, desno);
             break;
-        case EKRAN_REZERVA:
+        case EKRAN_PLOCA_RASPON:
+            azurirajRasponPloceNaTipkama(lijevo, desno, gore, dolje);
             break;
     }
 
