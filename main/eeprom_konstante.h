@@ -36,6 +36,13 @@ struct PostavkeSpremnik {
   unsigned long trajanjeZvonjenjaNedjeljaMs;
   unsigned long trajanjeSlavljenjaMs;
   uint8_t brojZvona;
+  char pristupLozinka[9];
+  char wifiSsid[33];
+  char wifiLozinka[33];
+  bool koristiDhcp;
+  char statickaIp[16];
+  char mreznaMaska[16];
+  char zadaniGateway[16];
 };
 
 constexpr int SLOTOVI_POSTAVKE = 6;
