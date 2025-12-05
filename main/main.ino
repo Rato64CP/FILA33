@@ -99,11 +99,11 @@ void setup() {
     postaviLCDBlinkanje(true);
   }
 
-  if (trebaKazaljke) {
-    kompenzirajKazaljke(false);
-  }
   if (trebaPlocu) {
     kompenzirajPlocu(false);
+  }
+  if (trebaKazaljke) {
+    kompenzirajKazaljke(false);
   }
 
   postaviLCDBlinkanje(false);
