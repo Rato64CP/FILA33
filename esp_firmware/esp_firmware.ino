@@ -31,6 +31,15 @@ String zadnjiOdgovorMega = "";
 bool wifiIkadSpojen = false;
 bool ntpIkadPostavljen = false;
 
+// Upravljanje nenametljivim pokušajima WiFi spajanja
+bool wifiPokusajUToku = false;
+unsigned long wifiPokusajPocetak = 0;
+unsigned long wifiSljedeciPokusajDozvoljen = 0;
+int wifiBrojPokusajaZaredom = 0;
+static const unsigned long WIFI_POKUSAJ_TIMEOUT_MS = 20000;
+static const unsigned long WIFI_ODGODA_POKUSAJA_MS = 5000;
+static const int WIFI_MAX_POKUSAJA_PRIJE_ODGODE = 3;
+
 // Popis naredbi koje prihvaća toranjski sat
 const char *DOZVOLJENE_NAREDBE[] = {
   "ZVONO1_ON",  "ZVONO1_OFF",  "ZVONO2_ON",  "ZVONO2_OFF",
@@ -95,39 +104,58 @@ void loop() {
 }
 
 void poveziNaWiFi() {
-  WiFi.mode(WIFI_STA);
+  unsigned long sada = millis();
 
-  if (koristiDhcp) {
-    WiFi.config(0U, 0U, 0U);
-    Serial.println("WIFI: DHCP konfiguracija aktivna");
-  } else if (!postaviStatickuKonfiguraciju()) {
-    Serial.println("WIFI: Staticka konfiguracija neispravna, prelazim na DHCP");
-    koristiDhcp = true;
-    WiFi.config(0U, 0U, 0U);
+  // Ako je spojeno, resetiraj brojače i izađi
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiPokusajUToku) {
+      Serial.println();
+      Serial.print("WIFI: Spojen, IP: ");
+      Serial.println(WiFi.localIP());
+    }
+    wifiIkadSpojen = true;
+    wifiPokusajUToku = false;
+    wifiBrojPokusajaZaredom = 0;
+    return;
   }
 
-  Serial.print("WIFI: Spajam se na SSID: ");
-  Serial.println(wifiSsid);
+  // Provjeri treba li započeti novi pokušaj
+  if (!wifiPokusajUToku && sada >= wifiSljedeciPokusajDozvoljen) {
+    WiFi.mode(WIFI_STA);
 
-  WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
+    if (koristiDhcp) {
+      WiFi.config(0U, 0U, 0U);
+      Serial.println("WIFI: DHCP konfiguracija aktivna");
+    } else if (!postaviStatickuKonfiguraciju()) {
+      Serial.println("WIFI: Staticka konfiguracija neispravna, prelazim na DHCP");
+      koristiDhcp = true;
+      WiFi.config(0U, 0U, 0U);
+    }
 
-  unsigned long pocetak = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");  // DEBUG: indikacija čekanja
-    if (millis() - pocetak > 20000) {
-      Serial.println();
-      Serial.println("WIFI: Timeout 20s, ponavljam pokušaj...");
-      pocetak = millis();  // nastavi pokušavati svakih 20 s
-      WiFi.disconnect();
-      WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
+    Serial.print("WIFI: Spajam se na SSID: ");
+    Serial.println(wifiSsid);
+
+    WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
+    wifiPokusajUToku = true;
+    wifiPokusajPocetak = sada;
+    wifiBrojPokusajaZaredom++;
+  }
+
+  // Tijekom pokušaja, povremeno provjeri timeout kako bi loop() ostao živ
+  if (wifiPokusajUToku && (sada - wifiPokusajPocetak >= WIFI_POKUSAJ_TIMEOUT_MS)) {
+    Serial.println();
+    Serial.println("WIFI: Timeout pokušaja, odspajam i čekam prije novog pokušaja");
+    WiFi.disconnect();
+    wifiPokusajUToku = false;
+
+    // Nakon nekoliko uzastopnih pokušaja napravi dulju pauzu
+    if (wifiBrojPokusajaZaredom >= WIFI_MAX_POKUSAJA_PRIJE_ODGODE) {
+      wifiSljedeciPokusajDozvoljen = sada + WIFI_ODGODA_POKUSAJA_MS;
+      wifiBrojPokusajaZaredom = 0;
+    } else {
+      wifiSljedeciPokusajDozvoljen = sada + 500;
     }
   }
-
-  Serial.println();
-  Serial.print("WIFI: Spojen, IP: ");
-  Serial.println(WiFi.localIP());
-  wifiIkadSpojen = true;
 }
 
 bool postaviStatickuKonfiguraciju() {
