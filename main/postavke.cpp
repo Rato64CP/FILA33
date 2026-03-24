@@ -31,6 +31,15 @@ static bool postavkeLCDBlinkanje = false;
 static char redak1Buffer[17] = "Postavke";
 static char redak2Buffer[17] = "Ucitavanje...";
 
+static void osigurajNullTerminiraneMreznePostavke() {
+  postavke.pristupLozinka[sizeof(postavke.pristupLozinka) - 1] = '\0';
+  postavke.wifiSsid[sizeof(postavke.wifiSsid) - 1] = '\0';
+  postavke.wifiLozinka[sizeof(postavke.wifiLozinka) - 1] = '\0';
+  postavke.statickaIp[sizeof(postavke.statickaIp) - 1] = '\0';
+  postavke.mreznaMaska[sizeof(postavke.mreznaMaska) - 1] = '\0';
+  postavke.zadaniGateway[sizeof(postavke.zadaniGateway) - 1] = '\0';
+}
+
 // Inicijalizacija postavki iz EEPROM-a
 void ucitajPostavke() {
   // Pokušaj učitati iz EEPROM-a
@@ -46,6 +55,7 @@ void ucitajPostavke() {
   if (postavke.satOd < 0) postavke.satOd = 6;
   if (postavke.satDo > 23) postavke.satDo = 22;
   if (postavke.satDo <= postavke.satOd) postavke.satDo = postavke.satOd + 8;
+  osigurajNullTerminiraneMreznePostavke();
   
   if (postavke.trajanjeImpulsaCekicaMs < 50) postavke.trajanjeImpulsaCekicaMs = 150;
   if (postavke.pauzaIzmeduUdaraca < 100) postavke.pauzaIzmeduUdaraca = 400;

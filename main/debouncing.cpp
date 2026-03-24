@@ -15,10 +15,16 @@ static struct {
   uint16_t brojOdskoka;
   bool u_odskoku;
 } pinStanja[MAX_PINS];
+static bool debouncingInicijaliziran = false;
 
 // ==================== INITIALIZATION ====================
 
 void inicijalizirajDebouncing() {
+  if (debouncingInicijaliziran) {
+    posaljiPCLog(F("Debouncing sistem već inicijaliziran, preskačem"));
+    return;
+  }
+
   for (uint8_t i = 0; i < MAX_PINS; i++) {
     pinStanja[i].trenutnoStanje = SWITCH_RELEASED;
     pinStanja[i].prethodnoStanje = SWITCH_RELEASED;
@@ -26,6 +32,7 @@ void inicijalizirajDebouncing() {
     pinStanja[i].brojOdskoka = 0;
     pinStanja[i].u_odskoku = false;
   }
+  debouncingInicijaliziran = true;
   
   posaljiPCLog(F("Debouncing sistem inicijaliziran"));
 }

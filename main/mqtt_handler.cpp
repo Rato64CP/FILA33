@@ -400,6 +400,10 @@ bool jeMQTTPovezan() {
 }
 
 void reconnectMQTT() {
+  if (mqtt_connected) {
+    return;
+  }
+
   unsigned long sada = millis();
   
   if (sada - last_mqtt_reconnect < MQTT_RECONNECT_INTERVAL) {
@@ -485,12 +489,16 @@ void upravljajMQTT() {
     }
     // Parse connection status: "MQTT:CONNECTED" or "MQTT:DISCONNECTED"
     else if (line == "MQTT:CONNECTED") {
-      mqtt_connected = true;
-      posaljiPCLog(F("MQTT: Connected to broker"));
+      if (!mqtt_connected) {
+        mqtt_connected = true;
+        posaljiPCLog(F("MQTT: Connected to broker"));
+      }
     }
     else if (line == "MQTT:DISCONNECTED") {
-      mqtt_connected = false;
-      posaljiPCLog(F("MQTT: Disconnected from broker"));
+      if (mqtt_connected) {
+        mqtt_connected = false;
+        posaljiPCLog(F("MQTT: Disconnected from broker"));
+      }
     }
   }
 }

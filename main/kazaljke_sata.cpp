@@ -174,7 +174,7 @@ void inicijalizirajKazaljke()
   // Initialize state variables
   impulsUTijeku = false;
   drugaFaza = false;
-  zadnjaAktiviranaMinuta = -1;
+  zadnjaAktiviranaMinuta = dohvatiTrenutnoVrijeme().minute();
   korekcija_u_tijeku = false;
   trenutnaBrojImpulsa = 0;
   vremePosljednjegImpulsa = 0;
@@ -733,6 +733,7 @@ void postaviTrenutniPolozajKazaljki(int trenutnaMinuta)
   
   K_minuta = trenutnaMinuta;
   WearLeveling::spremi(EepromLayout::BAZA_KAZALJKE, EepromLayout::SLOTOVI_KAZALJKE, K_minuta);
+  zadnjaAktiviranaMinuta = dohvatiTrenutnoVrijeme().minute();
   
   String log = F("Postavljena pozicija: K_minuta=");
   log += K_minuta;
