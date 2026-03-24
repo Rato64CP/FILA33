@@ -8,23 +8,23 @@
 
 // Default postavke
 static EepromLayout::PostavkeSpremnik postavke = {
-  .satOd = 6,                          // Otkucavanje od 6h
-  .satDo = 22,                         // Otkucavanje do 22h
-  .plocaPocetakMinuta = 600,           // 10:00
-  .plocaKrajMinuta = 1200,             // 20:00
-  .trajanjeImpulsaCekicaMs = 150,      // 150 ms
-  .pauzaIzmeduUdaraca = 400,           // 400 ms
-  .trajanjeZvonjenjaRadniMs = 120000,  // 2 minute radni dani
-  .trajanjeZvonjenjaNedjeljaMs = 180000, // 3 minute nedjelja
-  .trajanjeSlavljenjaMs = 120000,      // 2 minute slavljenje
-  .brojZvona = 2,                      // 2 zvona
-  .pristupLozinka = "1234",            // Default lozinka
-  .wifiSsid = "WiFi",                  // Default SSID
-  .wifiLozinka = "password",           // Default lozinka
-  .koristiDhcp = true,                 // DHCP po defaultu
-  .statickaIp = "192.168.1.100",       // Fallback static IP
-  .mreznaMaska = "255.255.255.0",      // Standard subnet mask
-  .zadaniGateway = "192.168.1.1"       // Standard gateway
+  6,              // satOd: Otkucavanje od 6h
+  22,             // satDo: Otkucavanje do 22h
+  600,            // plocaPocetakMinuta: 10:00
+  1200,           // plocaKrajMinuta: 20:00
+  150,            // trajanjeImpulsaCekicaMs: 150 ms
+  400,            // pauzaIzmeduUdaraca: 400 ms
+  120000UL,       // trajanjeZvonjenjaRadniMs: 2 minute radni dani
+  180000UL,       // trajanjeZvonjenjaNedjeljaMs: 3 minute nedjelja
+  120000UL,       // trajanjeSlavljenjaMs: 2 minute slavljenje
+  2,              // brojZvona: 2 zvona
+  "1234",         // pristupLozinka: default lozinka
+  "WiFi",         // wifiSsid: default SSID
+  "password",     // wifiLozinka: default lozinka
+  true,           // koristiDhcp: DHCP po defaultu
+  "192.168.1.100",// statickaIp: fallback static IP
+  "255.255.255.0",// mreznaMaska: standard subnet mask
+  "192.168.1.1"   // zadaniGateway: standard gateway
 };
 
 static bool postavkeLCDBlinkanje = false;
@@ -70,7 +70,7 @@ const char* dohvatiPostavkeRedak1() {
   return redak1Buffer;
 }
 
-const char* dohvatiPostavkeRedac2() {
+const char* dohvatiPostavkeRedak2() {
   snprintf(redak2Buffer, sizeof(redak2Buffer), "Otkl %d-%d h", postavke.satOd, postavke.satDo);
   return redak2Buffer;
 }

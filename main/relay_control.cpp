@@ -11,6 +11,7 @@
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
+#include "watchdog.h"
 
 // ==================== RELAY STATE TRACKING ====================
 
@@ -23,11 +24,7 @@ static enum {
 } relay_phase = RELAY_IDLE;
 
 // Relay type and context (identifies which relay operation is active)
-static enum {
-  RELAY_TYPE_NONE,
-  RELAY_TYPE_HAND_POSITION,        // K-minuta tracking for hand movement
-  RELAY_TYPE_PLATE_POSITION        // Plate position tracking for rotation
-} relay_type = RELAY_TYPE_NONE;
+static RelayType relay_type = RELAY_TYPE_NONE;
 
 // Context-specific state
 static struct {
@@ -279,7 +276,7 @@ void odradiJedanImpulsBlokirajuci_Ploca(int trenutna_pozicija) {
   osvjeziWatchdog();
   
   // Second phase: activate NEPARNI relay
-  digitalWrite(PIN_RELEJ_NEPARNI_PLOCE, HIGH);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
   
   String log2 = F("Relay (blk): Plate phase 2, pos=");
   log2 += trenutna_pozicija;
@@ -306,7 +303,7 @@ bool jeRelej_Aktivan() {
 }
 
 // Get current relay operation type
-enum RelayType dohvatiTipReleja() {
+RelayType dohvatiTipReleja() {
   return relay_type;
 }
 

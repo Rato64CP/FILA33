@@ -57,7 +57,7 @@ void upravljajRelej();
 bool jeRelej_Aktivan();
 
 // Get current relay operation type (NONE, HAND_POSITION, or PLATE_POSITION)
-enum RelayType dohvatiTipReleja();
+RelayType dohvatiTipReleja();
 
 // Get current relay phase (0=idle, 1=first phase, 2=second phase)
 int dohvatiFazuReleja();
@@ -110,5 +110,3 @@ void deaktivirajSveReleje();
  * - Includes watchdog refresh in blocking mode
  * - Automatic relay deactivation on phase completion
  */
-
-#endif // RELAY_CONTROL_H
