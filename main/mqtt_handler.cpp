@@ -281,7 +281,7 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
   if (tema.endsWith("/service/ring_bell")) {
     int bell = poruka.toInt();
     if (bell == 1 || bell == 2) {
-      uključiZvono(bell);
+      ukljuciZvono(bell);
       String log = F("MQTT: Ring Bell ");
       log += bell;
       posaljiPCLog(log);

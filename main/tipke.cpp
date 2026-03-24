@@ -44,7 +44,8 @@ void inicijalizirajTipke() {
     pinMode(keypadMapping[i].pin, INPUT_PULLUP);
   }
   
-  posaljiPCLog(F("Tipke: inicijalizirane sa 6 kljuceva"));\n}
+  posaljiPCLog(F("Tipke: inicijalizirane sa 6 kljuceva"));
+}
 
 // ==================== KEY SCANNING ====================
 
