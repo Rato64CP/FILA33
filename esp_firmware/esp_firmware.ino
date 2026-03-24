@@ -18,6 +18,7 @@ static const char *NTP_POSLUZITELJ       = "pool.ntp.org";
 static const long  NTP_OFFSET_SEKUNDI    = 0;           // UTC
 static const unsigned long NTP_INTERVAL_MS   = 60000;   // osvježavanje NTP-a
 static const unsigned long SLANJE_INTERVAL_MS = 30000;  // slanje Megi
+static const size_t SERIJSKI_BUFFER_MAX = 256;
 
 WiFiUDP ntpUDP;
 NTPClient ntpKlijent(ntpUDP, NTP_POSLUZITELJ, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
@@ -58,6 +59,11 @@ void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout = 3000);
 void konfigurirajWebPosluzitelj();
 void saljiNaredbuMegai(const String &naredba);
 bool jeNaredbaDozvoljena(const String &naredba);
+bool jePrijestupnaGodina(int godina);
+int danUTjednu(int godina, int mjesec, int dan);
+int zadnjaNedjeljaUMjesecu(int godina, int mjesec);
+bool jeLjetnoVrijemeEU(time_t utcEpoch);
+time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch);
 
 void setup() {
   Serial.begin(9600);  // dijelimo vezu s Megom
@@ -211,21 +217,22 @@ void osvjeziNTPSat() {
 }
 
 void posaljiNTPPremaMegai() {
-  time_t epoch = ntpKlijent.getEpochTime();
-  struct tm *utc = gmtime(&epoch);
-  if (utc == nullptr) {
-    Serial.println("NTP: gmtime vratio nullptr, preskacem slanje");
+  time_t utcEpoch = ntpKlijent.getEpochTime();
+  time_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
+  struct tm lokalniTm;
+  if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
+    Serial.println("NTP: konverzija lokalnog vremena nije uspjela, preskacem slanje");
     return;
   }
 
   char isoBuffer[25];
-  strftime(isoBuffer, sizeof(isoBuffer), "%Y-%m-%dT%H:%M:%SZ", utc);
+  strftime(isoBuffer, sizeof(isoBuffer), "%Y-%m-%dT%H:%M:%S", &lokalniTm);
 
   Serial.print("SLANJE: NTP linija prema Megi: ");
   Serial.println(isoBuffer);
 
   Serial.print("NTP:");
-  Serial.println(isoBuffer);  // format koji očekuje Mega (obradiESPSerijskuKomunikaciju)
+  Serial.println(isoBuffer);  // Mega očekuje lokalni ISO bez vremenske zone
 }
 
 void obradiSerijskiUlaz() {
@@ -294,9 +301,81 @@ void obradiSerijskiUlaz() {
       }
       prijemniBuffer = "";
     } else if (znak != '\r') {
-      prijemniBuffer += znak;
+      if (prijemniBuffer.length() < SERIJSKI_BUFFER_MAX) {
+        prijemniBuffer += znak;
+      } else {
+        Serial.println("SERIJSKI RX: linija preduga, odbacujem");
+        prijemniBuffer = "";
+      }
     }
   }
+}
+
+bool jePrijestupnaGodina(int godina) {
+  if ((godina % 4) != 0) return false;
+  if ((godina % 100) != 0) return true;
+  return (godina % 400) == 0;
+}
+
+int zadnjaNedjeljaUMjesecu(int godina, int mjesec) {
+  static const int daniUMjesecu[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+  int brojDana = daniUMjesecu[mjesec - 1];
+  if (mjesec == 2 && jePrijestupnaGodina(godina)) {
+    brojDana = 29;
+  }
+
+  int pomakDoNedjelje = danUTjednu(godina, mjesec, brojDana);  // 0 = nedjelja
+  return brojDana - pomakDoNedjelje;
+}
+
+int danUTjednu(int godina, int mjesec, int dan) {
+  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  int g = godina;
+  if (mjesec < 3) {
+    g -= 1;
+  }
+  return (g + g / 4 - g / 100 + g / 400 + t[mjesec - 1] + dan) % 7;
+}
+
+bool jeLjetnoVrijemeEU(time_t utcEpoch) {
+  struct tm utcTm;
+  if (gmtime_r(&utcEpoch, &utcTm) == nullptr) {
+    return false;
+  }
+
+  int godina = utcTm.tm_year + 1900;
+  int mjesec = utcTm.tm_mon + 1;
+  int dan = utcTm.tm_mday;
+  int sati = utcTm.tm_hour;
+
+  if (mjesec < 3 || mjesec > 10) {
+    return false;
+  }
+  if (mjesec > 3 && mjesec < 10) {
+    return true;
+  }
+
+  int prijelazniDan = zadnjaNedjeljaUMjesecu(godina, mjesec);
+  if (mjesec == 3) {
+    if (dan > prijelazniDan) return true;
+    if (dan < prijelazniDan) return false;
+    return sati >= 1;
+  }
+
+  if (dan < prijelazniDan) return true;
+  if (dan > prijelazniDan) return false;
+  return sati < 1;
+}
+
+time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch) {
+  static const long CET_OFFSET_SEKUNDI = 3600;
+  static const long CEST_DODATAK_SEKUNDI = 3600;
+
+  long ukupniOffset = CET_OFFSET_SEKUNDI;
+  if (jeLjetnoVrijemeEU(utcEpoch)) {
+    ukupniOffset += CEST_DODATAK_SEKUNDI;
+  }
+  return utcEpoch + ukupniOffset;
 }
 
 void konfigurirajWebPosluzitelj() {

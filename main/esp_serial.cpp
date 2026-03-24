@@ -14,6 +14,7 @@
 static HardwareSerial &espSerijskiPort = Serial3;
 
 static const unsigned long ESP_BRZINA = 9600;
+static const size_t ESP_ULAZNI_BUFFER_MAX = 256;
 
 String ulazniBuffer = "";
 
@@ -62,8 +63,17 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
   int minuta  = iso.substring(14, 16).toInt();
   int sekunda = iso.substring(17, 19).toInt();
 
+  if (godina < 2024 || mjesec < 1 || mjesec > 12) return false;
+
+  static const uint8_t daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  bool prijestupnaGodina = ((godina % 4 == 0) && (godina % 100 != 0)) || (godina % 400 == 0);
+  int maxDana = daniUMjesecu[mjesec - 1];
+  if (mjesec == 2 && prijestupnaGodina) {
+    maxDana = 29;
+  }
+
   bool poljaIspravna =
-      godina >= 2024 && mjesec >= 1 && mjesec <= 12 && dan >= 1 && dan <= 31 &&
+      dan >= 1 && dan <= maxDana &&
       sat >= 0 && sat <= 23 && minuta >= 0 && minuta <= 59 && sekunda >= 0 && sekunda <= 59;
   if (!poljaIspravna) return false;
 
@@ -149,7 +159,12 @@ void obradiESPSerijskuKomunikaciju() {
 
       ulazniBuffer = "";
     } else {
-      ulazniBuffer += znak;
+      if (ulazniBuffer.length() < ESP_ULAZNI_BUFFER_MAX) {
+        ulazniBuffer += znak;
+      } else {
+        posaljiPCLog(F("ESP RX: preduga linija, odbacujem buffer"));
+        ulazniBuffer = "";
+      }
     }
   }
 }
