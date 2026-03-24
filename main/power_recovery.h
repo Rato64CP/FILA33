@@ -19,9 +19,6 @@ void spremiKriticalnoStanje();
 // Saves all state, closes open operations, prepares for safe shutdown
 void gracioznoGasenje();
 
-// Watchdog ping - must be called regularly to prevent system reset
-void osvjeziWatchdog();
-
 // Check if system recovered from watchdog reset
 bool jeSistemNakonWatchdogReseta();
 
@@ -36,3 +33,7 @@ bool provjeriZdravostEEPROM();
 
 // Get system uptime in seconds
 unsigned long dohvatiSistUptimeSeconde();
+// Oznaka uzroka reseta i uptime brojač (poziva watchdog modul)
+void oznaciWatchdogReset(bool resetiranWatchdog);
+void oznaciGubitakNapajanja(bool izgubljenoNapajanje);
+void povecajUptimeBrojac();

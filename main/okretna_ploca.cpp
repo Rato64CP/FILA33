@@ -14,6 +14,7 @@
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
+#include "watchdog.h"
 
 // ==================== CONSTANTS ====================
 

@@ -9,6 +9,8 @@ void postaviLCDBlinkanje(bool omoguci);
 void odradiPauzuSaLCD(unsigned long trajanjeMs);
 
 // Signalizacija statusa otkucavanja na LCD-u
+void signalizirajBell1_Ringing();
+void signalizirajBell2_Ringing();
 void signalizirajHammer1_Active();
 void signalizirajHammer2_Active();
 void signalizirajCelebration_Mode();
