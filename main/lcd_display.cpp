@@ -441,11 +441,6 @@ void odradiPauzuSaLCD(unsigned long duration_ms) {
 
 // ==================== STATE HELPERS ====================
 
-// Get current day notation character
-char dohvatiOznakuDana() {
-  return day_notation;
-}
-
 // Update day notation based on current state
 void azurirajOznakuDana_External() {
   // If no error and no correction, mark as normal

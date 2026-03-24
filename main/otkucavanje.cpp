@@ -509,6 +509,52 @@ static void provjeriDugmeMrtvackog(unsigned long sadaMs) {
 
 // ==================== NORMAL HOUR STRIKING MANAGEMENT ====================
 
+void inicijalizirajOtkucavanje() {
+  // Izlazi za čekiće
+  pinMode(PIN_CEKIC_MUSKI, OUTPUT);
+  pinMode(PIN_CEKIC_ZENSKI, OUTPUT);
+  digitalWrite(PIN_CEKIC_MUSKI, LOW);
+  digitalWrite(PIN_CEKIC_ZENSKI, LOW);
+
+  // Ulazi za tipke (slavljenje / mrtvačko)
+  pinMode(PIN_KEY_CELEBRATION, INPUT_PULLUP);
+  pinMode(PIN_KEY_FUNERAL, INPUT_PULLUP);
+
+  // Početno stanje modula
+  otkucavanje.vrsta = OTKUCAVANJE_NONE;
+  otkucavanje.preostali_udarci = 0;
+  otkucavanje.vrijeme_pocetka_ms = 0;
+  otkucavanje.cekic_aktivan = false;
+  otkucavanje.aktivni_pin = -1;
+  otkucavanje.vrijeme_zadnje_aktivacije = 0;
+  otkucavanje.blokirano = false;
+
+  slavljenje.slavljenje_aktivno = false;
+  slavljenje.vrijeme_pocetka_ms = 0;
+  slavljenje.trajanje_ms = 0;
+  slavljenje.trenutni_cekic = 1;
+  slavljenje.vrijeme_zadnje_promjene_ms = 0;
+  slavljenje.cekic_aktivan = false;
+
+  mrtvacko.mrtvacko_aktivno = false;
+  mrtvacko.vrijeme_pocetka_ms = 0;
+  mrtvacko.trajanje_ms = 0;
+  mrtvacko.cekic_aktivan = false;
+  mrtvacko.vrijeme_zadnje_promjene_ms = 0;
+
+  dugmad.prethodno_stanje_slavljenja = true;
+  dugmad.vrijeme_promjene_slavljenja = 0;
+  dugmad.debounce_u_tijeku_slavljenja = false;
+  dugmad.prethodno_stanje_mrtvackog = true;
+  dugmad.vrijeme_promjene_mrtvackog = 0;
+  dugmad.debounce_u_tijeku_mrtvackog = false;
+
+  zadnje_izmjereno_vrijeme = dohvatiTrenutnoVrijeme();
+  blokada_otkucavanja = false;
+
+  posaljiPCLog(F("Otkucavanje: inicijalizirano"));
+}
+
 // Called from main loop to manage hour/half-hour striking sequences
 void upravljajOtkucavanjem() {
   unsigned long sadaMs = millis();
