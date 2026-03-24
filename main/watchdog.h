@@ -7,6 +7,3 @@ void inicijalizirajWatchdog();
 
 // Osvježi watchdog brojač (mora se pozivati najmanje svaki 8 sekundi)
 void osvjeziWatchdog();
-
-// Graceful shutdown prije gubitka napajanja (ako je dostupan signal za detekciju pada napona)
-void gracioznoGasenje();

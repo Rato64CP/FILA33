@@ -270,35 +270,6 @@ void deaktivirajZvonjenje(int zvono) {
   iskljuciZvono(zvono);
 }
 
-// ==================== CELEBRATION/FUNERAL STUBS ====================
-
-// These are now implemented in otkucavanje.cpp, but included here for API compatibility
-void zapocniSlavljenje() {
-  // Implemented in otkucavanje.cpp
-}
-
-void zaustaviSlavljenje() {
-  // Implemented in otkucavanje.cpp
-}
-
-void zapocniMrtvacko() {
-  // Implemented in otkucavanje.cpp
-}
-
-void zaustaviMrtvacko() {
-  // Implemented in otkucavanje.cpp
-}
-
-bool jeSlavljenjeUTijeku() {
-  // Implemented in otkucavanje.cpp
-  return false;
-}
-
-bool jeMrtvackoUTijeku() {
-  // Implemented in otkucavanje.cpp
-  return false;
-}
-
 // ==================== INITIALIZATION ====================
 
 void inicijalizirajZvona() {
