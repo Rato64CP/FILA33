@@ -1,41 +1,23 @@
-// pc_serial.cpp
+// pc_serial.cpp – PC serijska komunikacija za debugging
 #include <Arduino.h>
-#include <RTClib.h>
-#include "time_glob.h"
 #include "pc_serial.h"
 
-static const unsigned long PC_BRZINA = 9600;
-static bool serijskiSpreman = false;
-
-static String formatirajVremenskuOznaku() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  char oznaka[21];
-  snprintf(oznaka, sizeof(oznaka), "%04d-%02d-%02d %02d:%02d:%02d",
-           sada.year(), sada.month(), sada.day(), sada.hour(), sada.minute(), sada.second());
-  return String(oznaka);
-}
-
 void inicijalizirajPCSerijsku() {
-  Serial.begin(PC_BRZINA);
-  while (!Serial) {
+  Serial.begin(115200);
+  while (!Serial && millis() < 3000) {
     delay(10);
   }
-  serijskiSpreman = true;
-  posaljiPCLog(F("USB serijska veza spremna"));
-}
-
-void posaljiPCLog(const __FlashStringHelper* poruka) {
-  if (!serijskiSpreman) return;
-  Serial.print(F("[LOG] "));
-  Serial.print(formatirajVremenskuOznaku());
-  Serial.print(F(" - "));
-  Serial.println(poruka);
+  Serial.println(F("============================================"));
+  Serial.println(F("Toranjski sat v1.0 - RTC+NTP+DCF sinkronizacija"));
+  Serial.println(F("============================================"));
 }
 
 void posaljiPCLog(const String& poruka) {
-  if (!serijskiSpreman) return;
   Serial.print(F("[LOG] "));
-  Serial.print(formatirajVremenskuOznaku());
-  Serial.print(F(" - "));
+  Serial.println(poruka);
+}
+
+void posaljiPCLog(const char* poruka) {
+  Serial.print(F("[LOG] "));
   Serial.println(poruka);
 }

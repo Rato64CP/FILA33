@@ -1,29 +1,70 @@
-// watchdog.cpp
+// watchdog.cpp – Watchdog monitoring za 24/7 pouzdanost
 #include <Arduino.h>
-#include "watchdog.h"
-
-#if defined(__AVR__)
 #include <avr/wdt.h>
+#include <EEPROM.h>
+#include "watchdog.h"
+#include "pc_serial.h"
 
-static bool watchdogAktivan = false;
+// ==================== WATCHDOG SETUP ====================
 
 void inicijalizirajWatchdog() {
-  // Osiguraj poznato stanje nakon potencijalnog WDT resetiranja.
+  // ATmega2560 ima WDT s tim timeout vrijednostima:
+  // 16 ms, 32 ms, 64 ms, 125 ms, 250 ms, 500 ms, 1s, 2s, 4s, 8s
+  // Postavljamo na 8 sekundi kao maximum sigurnu vrijednost
+  
+  // Provjera razloga restart-a
+  uint8_t mcusr = MCUSR;
+  if (mcusr & (1 << WDRF)) {
+    posaljiPCLog(F("WDT: Recovery nakon watchdog reset-a"));
+  }
+  if (mcusr & (1 << BORF)) {
+    posaljiPCLog(F("WDT: Recovery nakon Brown-out reset-a"));
+  }
+  if (mcusr & (1 << EXTRF)) {
+    posaljiPCLog(F("WDT: Recovery nakon vanjskog reset-a"));
+  }
+  if (mcusr & (1 << PORF)) {
+    posaljiPCLog(F("WDT: Recovery nakon Power-on reset-a"));
+  }
+  
+  MCUSR = 0; // Očisti sve zastavice
+  
+  // Disable WDT privremeno (osiguraj da se može prepisati)
   wdt_disable();
-  delay(10);
+  
+  // Postavi na 8 sekundi (WDTO_8S)
+  // Ovo je sigurni timeout koji permet dovoljno vremena za sve operacije
   wdt_enable(WDTO_8S);
-  watchdogAktivan = true;
+  
+  posaljiPCLog(F("WDT: Inicijaliziran sa timeoutom od 8 sekundi"));
 }
 
+// ==================== WATCHDOG REFRESH ====================
+
 void osvjeziWatchdog() {
-  if (!watchdogAktivan) return;
+  // Resetiraj WDT brojač
+  // Mora se pozivati najmanje svakih 8 sekundi kako bi se izbjeglo resetiranje
   wdt_reset();
 }
 
-#else
+// ==================== GRACEFUL SHUTDOWN ====================
 
-void inicijalizirajWatchdog() {}
-
-void osvjeziWatchdog() {}
-
-#endif
+void gracioznoGasenje() {
+  // Funkcija za graceful shutdown prije gubitka napajanja
+  // Korisne je ako je dostupan signal za detekciju pada napona (Power Loss Detection)
+  
+  posaljiPCLog(F("WDT: Graceful shutdown u tijeku..."));
+  
+  // Spremi kritične podatke prije nego što se napajanje izgubi
+  // (već se sprema u okretna_ploca.cpp, kazaljke_sata.cpp, itd.)
+  
+  // Isključi sve releje kako bi se izbjegla oštećenja
+  // (to se radi u individualnim modulima)
+  
+  // Sačekaj malo kako bi se osigurao schrijani EEPROM
+  delay(100);
+  
+  // Sada možemo bezbjedno čekati na gubitak napajanja
+  // Watchdog će resetirati sistem ako se oporavimo
+  posaljiPCLog(F("WDT: Spreman za gubitak napajanja"));
+}

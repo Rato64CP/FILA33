@@ -1,46 +1,76 @@
-// podesavanja_piny.h
-#pragma once
+// podesavanja_piny.h – CONSOLIDATED PIN DEFINITIONS WITH HEADER GUARDS
+// SINGLE SOURCE OF TRUTH for all hardware pin assignments
+// Arduino Mega 2560 pinout for tower clock system
 
 #ifndef PODESAVANJA_PINY_H
 #define PODESAVANJA_PINY_H
 
-// Kazaljke sata
-#define PIN_RELEJ_PARNE_KAZALJKE   10
-#define PIN_RELEJ_NEPARNE_KAZALJKE 11
+// ==================== RELAY CONTROL PINS ====================
+// Impulse relay pins for hand position control (K-minuta tracking)
+// 6-second pulses via ULN2803 optocoupler drivers to 5V relays
 
-// Okretna ploča
-#define PIN_RELEJ_PARNE_PLOCE      8
-#define PIN_RELEJ_NEPARNE_PLOCE    9
+#define PIN_RELEJ_PARNE_KAZALJKE      22  // Even relay (first phase)
+#define PIN_RELEJ_NEPARNE_KAZALJKE    23  // Odd relay (second phase)
 
-// Ulazi okretne ploče (čavli) – aktivni na LOW uz interno povlačenje prema Vcc
-#define PIN_PLOCA_ULAZ_1           30
-#define PIN_PLOCA_ULAZ_2           31
-#define PIN_PLOCA_ULAZ_3           32
-#define PIN_PLOCA_ULAZ_4           33
-#define PIN_PLOCA_ULAZ_5           34
+// Impulse relay pins for rotating plate control (position tracking)
+#define PIN_RELEJ_PARNE_PLOCE         24  // Even relay for plate (first phase)
+#define PIN_RELEJ_NEPARNE_PLOCE       25  // Odd relay for plate (second phase)
 
-// Tipkovnica (4x4 matrica, redovi i stupci)
-#define PIN_TIPKOVNICA_RED1         40
-#define PIN_TIPKOVNICA_RED2         41
-#define PIN_TIPKOVNICA_RED3         42
-#define PIN_TIPKOVNICA_RED4         43
-#define PIN_TIPKOVNICA_STUPAC1      44
-#define PIN_TIPKOVNICA_STUPAC2      45
-#define PIN_TIPKOVNICA_STUPAC3      46
-#define PIN_TIPKOVNICA_STUPAC4      47
+// ==================== BELL AND HAMMER PINS ====================
+// Bell control for hourly (Bell 1) and half-hourly (Bell 2) strikes
 
-// Čekići
-#define PIN_CEKIC_MUSKI             12
-#define PIN_CEKIC_ZENSKI            3
+#define PIN_ZVONO_1                   26  // Bell 1 - hourly strikes
+#define PIN_ZVONO_2                   27  // Bell 2 - half-hourly strikes
 
-// Ulaz za slavljenje (aktivno na LOW uz interno pull-up otpornik)
-#define PIN_SLAVLJENJE_SIGNAL       2
+// Hammer pins - blocked during bell movement with inertia delays
+#define PIN_CEKIC_MUSKI               28  // Hammer 1 - male (hourly)
+#define PIN_CEKIC_ZENSKI              29  // Hammer 2 - female (half-hourly)
 
-// Zvona
-#define PIN_ZVONO_1                 4
-#define PIN_ZVONO_2                 5
+// ==================== ROTATING PLATE MECHANICAL INPUTS ====================
+// 5 mechanical cam sensors for plate position triggering
+// Used to detect position and trigger bells/celebrations
 
-// DCF77 antena (koristi digitalni pin s hardverskim prekidom)
-#define PIN_DCF_SIGNAL              18
+#define PIN_ULAZA_PLOCE_1             30  // Input 1 - bell 1 (weekdays)
+#define PIN_ULAZA_PLOCE_2             31  // Input 2 - bell 2 (weekdays)
+#define PIN_ULAZA_PLOCE_3             32  // Input 3 - bell 1 (Sundays)
+#define PIN_ULAZA_PLOCE_4             33  // Input 4 - bell 2 (Sundays)
+#define PIN_ULAZA_PLOCE_5             34  // Input 5 - celebration trigger
 
-#endif // PODESAVANJA_PINY_H
+// ==================== TIME SYNCHRONIZATION INPUTS ====================
+// DCF77 receiver - external synchronization source
+
+#define PIN_DCF_SIGNAL                35  // DCF77 digital signal (LOW = impulse)
+
+// ==================== I2C BUS ====================
+// I2C communication for RTC (DS3231) and external EEPROM (24C32)
+// Arduino Mega I2C: SDA=20, SCL=21 (fixed pins)
+
+#define PIN_SDA                       20  // I2C SDA - serial data
+#define PIN_SCL                       21  // I2C SCL - serial clock
+
+// ==================== KEYPAD CONTROL ====================
+// 6-key navigation keypad for LCD menu system
+
+#define PIN_KEY_UP                    36  // UP navigation
+#define PIN_KEY_DOWN                  37  // DOWN navigation
+#define PIN_KEY_LEFT                  38  // LEFT navigation
+#define PIN_KEY_RIGHT                 39  // RIGHT navigation
+#define PIN_KEY_SELECT                40  // SELECT confirmation
+#define PIN_KEY_BACK                  41  // BACK/MENU exit
+
+// ==================== CELEBRATION AND FUNERAL BUTTONS ====================
+// New buttons for celebration and funeral modes with mutual exclusion
+
+#define PIN_KEY_CELEBRATION           41  // Celebration button toggle (PIN 41)
+#define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
+
+// ==================== SERIAL COMMUNICATION ====================
+// Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
+
+// Serial0 (USB):  115200 baud - PC debugging/logging
+// Serial3:        9600 baud   - ESP8266 MQTT gateway (Rx3=pin15, Tx3=pin14)
+
+// All PIN assignments consolidated in this single header file
+// No duplicate definitions allowed in other source files
+
+#endif  // PODESAVANJA_PINY_H

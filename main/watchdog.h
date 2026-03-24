@@ -1,8 +1,12 @@
+// watchdog.h – Watchdog monitoring za 24/7 pouzdanost
 #pragma once
 
-// watchdog.h – Upravljanje ugrađenim WDT-om za toranjski sat
-// Funkcije omogućuju da se glavna petlja i blokirajuće operacije redovito javlja
-// watchdogu kako bi se Arduino resetirao u slučaju pada napona ili zastoja koda.
-
+// Inicijalizacija watchdog timera
+// Postavlja WDT na ~8 sekundi (maximum za ATmega2560)
 void inicijalizirajWatchdog();
+
+// Osvježi watchdog brojač (mora se pozivati najmanje svaki 8 sekundi)
 void osvjeziWatchdog();
+
+// Graceful shutdown prije gubitka napajanja (ako je dostupan signal za detekciju pada napona)
+void gracioznoGasenje();

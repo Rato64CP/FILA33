@@ -1,4 +1,8 @@
-// okretna_ploca.cpp
+// okretna_ploca.cpp – Complete rotating plate control system
+// 64 positions covering 15-minute intervals in operating window (04:59-20:44)
+// Dual relay sequencing with wear-leveling EEPROM persistence
+// Mechanical cam input processing for automatic bells/celebrations
+
 #include <Arduino.h>
 #include <RTClib.h>
 #include "okretna_ploca.h"
@@ -9,252 +13,317 @@
 #include "postavke.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
-#include "pc_serial.h"   
+#include "pc_serial.h"
 
-const unsigned long POLA_OKRETA_MS = 6000UL;
-const int MAKS_PAMETNI_POMAK_MINUTA = 15; // maksimalno za čekanje umjesto rotacije
-const int MAKS_OFFSET_MINUTA = 14;        // offset mora ostati u okviru 0-14 kako bi modulo provjera uspjela
-const int MINUTA_U_DANU = 24 * 60;
+// ==================== CONSTANTS ====================
 
-static unsigned long vrijemeStarta = 0;
-static bool ciklusUTijeku = false;
-static bool drugaFaza = false;
-static int zadnjaAktiviranaMinuta = -1;
+const unsigned long POLA_OKRETA_MS = 6000UL;      // Full 6-second impulse cycle
+const unsigned long FAZA_TRAJANJE_MS = 3000UL;    // Each phase is 3 seconds
+
+const int BROJ_POZICIJA = 64;                      // 64 positions total (0-63)
+const int VRIJEME_POCETKA_OPERACIJE = 299;         // 04:59 in minutes from midnight
+const int VRIJEME_KRAJA_OPERACIJE = 1244;          // 20:44 in minutes from midnight
+const int POZICIJA_NOCI = 63;                      // Night position (locked)
+const int MINUTNI_BLOK = 15;                       // Each position covers 15 minutes
+
+const int MAKS_PAMETNI_POMAK_MINUTA = 15;
+
+// ==================== GLOBAL STATE VARIABLES ====================
+
+int pozicijaPloce = 0;
+int offsetMinuta = 14;
+
+static unsigned long vrijemeStarta = 0;           
+static bool ciklusUTijeku = false;                
+static bool drugaFaza = false;                    
+static int zadnjaAktiviranaMinuta = -1;           
+
+static bool plocaUSinkronu = true;                
+
+static bool korekcija_u_tijeku = false;           
+static int trenutnaBrojKorakaNaKorekciji = 0;     
+static unsigned long vremePosljednjegImpulsa = 0; 
 
 static const uint8_t BROJ_ULAZA_PLOCE = 5;
 static const uint8_t PIN_ULAZA_PLOCE[BROJ_ULAZA_PLOCE] = {
-  PIN_PLOCA_ULAZ_1,
-  PIN_PLOCA_ULAZ_2,
-  PIN_PLOCA_ULAZ_3,
-  PIN_PLOCA_ULAZ_4,
-  PIN_PLOCA_ULAZ_5
+  PIN_ULAZA_PLOCE_1,
+  PIN_ULAZA_PLOCE_2,
+  PIN_ULAZA_PLOCE_3,
+  PIN_ULAZA_PLOCE_4,
+  PIN_ULAZA_PLOCE_5
 };
 
 static int zadnjiSlotUlaza = -1;
+
 static bool autoZvonoAktivno[2] = {false, false};
 static unsigned long autoZvonoKraj[2] = {0, 0};
+
 static bool autoSlavljenjeZakazano = false;
 static unsigned long autoSlavljenjeStart = 0;
 static unsigned long autoSlavljenjeTrajanje = 0;
 static bool autoSlavljenjeAktivno = false;
 static unsigned long autoSlavljenjeKraj = 0;
+
 static bool plocaAktivnaRanije = true;
 
-int pozicijaPloce = 0; // 0-63
-int offsetMinuta = 14; // podesivo u postavkama, 0–14
+// ==================== HELPER FUNCTIONS ====================
 
-// -------------------- POMOĆNE FUNKCIJE --------------------
-
-static int izracunajCiljnuPoziciju(const DateTime& now) {
-  if (!jePlocaKonfigurirana()) return pozicijaPloce;
+// Calculate expected plate position based on RTC time
+static int izracunajCiljnuPoziciju(const DateTime& now)
+{
+  if (!jePlocaKonfigurirana()) {
+    return pozicijaPloce;
+  }
+  
   int ukupnoMinuta = now.hour() * 60 + now.minute();
-  int pocetak = (dohvatiPocetakPloceMinute() + offsetMinuta) % MINUTA_U_DANU;
+  int pocetak = VRIJEME_POCETKA_OPERACIJE;
   int diff = ukupnoMinuta - pocetak;
-  if (diff < 0) diff += MINUTA_U_DANU;
-  int pozicija = diff / 15;
-  if (pozicija > 63) pozicija = 63;
-  if (pozicija < 0)  pozicija = 0;
+  
+  if (diff < 0) {
+    return POZICIJA_NOCI;
+  }
+  
+  int pozicija = diff / MINUTNI_BLOK;
+  
+  if (pozicija > POZICIJA_NOCI) {
+    pozicija = POZICIJA_NOCI;
+  }
+  if (pozicija < 0) {
+    pozicija = 0;
+  }
+  
   return pozicija;
 }
 
-static bool jeVrijemeUPlocnomIntervalu(const DateTime& now) {
-  if (!jePlocaKonfigurirana()) return false;
-
-  int minutaDana = now.hour() * 60 + now.minute();
-  int pocetak = dohvatiPocetakPloceMinute();
-  int kraj = dohvatiKrajPloceMinute();
-
-  if (pocetak == kraj) return true; // puni dan osim ako je oba nula (pokrito je gore)
-
-  if (pocetak < kraj) {
-    return minutaDana >= pocetak && minutaDana <= kraj;
+// Check if current time is within operating window (04:59-20:44)
+static bool jeVrijemeUPlocnomIntervalu(const DateTime& now)
+{
+  if (!jePlocaKonfigurirana()) {
+    return false;
   }
-
-  return minutaDana >= pocetak || minutaDana <= kraj;
+  
+  int minutaDana = now.hour() * 60 + now.minute();
+  int pocetak = VRIJEME_POCETKA_OPERACIJE;      
+  int kraj = VRIJEME_KRAJA_OPERACIJE;           
+  
+  return (minutaDana >= pocetak && minutaDana <= kraj);
 }
 
-static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija) {
-  int razlika = (ciljnaPozicija - trenutnaPozicija) % 64;
-  if (razlika < 0) razlika += 64;
+// Calculate number of steps needed to move from current to target position
+static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija)
+{
+  int razlika = (ciljnaPozicija - trenutnaPozicija) % BROJ_POZICIJA;
+  
+  if (razlika < 0) {
+    razlika += BROJ_POZICIJA;
+  }
+  
   return razlika;
 }
 
-static void pokreniPrvuFazuPloce() {
+// Activate first phase of plate rotation
+static void pokreniPrvuFazuPloce()
+{
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  
   vrijemeStarta = millis();
   ciklusUTijeku = true;
   drugaFaza = false;
+  
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+  
+  String log = F("Ploca: prva faza, pozicija=");
+  log += pozicijaPloce;
+  posaljiPCLog(log);
 }
 
-static void zavrsiCiklusPloce() {
+// Complete plate rotation step
+static void zavrsiCiklusPloce()
+{
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   ciklusUTijeku = false;
   drugaFaza = false;
-  pozicijaPloce = (pozicijaPloce + 1) % 64;
+  
+  pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
-
-  String log = F("Ploca: zavrsen jedan korak, nova pozicija=");
+  
+  String log = F("Ploca: korak zavrsen, pozicija=");
   log += pozicijaPloce;
   posaljiPCLog(log);
 }
 
-static void odradiJedanKorakPloceBlokirajuci() {
+// Execute one complete rotation step in blocking mode
+static void odradiJedanKorakPloceBlokirajuci()
+{
+  // FIRST PHASE
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
-  odradiPauzuSaLCD(POLA_OKRETA_MS);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+  
+  String logPhase1 = F("Ploca (blok): faza 1");
+  posaljiPCLog(logPhase1);
+  
+  odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
+  
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   odradiPauzuSaLCD(200);
+  osvjeziWatchdog();
+  
+  // SECOND PHASE
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
-  odradiPauzuSaLCD(POLA_OKRETA_MS);
+  
+  String logPhase2 = F("Ploca (blok): faza 2");
+  posaljiPCLog(logPhase2);
+  
+  odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
+  osvjeziWatchdog();
+  
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  
   odradiPauzuSaLCD(400);
-  pozicijaPloce = (pozicijaPloce + 1) % 64;
+  osvjeziWatchdog();
+  
+  pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
-
-  String log = F("Ploca (blokirajuci): odradjen korak, pozicija=");
-  log += pozicijaPloce;
-  posaljiPCLog(log);
+  
+  String logComplete = F("Ploca (blok): korak zavrsen");
+  posaljiPCLog(logComplete);
 }
 
-static bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
+// Check if enough time has passed
+static bool vrijemeProslo(unsigned long sada, unsigned long cilj)
+{
   return static_cast<long>(sada - cilj) >= 0;
 }
 
-// -------------------- AUTO ZVONA / SLAVLJENJE --------------------
+// ==================== AUTOMATIC BELL/HAMMER TRIGGERING ====================
 
-static void azurirajAutomatskaZvonjenja(unsigned long sadaMs) {
-  // završetak auto zvona
+static void azurirajAutomatskaZvonjenja(unsigned long sadaMs)
+{
   for (int i = 0; i < 2; ++i) {
     if (autoZvonoAktivno[i] && vrijemeProslo(sadaMs, autoZvonoKraj[i])) {
       deaktivirajZvonjenje(i + 1);
       autoZvonoAktivno[i] = false;
-      String log = F("Ploca auto-zvono: zvono ");
-      log += (i + 1);
-      log += F(" zaustavljeno");
+      
+      String log = F("Ploca auto-zvono: zaustavljeno");
       posaljiPCLog(log);
     }
   }
-
-  // sinkronizacija stanja slavljenja
+  
   if (autoSlavljenjeAktivno && !jeSlavljenjeUTijeku()) {
     autoSlavljenjeAktivno = false;
-    posaljiPCLog(F("Ploca auto-slavljenje: otkriveno da slavljenje vise ne traje (vanjski stop)."));
+    String log = F("Ploca auto-slavljenje: zaustavljeno");
+    posaljiPCLog(log);
   }
-
-  // start zakazanog slavljenja
+  
   if (autoSlavljenjeZakazano && vrijemeProslo(sadaMs, autoSlavljenjeStart)) {
     autoSlavljenjeZakazano = false;
+    
     if (!jeSlavljenjeUTijeku()) {
       zapocniSlavljenje();
       autoSlavljenjeAktivno = true;
       autoSlavljenjeKraj = sadaMs + autoSlavljenjeTrajanje;
-
-      String log = F("Ploca auto-slavljenje: pokretanje zakazanog slavljenja, trajanje(ms)=");
-      log += autoSlavljenjeTrajanje;
-      posaljiPCLog(log);
-    } else if (autoSlavljenjeAktivno) {
-      autoSlavljenjeKraj = sadaMs + autoSlavljenjeTrajanje;
-
-      String log = F("Ploca auto-slavljenje: produzenje trajanja zbog vec aktivnog slavljenja, novo trajanje(ms)=");
-      log += autoSlavljenjeTrajanje;
+      
+      String log = F("Ploca auto-slavljenje: pokrenuto");
       posaljiPCLog(log);
     }
   }
-
-  // završetak slavljenja
+  
   if (autoSlavljenjeAktivno && vrijemeProslo(sadaMs, autoSlavljenjeKraj)) {
     zaustaviSlavljenje();
     autoSlavljenjeAktivno = false;
-    posaljiPCLog(F("Ploca auto-slavljenje: zaustavljeno po isteku vremena."));
+    
+    String log = F("Ploca auto-slavljenje: zaustavljeno");
+    posaljiPCLog(log);
   }
 }
 
-static void pokreniAutomatskoZvonjenje(int index, unsigned long sadaMs, unsigned long trajanjeMs) {
-  if (index < 0 || index > 1) return;
+static void pokreniAutomatskoZvonjenje(int index, unsigned long sadaMs, unsigned long trajanjeMs)
+{
+  if (index < 0 || index > 1) {
+    return;
+  }
+  
   if (!autoZvonoAktivno[index]) {
     aktivirajZvonjenje(index + 1);
-    String log = F("Ploca auto-zvono: pokretanje zvona ");
-    log += (index + 1);
-    log += F(", trajanje(ms)=");
-    log += trajanjeMs;
+    
+    String log = F("Ploca auto-zvono: pokrenuto");
     posaljiPCLog(log);
   }
+  
   autoZvonoAktivno[index] = true;
   autoZvonoKraj[index] = sadaMs + trajanjeMs;
 }
 
-static void zakaziSlavljenje(unsigned long startMs, unsigned long trajanjeMs) {
+static void zakaziSlavljenje(unsigned long startMs, unsigned long trajanjeMs)
+{
   autoSlavljenjeZakazano = true;
   autoSlavljenjeStart = startMs;
   autoSlavljenjeTrajanje = trajanjeMs;
-
-  String log = F("Ploca auto-slavljenje: zakazano odg adjeno slavljenje, startMs=");
-  log += startMs;
-  log += F(" trajanje(ms)=");
-  log += trajanjeMs;
+  
+  String log = F("Ploca auto-slavljenje: zakazano");
   posaljiPCLog(log);
 }
 
-static void pokreniSlavljenjeOdmah(unsigned long sadaMs, unsigned long trajanjeMs) {
+static void pokreniSlavljenjeOdmah(unsigned long sadaMs, unsigned long trajanjeMs)
+{
   autoSlavljenjeZakazano = false;
+  
   if (!jeSlavljenjeUTijeku()) {
     zapocniSlavljenje();
     autoSlavljenjeAktivno = true;
     autoSlavljenjeTrajanje = trajanjeMs;
     autoSlavljenjeKraj = sadaMs + trajanjeMs;
-
-    String log = F("Ploca auto-slavljenje: pokrenuto odmah, trajanje(ms)=");
-    log += trajanjeMs;
-    posaljiPCLog(log);
-  } else if (autoSlavljenjeAktivno) {
-    autoSlavljenjeTrajanje = trajanjeMs;
-    autoSlavljenjeKraj = sadaMs + trajanjeMs;
-
-    String log = F("Ploca auto-slavljenje: vec aktivno, produzeno trajanje(ms)=");
-    log += trajanjeMs;
+    
+    String log = F("Ploca auto-slavljenje: odmah");
     posaljiPCLog(log);
   }
 }
 
-// -------------------- OBRADA ULAZA PLOČE --------------------
+// ==================== MECHANICAL INPUT PROCESSING ====================
 
-static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
+static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs)
+{
   bool ulaziAktivni[BROJ_ULAZA_PLOCE];
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
     ulaziAktivni[i] = (digitalRead(PIN_ULAZA_PLOCE[i]) == LOW);
   }
-
+  
   String dbg = F("Ploca ulazi: ");
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
     dbg += ulaziAktivni[i] ? '1' : '0';
   }
-  dbg += F(" (sat=");
-  dbg += now.hour();
-  dbg += F(" min=");
-  dbg += now.minute();
-  dbg += F(")");
   posaljiPCLog(dbg);
-
-  bool jeNedjelja = now.dayOfTheWeek() == 0;
+  
+  bool jeNedjelja = (now.dayOfTheWeek() == 0);
+  
   bool pokreniZvono1 = jeNedjelja ? ulaziAktivni[2] : ulaziAktivni[0];
   bool pokreniZvono2 = jeNedjelja ? ulaziAktivni[3] : ulaziAktivni[1];
   bool pokreniSlavljenjePin = ulaziAktivni[4];
-
+  
   unsigned long trajanjeMs = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs()
                                         : dohvatiTrajanjeZvonjenjaRadniMs();
   if (trajanjeMs == 0) {
     trajanjeMs = jeNedjelja ? 180000UL : 120000UL;
   }
+  
   unsigned long trajanjeSlavljenja = dohvatiTrajanjeSlavljenjaMs();
   if (trajanjeSlavljenja == 0) {
     trajanjeSlavljenja = 120000UL;
   }
-
+  
   bool imaZvono = false;
   if (pokreniZvono1) {
     pokreniAutomatskoZvonjenje(0, sadaMs, trajanjeMs);
@@ -264,15 +333,17 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
     pokreniAutomatskoZvonjenje(1, sadaMs, trajanjeMs);
     imaZvono = true;
   }
-
+  
   if (pokreniSlavljenjePin) {
     if (imaZvono) {
       unsigned long pocetak = sadaMs + trajanjeMs;
+      
       for (int i = 0; i < 2; ++i) {
         if (autoZvonoAktivno[i] && autoZvonoKraj[i] > pocetak) {
           pocetak = autoZvonoKraj[i];
         }
       }
+      
       zakaziSlavljenje(pocetak, trajanjeSlavljenja);
     } else {
       pokreniSlavljenjeOdmah(sadaMs, trajanjeSlavljenja);
@@ -280,39 +351,55 @@ static void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
   }
 }
 
-// -------------------- JAVNE FUNKCIJE --------------------
+// ==================== INITIALIZATION ====================
 
-void inicijalizirajPlocu() {
+void inicijalizirajPlocu()
+{
   pinMode(PIN_RELEJ_PARNE_PLOCE, OUTPUT);
   pinMode(PIN_RELEJ_NEPARNE_PLOCE, OUTPUT);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-
+  
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
     pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
   }
-
+  
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_POZICIJA_PLOCE,
                             EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                             pozicijaPloce)) {
     pozicijaPloce = 0;
+    posaljiPCLog(F("Ploca: pozicija inicijalizirana na 0"));
+  } else {
+    if (pozicijaPloce < 0 || pozicijaPloce >= BROJ_POZICIJA) {
+      pozicijaPloce = 0;
+      String log = F("Ploca: pozicija van dosega, resetirano");
+      posaljiPCLog(log);
+    }
   }
-  if (pozicijaPloce < 0 || pozicijaPloce > 63) pozicijaPloce = 0;
-
+  
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA,
                             EepromLayout::SLOTOVI_OFFSET_MINUTA,
                             offsetMinuta)) {
-    offsetMinuta = MAKS_OFFSET_MINUTA;
+    offsetMinuta = 14;
+    posaljiPCLog(F("Ploca: offsetMinuta inicijalizirana na 14"));
+  } else {
+    if (offsetMinuta < 0 || offsetMinuta > 14) {
+      offsetMinuta = 14;
+      String log = F("Ploca: offset van dosega, resetirano");
+      posaljiPCLog(log);
+    }
   }
-  if (offsetMinuta < 0 || offsetMinuta > MAKS_OFFSET_MINUTA) {
-    offsetMinuta = MAKS_OFFSET_MINUTA;
-  }
-
+  
   vrijemeStarta = 0;
   ciklusUTijeku = false;
   drugaFaza = false;
   zadnjaAktiviranaMinuta = -1;
   zadnjiSlotUlaza = -1;
+  korekcija_u_tijeku = false;
+  trenutnaBrojKorakaNaKorekciji = 0;
+  vremePosljednjegImpulsa = 0;
+  plocaUSinkronu = true;
+  
   for (uint8_t i = 0; i < 2; ++i) {
     autoZvonoAktivno[i] = false;
     autoZvonoKraj[i] = 0;
@@ -322,187 +409,204 @@ void inicijalizirajPlocu() {
   autoSlavljenjeTrajanje = 0;
   autoSlavljenjeAktivno = false;
   autoSlavljenjeKraj = 0;
-
-  String log = F("Ploca init: pozicija=");
-  log += pozicijaPloce;
-  log += F(" offsetMin=");
-  log += offsetMinuta;
+  plocaAktivnaRanije = true;
+  
+  String log = F("Ploca inicijalizirana");
   posaljiPCLog(log);
 }
 
-void upravljajPlocom() {
+// ==================== MAIN OPERATION ====================
+
+void upravljajPlocom()
+{
   DateTime now = dohvatiTrenutnoVrijeme();
   unsigned long sadaMs = millis();
-
+  
   azurirajAutomatskaZvonjenja(sadaMs);
-
+  
   bool plocaAktivna = jeVrijemeUPlocnomIntervalu(now);
+  
   if (!plocaAktivna) {
     if (ciklusUTijeku) {
       digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
       digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
       ciklusUTijeku = false;
       drugaFaza = false;
-      posaljiPCLog(F("Ploca: zaustavljena jer je izvan dozvoljenog termina."));
+      
+      posaljiPCLog(F("Ploca: zaustavljena - izvan dozvoljenog vremena"));
     } else if (plocaAktivnaRanije) {
-      posaljiPCLog(F("Ploca: onemogucena (raspon 00:00-00:00) ili izvan zadanog intervala."));
+      posaljiPCLog(F("Ploca: onemogucena - nocni rezim"));
     }
+    
     plocaAktivnaRanije = false;
     zadnjiSlotUlaza = -1;
     return;
   }
-
+  
   if (!plocaAktivnaRanije) {
-    posaljiPCLog(F("Ploca: ponovno aktivna u dozvoljenom intervalu."));
+    posaljiPCLog(F("Ploca: ponovno aktivna - dnevni rezim"));
   }
   plocaAktivnaRanije = true;
-
-  // svakih 15 min, nakon 30. sekunde, očitaj ploču (čavle)
+  
   if (now.minute() % 15 == 0 && now.second() >= 30) {
     int slot = now.hour() * 4 + (now.minute() / 15);
+    
     if (slot != zadnjiSlotUlaza) {
       zadnjiSlotUlaza = slot;
-      posaljiPCLog(String(F("Ploca: obrada ulaza za slot=")) + slot);
+      
+      String logSlot = F("Ploca: obrada ulaza");
+      posaljiPCLog(logSlot);
+      
       obradiUlazePloce(now, sadaMs);
     }
   }
-
+  
   int minuta = now.minute();
-
   int cilj = izracunajCiljnuPoziciju(now);
-  int razlika = cilj - pozicijaPloce;
-  if (razlika < 0) razlika += 64;
-
-  // STARI UVJET je imao now.second() <= 1, što je bilo nesigurno
-  // NOVI, ROBUSTNIJI UVJET: reagiramo na novu minutu s odgovarajućim offsetom
-  bool trebaPokrenuti =
-      (!ciklusUTijeku &&
-       minuta != zadnjaAktiviranaMinuta &&
-       (minuta % 15 == offsetMinuta) &&
-       razlika > 0);
-
+  
+  int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, cilj);
+  
+  bool trebaPokrenuti = (!ciklusUTijeku &&
+                         minuta != zadnjaAktiviranaMinuta &&
+                         (minuta % MINUTNI_BLOK == offsetMinuta) &&
+                         razlika > 0);
+  
   if (trebaPokrenuti) {
-    String log = F("Ploca: pokretanje koraka – sat=");
-    log += now.hour();
-    log += F(" min=");
-    log += minuta;
-    log += F(" pozicija=");
-    log += pozicijaPloce;
-    log += F(" cilj=");
-    log += cilj;
-    log += F(" razlika=");
-    log += razlika;
+    String log = F("Ploca: pokretanje koraka");
     posaljiPCLog(log);
-
+    
     pokreniPrvuFazuPloce();
     zadnjaAktiviranaMinuta = minuta;
   }
-
-  if (!ciklusUTijeku) return;
-
+  
+  if (!ciklusUTijeku) {
+    return;
+  }
+  
   unsigned long proteklo = millis() - vrijemeStarta;
-  if (!drugaFaza && proteklo >= POLA_OKRETA_MS) {
+  
+  if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
+    
     vrijemeStarta = millis();
     drugaFaza = true;
-    posaljiPCLog(F("Ploca: faza 2 koraka (druga polovica okreta)."));
-  } else if (drugaFaza && proteklo >= POLA_OKRETA_MS) {
+    
+    String logPhase2 = F("Ploca: faza 2");
+    posaljiPCLog(logPhase2);
+  }
+  else if (drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
     zavrsiCiklusPloce();
   }
 }
 
-void postaviTrenutniPolozajPloce(int pozicija) {
-  pozicijaPloce = constrain(pozicija, 0, 63);
+// ==================== PUBLIC API ====================
+
+void postaviTrenutniPolozajPloce(int pozicija)
+{
+  pozicijaPloce = constrain(pozicija, 0, BROJ_POZICIJA - 1);
+  
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
-
-  zadnjaAktiviranaMinuta = -1; // dopusti odmah ručnu korekciju ako je potrebno
-
-  String log = F("Ploca: rucno postavljena pozicija=");
+  
+  zadnjaAktiviranaMinuta = -1;
+  
+  String log = F("Ploca: postavljena pozicija=");
   log += pozicijaPloce;
   posaljiPCLog(log);
 }
 
-void postaviOffsetMinuta(int offset) {
-  offsetMinuta = constrain(offset, 0, MAKS_OFFSET_MINUTA);
+void postaviOffsetMinuta(int offset)
+{
+  offsetMinuta = constrain(offset, 0, 14);
+  
   WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA,
                        EepromLayout::SLOTOVI_OFFSET_MINUTA,
                        offsetMinuta);
-
-  String log = F("Ploca: postavljen offsetMinuta=");
+  
+  String log = F("Ploca: postavljen offset=");
   log += offsetMinuta;
   posaljiPCLog(log);
 }
 
-int dohvatiPozicijuPloce() {
+int dohvatiPozicijuPloce()
+{
   return pozicijaPloce;
 }
 
-int dohvatiOffsetMinuta() {
+int dohvatiOffsetMinuta()
+{
   return offsetMinuta;
 }
 
-bool jePlocaUSinkronu() {
-  if (!jePlocaKonfigurirana()) return true;
-  DateTime now = dohvatiTrenutnoVrijeme();
-  bool sink = (pozicijaPloce == izracunajCiljnuPoziciju(now));
-  return sink;
-}
-
-void kompenzirajPlocu(bool pametniMod) {
+void kompenzirajPlocu(bool pametniMod)
+{
   if (!jePlocaKonfigurirana()) {
-    posaljiPCLog(F("Ploca kompenzacija: ploca onemogucena postavkama."));
+    posaljiPCLog(F("Ploca kompenzacija: onemogucena"));
     return;
   }
+  
   DateTime now = dohvatiTrenutnoVrijeme();
   int ciljPozicija = izracunajCiljnuPoziciju(now);
   int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
-
-  String log = F("Ploca kompenzacija: poz=");
-  log += pozicijaPloce;
-  log += F(" cilj=");
-  log += ciljPozicija;
-  log += F(" razlika=");
+  
+  String log = F("Ploca kompenzacija: razlika=");
   log += razlika;
-  log += F(" pametniMod=");
-  log += pametniMod ? '1' : '0';
   posaljiPCLog(log);
-
+  
   if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) {
-    posaljiPCLog(F("Ploca kompenzacija: pametniMod aktivan, razlika mala – cekam prirodno dovodenje."));
-    return; // čekaj sljedeći impuls ako je blizu
+    posaljiPCLog(F("Ploca kompenzacija: pametni mod - cekam"));
+    return;
   }
-
+  
   if (razlika == 0) {
     zadnjaAktiviranaMinuta = now.minute();
     ciklusUTijeku = false;
     drugaFaza = false;
-    posaljiPCLog(F("Ploca kompenzacija: vec u sinkronu, nema rotacije."));
+    plocaUSinkronu = true;
+    
+    posaljiPCLog(F("Ploca kompenzacija: vec u sinkronu"));
     return;
   }
-
+  
   for (int i = 0; i < razlika; i++) {
     odradiJedanKorakPloceBlokirajuci();
   }
-
+  
   pozicijaPloce = ciljPozicija;
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
-
+  
   zadnjaAktiviranaMinuta = now.minute();
   ciklusUTijeku = false;
   drugaFaza = false;
-
-  log = F("Ploca kompenzacija: zavrsena, nova pozicija=");
-  log += pozicijaPloce;
+  plocaUSinkronu = true;
+  
+  log = F("Ploca kompenzacija: zavrsena");
   posaljiPCLog(log);
 }
 
-void oznaciPlocuKaoSinkroniziranu() {
+bool jePlocaUSinkronu()
+{
+  if (!jePlocaKonfigurirana()) {
+    return true;
+  }
+  
+  DateTime now = dohvatiTrenutnoVrijeme();
+  int cilj = izracunajCiljnuPoziciju(now);
+  bool sink = (pozicijaPloce == cilj);
+  
+  return sink;
+}
+
+void oznaciPlocuKaoSinkroniziranu()
+{
   DateTime now = dohvatiTrenutnoVrijeme();
   zadnjaAktiviranaMinuta = now.minute();
-  posaljiPCLog(F("Ploca: oznacena kao sinkronizirana."));
+  plocaUSinkronu = true;
+  
+  String log = F("Ploca: oznacena kao sinkronizirana");
+  posaljiPCLog(log);
 }

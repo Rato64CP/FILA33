@@ -1,263 +1,232 @@
-// time_glob.cpp
+// time_glob.cpp – Globalno rukovanje vremenom
 #include <Arduino.h>
 #include <RTClib.h>
 #include "time_glob.h"
-#include "vrijeme_izvor.h"
+#include "i2c_eeprom.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
+#include "pc_serial.h"
 
-RTC_DS3231 rtc;
+// DS3231 RTC modul
+static RTC_DS3231 rtc;
 
-static constexpr size_t MAKS_DULJINA_IZVORA = 4; // ukljucuje nul terminator
+// Trenutno vrijeme (cache)
+static DateTime trenutnoVrijeme;
 
-String izvorVremena = "RTC"; // moze biti "NTP", "DCF", "RU" ili "RTC"
-char oznakaDana = 'R';
+// Izvor vremena
+static enum {
+  IZ_RTC,
+  IZ_NTP,
+  IZ_DCF
+} trenutniIzvor = IZ_RTC;
 
-static bool rtcPouzdan = true;
+// Zadnja sinkronizacija
+static DateTime zadnjaSinkronizacija((uint32_t)0);
+static unsigned long zadnjaSinkronizacijaMs = 0;
+static const unsigned long TIMEOUT_SINKRONIZACIJE_MS = 3600000; // 1 sat
+
+// Oznake
+static char oznakaDana = 'N';
+static char oznakaizvora[4] = "RTC";
+
+// RTC pouzdanost
+static bool rtcBaterijaOk = false;
+
+// Fallback referencija (koristi zadnje poznato vrijeme ako RTC/NTP/DCF nisu dostupni)
 static bool fallbackAktivan = false;
-static bool fallbackImaReferencu = false;
-static DateTime fallbackVrijeme = DateTime((uint32_t)0);
-static unsigned long fallbackMillis = 0;
+static DateTime fallbackVrijeme((uint32_t)0);
 
-// ---- NOVO: praćenje skoka vremena (za kazaljke/ploču) ---------------------
+// -------------------- POMOĆNE FUNKCIJE --------------------
 
-// Zadnje poznato lokalno vrijeme (ono koje je bilo važeće prije najnovijeg postavljanja)
-static DateTime zadnjeLokalnoVrijeme = DateTime((uint32_t)0);
-static bool imaZadnjeLokalno = false;
-
-// Skok vremena u minutama (novo_lokalno - staro_lokalno)
-static int zadnjiSkokMinuta = 0;
-static bool imaZadnjiSkok = false;
-static unsigned long zadnjiSkokMillis = 0;
-
-static void registrirajSkokVremena(const DateTime& novoLokalno) {
-  if (imaZadnjeLokalno) {
-    long diffSec = (long)novoLokalno.unixtime() - (long)zadnjeLokalnoVrijeme.unixtime();
-    int diffMin = (int)(diffSec / 60);
-
-    if (diffMin != 0) {
-      zadnjiSkokMinuta = diffMin;
-      imaZadnjiSkok = true;
-      zadnjiSkokMillis = millis();
-    }
+static void azurirajOznakuIzvora() {
+  switch (trenutniIzvor) {
+    case IZ_RTC:
+      strncpy(oznakaizvora, "RTC", sizeof(oznakaizvora) - 1);
+      break;
+    case IZ_NTP:
+      strncpy(oznakaizvora, "NTP", sizeof(oznakaizvora) - 1);
+      break;
+    case IZ_DCF:
+      strncpy(oznakaizvora, "DCF", sizeof(oznakaizvora) - 1);
+      break;
+    default:
+      strncpy(oznakaizvora, "???", sizeof(oznakaizvora) - 1);
+      break;
   }
-  zadnjeLokalnoVrijeme = novoLokalno;
-  imaZadnjeLokalno = true;
+  oznakaizvora[sizeof(oznakaizvora) - 1] = '\0';
 }
 
-// ---------------------------------------------------------------------------
-// Pomoćne funkcije za DST (CET/CEST, Hrvatska / EU)
-// ---------------------------------------------------------------------------
-
-// Određuje je li zadani UTC trenutak unutar razdoblja ljetnog računanja vremena
-static bool jeLjetnoVrijeme(const DateTime& t) {
-  int godina = t.year();
-
-  // Zadnja nedjelja u ožujku u 2:00 (po UTC-u)
-  DateTime zadnjaNedOzu(godina, 3, 31, 2, 0, 0);
-  while (zadnjaNedOzu.dayOfTheWeek() != 0) { // 0 = nedjelja
-    zadnjaNedOzu = zadnjaNedOzu - TimeSpan(24 * 3600);
-  }
-
-  // Zadnja nedjelja u listopadu u 3:00 (po UTC-u)
-  DateTime zadnjaNedLis(godina, 10, 31, 3, 0, 0);
-  while (zadnjaNedLis.dayOfTheWeek() != 0) {
-    zadnjaNedLis = zadnjaNedLis - TimeSpan(24 * 3600);
-  }
-
-  uint32_t unixT = t.unixtime();
-  return (unixT >= zadnjaNedOzu.unixtime() && unixT < zadnjaNedLis.unixtime());
+static void spremiZadnjuSinkronizaciju() {
+  EepromLayout::ZadnjaSinkronizacija zs;
+  zs.izvor = (int)trenutniIzvor;
+  zs.timestamp = zadnjaSinkronizacija.unixtime();
+  WearLeveling::spremi(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
+                       EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
+                       zs);
+  zadnjaSinkronizacijaMs = millis();
 }
 
-// Pretvara UTC DateTime u lokalno vrijeme (CET/CEST)
-static DateTime pretvoriUTCULokalno(const DateTime& utc) {
-  // CET = UTC+1, CEST = UTC+2
-  if (jeLjetnoVrijeme(utc)) {
-    return utc + TimeSpan(2 * 3600);
+static void ucitajZadnjuSinkronizaciju() {
+  EepromLayout::ZadnjaSinkronizacija zs;
+  if (WearLeveling::ucitaj(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
+                          EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
+                          zs)) {
+    zadnjaSinkronizacija = DateTime(zs.timestamp);
+    trenutniIzvor = (zs.izvor == IZ_NTP ? IZ_NTP : (zs.izvor == IZ_DCF ? IZ_DCF : IZ_RTC));
   } else {
-    return utc + TimeSpan(1 * 3600);
+    zadnjaSinkronizacija = DateTime((uint32_t)0);
+    trenutniIzvor = IZ_RTC;
   }
+  azurirajOznakuIzvora();
 }
 
-// ---------------------------------------------------------------------------
-
-static void aktivirajFallbackVrijeme() {
-  fallbackVrijeme = getZadnjeSinkroniziranoVrijeme();
-  fallbackImaReferencu = fallbackVrijeme.unixtime() > 0;
-  if (!fallbackImaReferencu) {
-    fallbackVrijeme = DateTime(F(__DATE__), F(__TIME__));
-  }
-  fallbackMillis = millis();
-  fallbackAktivan = true;
-}
-
-static DateTime izracunajFallbackVrijeme() {
-  if (!fallbackAktivan) {
-    aktivirajFallbackVrijeme();
-  }
-  unsigned long proteklo = millis() - fallbackMillis;
-  return fallbackVrijeme + TimeSpan(proteklo / 1000);
-}
-
-// ---- OVDJE SMO PROŠIRILI FUNKCIJU: sada registrira i skok vremena ---------
-
-static void oznaciRTCPouzdanSaVremenom(const DateTime& referenca) {
-  // referenca je LOKALNO vrijeme koje sada smatramo točnim
-  registrirajSkokVremena(referenca);
-
-  rtcPouzdan = true;
-  fallbackAktivan = false;
-  fallbackImaReferencu = true;
-  fallbackVrijeme = referenca;
-  fallbackMillis = millis();
-}
-
-static void procitajIzvorVremena() {
-  char spremljeniIzvor[MAKS_DULJINA_IZVORA] = {0};
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_IZVOR_VREMENA,
-                            EepromLayout::SLOTOVI_IZVOR_VREMENA,
-                            spremljeniIzvor)) {
-    spremljeniIzvor[0] = '\0';
-  } else {
-    spremljeniIzvor[MAKS_DULJINA_IZVORA - 1] = '\0';
-  }
-
-  String ucitani = String(spremljeniIzvor);
-  if (ucitani == "NTP" || ucitani == "RU" || ucitani == "DCF") {
-    izvorVremena = ucitani;
-  } else {
-    izvorVremena = "RTC";
-  }
-}
-
-static void spremiIzvorVremena() {
-  char spremi[MAKS_DULJINA_IZVORA] = {0};
-  izvorVremena.toCharArray(spremi, MAKS_DULJINA_IZVORA);
-  WearLeveling::spremi(EepromLayout::BAZA_IZVOR_VREMENA,
-                       EepromLayout::SLOTOVI_IZVOR_VREMENA,
-                       spremi);
-}
-
-void azurirajVrijemeIzNTP(const DateTime& dtUTC) {
-  // dtUTC je *UTC* vrijeme koje dolazi s ESP-a
-  postaviVrijemeIzNTP(dtUTC);
-  azurirajOznakuDana();
-}
+// -------------------- JAVNE FUNKCIJE --------------------
 
 void inicijalizirajRTC() {
   if (!rtc.begin()) {
-    rtcPouzdan = false;
-    aktivirajFallbackVrijeme();
+    posaljiPCLog(F("RTC: DS3231 nije dostupan"));
+    rtcBaterijaOk = false;
   } else {
-    bool trebaSinkronizaciju = rtc.lostPower();
-    DateTime trenutno = rtc.now();
-    if (trenutno.year() < 2024) {
-      trebaSinkronizaciju = true;
-    }
-    if (trebaSinkronizaciju) {
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // privremeno vrijeme dok cekamo sinkronizaciju
-      rtcPouzdan = false;
-      aktivirajFallbackVrijeme();
+    // Provjera valjanosti RTC baterije
+    if (rtc.lostPower()) {
+      posaljiPCLog(F("RTC: baterija je prazna, vrijeme nije pouzdano"));
+      rtcBaterijaOk = false;
+      // Postavi minimalnu vrijednost
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     } else {
-      // Ovo je prvo pouzdano lokalno vrijeme iz RTC-a nakon boot-a
-      oznaciRTCPouzdanSaVremenom(trenutno);
+      rtcBaterijaOk = true;
+      posaljiPCLog(F("RTC: baterija OK, vrijeme je pouzdano"));
     }
+    trenutnoVrijeme = rtc.now();
   }
-
-  procitajIzvorVremena();
-  if (!rtcPouzdan) {
-    izvorVremena = fallbackImaReferencu ? "CEK" : "ERR";
-    spremiIzvorVremena();
-  }
+  ucitajZadnjuSinkronizaciju();
 }
 
 DateTime dohvatiTrenutnoVrijeme() {
-  if (rtcPouzdan) {
-    return rtc.now();
+  // Osvježi vrijeme svakih 100 ms ako je RTC dostupan
+  static unsigned long zadnjaProvjeraMs = 0;
+  unsigned long sadaMs = millis();
+  
+  if (sadaMs - zadnjaProvjeraMs >= 100 || zadnjaProvjeraMs == 0) {
+    zadnjaProvjeraMs = sadaMs;
+    if (rtc.begin()) {
+      trenutnoVrijeme = rtc.now();
+    }
   }
-  return izracunajFallbackVrijeme();
+  
+  return trenutnoVrijeme;
 }
 
-// dt (NTP) dolazi u UTC formatu; ovdje ga prevodimo u lokalno vrijeme i spremamo u RTC
-void postaviVrijemeIzNTP(const DateTime& dtUTC) {
-  // 1) Pretvori UTC → lokalno (CET/CEST)
-  DateTime lokalno = pretvoriUTCULokalno(dtUTC);
-
-  // 2) Spremaj u RTC lokalno vrijeme
-  rtc.adjust(lokalno);
-  oznaciRTCPouzdanSaVremenom(lokalno);
-  izvorVremena = "NTP";
-  spremiIzvorVremena();
-  setZadnjaSinkronizacija(NTP_VRIJEME, lokalno);
+void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
+  // Provjera validnosti NTP vremena
+  if (ntpVrijeme.unixtime() == 0 || ntpVrijeme.year() < 2024) {
+    posaljiPCLog(F("NTP: neispravno vrijeme, odbacujem"));
+    return;
+  }
+  
+  // Ažuriranje RTC-a
+  if (rtc.begin()) {
+    rtc.adjust(ntpVrijeme);
+    rtcBaterijaOk = true;
+  }
+  
+  trenutnoVrijeme = ntpVrijeme;
+  zadnjaSinkronizacija = ntpVrijeme;
+  trenutniIzvor = IZ_NTP;
+  azurirajOznakuIzvora();
+  spremiZadnjuSinkronizaciju();
+  
+  String log = F("Vrijeme ažurirano iz NTP: ");
+  log += ntpVrijeme.year();
+  log += F("-");
+  log += ntpVrijeme.month();
+  log += F("-");
+  log += ntpVrijeme.day();
+  log += F(" ");
+  log += ntpVrijeme.hour();
+  log += F(":");
+  log += ntpVrijeme.minute();
+  posaljiPCLog(log);
 }
 
-void postaviVrijemeIzDCF(const DateTime& dt) {
-  rtc.adjust(dt);
-  oznaciRTCPouzdanSaVremenom(dt);
-  izvorVremena = "DCF";
-  spremiIzvorVremena();
-  setZadnjaSinkronizacija(DCF_VRIJEME, dt);
-}
-
-void postaviVrijemeRucno(const DateTime& dt) {
-  rtc.adjust(dt);
-  oznaciRTCPouzdanSaVremenom(dt);
-  izvorVremena = "RU";
-  spremiIzvorVremena();
-  setZadnjaSinkronizacija(RTC_VRIJEME, dt);
-}
-
-void azurirajVrijemeIzDCF(const DateTime& dt) {
-  postaviVrijemeIzDCF(dt);
-  azurirajOznakuDana();
-}
-
-void azurirajOznakuDana() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  int dan = sada.dayOfTheWeek();
-  oznakaDana = (dan == 0) ? 'N' : 'R';
+void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
+  // Provjera validnosti DCF vremena
+  if (dcfVrijeme.unixtime() == 0 || dcfVrijeme.year() < 2024) {
+    posaljiPCLog(F("DCF: neispravno vrijeme, odbacujem"));
+    return;
+  }
+  
+  // Ako je NTP najnoviji izvor, ne mijenjaj
+  if (trenutniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela()) {
+    return;
+  }
+  
+  // Ažuriranje RTC-a
+  if (rtc.begin()) {
+    rtc.adjust(dcfVrijeme);
+    rtcBaterijaOk = true;
+  }
+  
+  trenutnoVrijeme = dcfVrijeme;
+  zadnjaSinkronizacija = dcfVrijeme;
+  trenutniIzvor = IZ_DCF;
+  azurirajOznakuIzvora();
+  spremiZadnjuSinkronizaciju();
+  
+  String log = F("Vrijeme ažurirano iz DCF: ");
+  log += dcfVrijeme.year();
+  log += F("-");
+  log += dcfVrijeme.month();
+  log += F("-");
+  log += dcfVrijeme.day();
+  log += F(" ");
+  log += dcfVrijeme.hour();
+  log += F(":");
+  log += dcfVrijeme.minute();
+  posaljiPCLog(log);
 }
 
 String dohvatiIzvorVremena() {
-  return izvorVremena;
+  return String(oznakaizvora);
 }
 
 char dohvatiOznakuDana() {
   return oznakaDana;
 }
 
-void oznaciPovratakNaRTC() {
-  if (!rtcPouzdan) {
-    izvorVremena = fallbackImaReferencu ? "CEK" : "ERR";
-    spremiIzvorVremena();
-    return;
+void azurirajOznakuDana() {
+  DateTime sada = dohvatiTrenutnoVrijeme();
+  uint8_t dan = sada.dayOfTheWeek();
+  const char znakovi[] = {'N', 'P', 'U', 'S', 'C', 'P', 'S'};
+  if (dan < 7) {
+    oznakaDana = znakovi[dan];
   }
-  if (izvorVremena == "RTC") return;
-  izvorVremena = "RTC";
-  spremiIzvorVremena();
-  setZadnjaSinkronizacija(RTC_VRIJEME, dohvatiTrenutnoVrijeme());
 }
 
 bool jeRTCPouzdan() {
-  return rtcPouzdan;
+  return rtcBaterijaOk;
 }
 
 bool fallbackImaPouzdanuReferencu() {
-  return fallbackImaReferencu;
+  return fallbackAktivan && fallbackVrijeme.unixtime() > 0;
 }
 
-// ---- JAVNI API za kazaljke/plocu (skok vremena) ---------------------------
-
-bool postojiSvjeziSkokVremena(unsigned long pragMs) {
-  if (!imaZadnjiSkok) return false;
-  unsigned long sada = millis();
-  return (sada - zadnjiSkokMillis) <= pragMs;
+DateTime getZadnjeSinkroniziranoVrijeme() {
+  return zadnjaSinkronizacija;
 }
 
-int dohvatiZadnjiSkokVremenaMinuta() {
-  return zadnjiSkokMinuta;
+void oznaciPovratakNaRTC() {
+  // Ako je bila NTP/DCF, vrati se na RTC
+  if (trenutniIzvor != IZ_RTC) {
+    trenutniIzvor = IZ_RTC;
+    azurirajOznakuIzvora();
+    posaljiPCLog(F("Povratak na RTC nakon gubitka NTP/DCF sinkronizacije"));
+  }
 }
 
-void ocistiZadnjiSkokVremena() {
-  imaZadnjiSkok = false;
+bool jeSinkronizacijaZastarjela() {
+  if (zadnjaSinkronizacijaMs == 0) return true;
+  unsigned long sadaMs = millis();
+  // Zastarjela ako je prošlo više od 1 sata
+  return (sadaMs - zadnjaSinkronizacijaMs) > TIMEOUT_SINKRONIZACIJE_MS;
 }

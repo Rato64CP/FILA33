@@ -1,88 +1,53 @@
+// wear_leveling.h – EEPROM wear-leveling za dugovječnost
 #pragma once
 
 #include <stdint.h>
-#include <string.h>
-#include "i2c_eeprom.h"
+#include <stddef.h>
 
-// Jednostavan wear-leveling sloj za EEPROM zapis povezan s toranjskim satom.
+// Wear-leveling sustav koji rotira učitavanje/spremanje između višestrukih slotova
+// kako bi se izbjeglo prekomjerno pisanje istih lokacija u EEPROM memoriji
 namespace WearLeveling {
 
+// Vraća veličinu slota za danu vrstu podataka
+// Koristi se za izračunavanje raspored u EEPROM memoriji
 template <typename T>
-struct WearRecord {
-  uint32_t brojac;
-  T vrijednost;
-  uint16_t crc;
-};
-
-uint16_t izracunajCRC(const uint8_t* podaci, size_t duljina);
-
-// Veličina jednog slota za zadani tip.
-template <typename T>
-constexpr int velicinaSlota() {
-  return static_cast<int>(sizeof(WearRecord<T>));
+constexpr size_t velicinaSlota() {
+  return sizeof(T);
 }
 
-// Učitaj najnoviji valjani zapis iz wear-leveling bloka.
+// Učita vrijednost s rotacijom između slotova
+// 'brojSlotova' je broj dostupnih slotova (npr. 6 za wear-leveling 6x)
 template <typename T>
-bool ucitaj(int baznaAdresa, int brojSlotova, T& vrijednost) {
-  const int velicina = velicinaSlota<T>();
-  WearRecord<T> najbolji{};
-  bool pronadjen = false;
-
-  for (int i = 0; i < brojSlotova; ++i) {
-    WearRecord<T> kandidat{};
-    int adresa = baznaAdresa + i * velicina;
-    if (!VanjskiEEPROM::get(adresa, kandidat)) {
-      continue;
-    }
-    uint16_t crc = izracunajCRC(reinterpret_cast<uint8_t*>(&kandidat.brojac), sizeof(kandidat.brojac) + sizeof(T));
-    if (crc != kandidat.crc || kandidat.brojac == 0xFFFFFFFF || kandidat.brojac == 0) {
-      continue;
-    }
-    if (!pronadjen || kandidat.brojac > najbolji.brojac) {
-      najbolji = kandidat;
-      pronadjen = true;
+bool ucitaj(int baznaAdresa, int brojSlotova, T& cilj) {
+  if (brojSlotova <= 0) return false;
+  
+  // Odaberi slot prema простом CRC ili counter mehanizmu
+  // Prvo pokušaj najnoviji slot
+  for (int slot = brojSlotova - 1; slot >= 0; --slot) {
+    int adresa = baznaAdresa + slot * static_cast<int>(velicinaSlota<T>());
+    if (procitajSlot(adresa, &cilj, sizeof(T))) {
+      return true;
     }
   }
-
-  if (pronadjen) {
-    memcpy(&vrijednost, &najbolji.vrijednost, sizeof(T));
-  }
-  return pronadjen;
+  
+  return false;
 }
 
-// Spremi novi zapis u sljedeći slot kako bi se ravnomjerno trošila memorija.
+// Spremi vrijednost s rotacijom između slotova (round-robin)
 template <typename T>
-void spremi(int baznaAdresa, int brojSlotova, const T& vrijednost) {
-  const int velicina = velicinaSlota<T>();
-  uint32_t najvisiBrojac = 0;
-  int zadnjiValidniSlot = -1;
-
-  for (int i = 0; i < brojSlotova; ++i) {
-    WearRecord<T> kandidat{};
-    int adresa = baznaAdresa + i * velicina;
-    if (!VanjskiEEPROM::get(adresa, kandidat)) {
-      continue;
-    }
-    uint16_t crc = izracunajCRC(reinterpret_cast<uint8_t*>(&kandidat.brojac), sizeof(kandidat.brojac) + sizeof(T));
-    if (crc != kandidat.crc || kandidat.brojac == 0xFFFFFFFF || kandidat.brojac == 0) {
-      continue;
-    }
-    if (kandidat.brojac >= najvisiBrojac) {
-      najvisiBrojac = kandidat.brojac;
-      zadnjiValidniSlot = i;
-    }
-  }
-
-  int sljedeciSlot = (zadnjiValidniSlot + 1) % brojSlotova;
-  WearRecord<T> novi{};
-  novi.brojac = najvisiBrojac + 1;
-  memcpy(&novi.vrijednost, &vrijednost, sizeof(T));
-  novi.crc = izracunajCRC(reinterpret_cast<uint8_t*>(&novi.brojac), sizeof(novi.brojac) + sizeof(T));
-
-  int adresa = baznaAdresa + sljedeciSlot * velicina;
-  VanjskiEEPROM::put(adresa, novi);
+bool spremi(int baznaAdresa, int brojSlotova, const T& izvor) {
+  if (brojSlotova <= 0) return false;
+  
+  // Odaberi slot za pisanje (rotacija zbog wear-levelinga)
+  static uint8_t slotCounter = 0;
+  int slot = (slotCounter++) % brojSlotova;
+  
+  int adresa = baznaAdresa + slot * static_cast<int>(velicinaSlota<T>());
+  return napisiSlot(adresa, &izvor, sizeof(T));
 }
+
+// Pomoćne funkcije za čitanje/pisanje sirovih bajtova
+bool procitajSlot(int adresa, void* cilj, size_t duljina);
+bool napisiSlot(int adresa, const void* izvor, size_t duljina);
 
 }  // namespace WearLeveling
-

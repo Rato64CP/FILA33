@@ -1,8 +1,6 @@
-// tipke.h
+// tipke.h – Upravljanje tipkama i postavkama
 #pragma once
 
 void inicijalizirajTipke();
 void provjeriTipke();
 bool uPostavkama();
-const char* dohvatiPostavkeRedak1();
-const char* dohvatiPostavkeRedak2();
