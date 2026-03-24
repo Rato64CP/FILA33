@@ -4,7 +4,7 @@ Ova podmapa sadrži firmware za ESP8266 modul koji se serijski povezuje s Arduin
 
 ## 🔄 Uloge modula
 
-- ⏱️ **NTP klijent** koristi `NTPClient` i periodički šalje poruke `NTP:YYYY-MM-DDTHH:MM:SSZ` prema Megi, čime se sinkronizira vrijeme u `obradiESPSerijskuKomunikaciju()`.
+- ⏱️ **NTP klijent** koristi `NTPClient` (UTC) i prije slanja radi pretvorbu u lokalno CET/CEST vrijeme, pa periodički šalje poruke `NTP:YYYY-MM-DDTHH:MM:SS` prema Megi (bez `Z` sufiksa), čime se sinkronizira vrijeme u `obradiESPSerijskuKomunikaciju()`.
 - 🌐 **WiFi STA način** spaja modul na kućnu mrežu kako bi mogao dohvatiti NTP i prihvatiti udaljene zahtjeve.
 - 🛰️ **Web poslužitelj** pruža rutu `/cmd?value=<NAREDBA>` koja formira `CMD:` poruke kompatibilne s funkcijama zvona i otkucaja (`aktivirajZvonjenje()`, `postaviBlokaduOtkucavanja()`, `zapocniSlavljenje()` i dr.).
 
