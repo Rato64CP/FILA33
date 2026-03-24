@@ -354,9 +354,8 @@ static void obradiKlucKorekcija(KeyEvent event) {
       if (faza_korekcije < 1) {
         faza_korekcije++;
       } else {
-        // Apply correction
-        int ciljnaMinuta = korektniSat * 60 + korektnaMinuta;
-        kompenzirajKazaljke(false);
+        // Primijeni korekciju kroz istu dinamičku putanju kao NTP/manual sinkronizacija.
+        postaviRucnuPozicijuKazaljki(korektniSat, korektnaMinuta);
         
         String log = F("Korekcija ruku: ");
         log += korektniSat;

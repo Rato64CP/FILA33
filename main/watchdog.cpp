@@ -6,6 +6,8 @@
 
 // ==================== WATCHDOG SETUP ====================
 
+static uint8_t zadnje_reset_zastavice = 0;
+
 void inicijalizirajWatchdog() {
   // ATmega2560 ima WDT s tim timeout vrijednostima:
   // 16 ms, 32 ms, 64 ms, 125 ms, 250 ms, 500 ms, 1s, 2s, 4s, 8s
@@ -13,6 +15,7 @@ void inicijalizirajWatchdog() {
   
   // Provjera razloga restart-a
   uint8_t mcusr = MCUSR;
+  zadnje_reset_zastavice = mcusr;
   if (mcusr & (1 << WDRF)) {
     posaljiPCLog(F("WDT: Recovery nakon watchdog reset-a"));
   }
@@ -44,4 +47,16 @@ void osvjeziWatchdog() {
   // Resetiraj WDT brojač
   // Mora se pozivati najmanje svakih 8 sekundi kako bi se izbjeglo resetiranje
   wdt_reset();
+}
+
+uint8_t dohvatiResetFlags() {
+  return zadnje_reset_zastavice;
+}
+
+bool jeWatchdogResetDetektiran() {
+  return (zadnje_reset_zastavice & (1 << WDRF)) != 0;
+}
+
+bool jePowerLossResetDetektiran() {
+  return (zadnje_reset_zastavice & ((1 << BORF) | (1 << PORF))) != 0;
 }

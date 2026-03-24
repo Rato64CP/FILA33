@@ -14,6 +14,7 @@
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "pc_serial.h"
+#include "watchdog.h"
 
 // ==================== POWER RECOVERY EEPROM LAYOUT ====================
 
@@ -199,6 +200,16 @@ void inicijalizirajPowerRecovery() {
   boot_time = millis();
   last_state_save_time = boot_time;
   boot_recovery_odraden = false;
+  watchdog_reset = jeWatchdogResetDetektiran();
+  power_loss_detected = jePowerLossResetDetektiran();
+
+  String logReset = F("Power Recovery: reset flags MCUSR=0x");
+  logReset += String(dohvatiResetFlags(), HEX);
+  logReset += F(" watchdog=");
+  logReset += watchdog_reset ? F("DA") : F("NE");
+  logReset += F(" power_loss=");
+  logReset += power_loss_detected ? F("DA") : F("NE");
+  posaljiPCLog(logReset);
 
   if (!provjeriZdravostEEPROM()) {
     posaljiPCLog(F("Power Recovery: WARNING - EEPROM health issues detected"));

@@ -16,6 +16,7 @@
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
+#include "watchdog.h"
 
 // ==================== CONSTANTS ====================
 
@@ -94,21 +95,31 @@ static int odaberiRelej()
   }
 }
 
+// Aktivira relejsku fazu prema paritetu K_minuta.
+// drugaFaza=false -> osnovni relej za trenutni korak
+// drugaFaza=true  -> suprotni relej za završetak istog mehaničkog impulsa
+static void aktivirajRelejskuFazu(bool drugaFazaImpulsa)
+{
+  int relej = odaberiRelej();
+  if (drugaFazaImpulsa) {
+    relej = (relej == 0) ? 1 : 0;
+  }
+
+  if (relej == 0) {
+    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
+    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
+  } else {
+    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
+    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
+  }
+}
+
 // Activate the first phase of an impulse (3 seconds)
 // Energize the selected relay based on parity
 static void pokreniPrvuFazu()
 {
   int relej = odaberiRelej();
-  
-  if (relej == 0) {
-    // Even relay (parni) - activate parni, deactivate neparni
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-  } else {
-    // Odd relay (neparni) - activate neparni, deactivate parni
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-  }
+  aktivirajRelejskuFazu(false);
   
   vrijemePocetkaImpulsa = millis();
   impulsUTijeku = true;
@@ -211,20 +222,7 @@ void upravljajKazaljkama()
   
   // Transition from first phase to second phase after 3 seconds
   if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
-    // Switch to second phase: reverse relay polarity for same relay
-    // (ULN2803 driver approach: alternate which relay is energized)
-    int relej = odaberiRelej();
-    
-    if (relej == 0) {
-      // Reverse: activate EVEN instead of ODD
-      digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-      digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-    } else {
-      // Reverse: activate ODD instead of EVEN
-      digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-      digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-    }
-    
+    aktivirajRelejskuFazu(true);
     vrijemePocetkaImpulsa = millis();
     drugaFaza = true;
   }
@@ -294,14 +292,7 @@ static void normalnaKorekcija()
     
     // First phase to second phase transition
     if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
-      int relej = odaberiRelej();
-      if (relej == 0) {
-        digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-        digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-      } else {
-        digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-        digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-      }
+      aktivirajRelejskuFazu(true);
       vrijemePocetkaImpulsa = sadaMs;
       drugaFaza = true;
     }
@@ -408,14 +399,7 @@ static void agresivnaKorekcija()
     
     // First phase to second phase
     if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
-      int relej = odaberiRelej();
-      if (relej == 0) {
-        digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-        digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-      } else {
-        digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-        digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-      }
+      aktivirajRelejskuFazu(true);
       vrijemePocetkaImpulsa = sadaMs;
       drugaFaza = true;
     }
@@ -550,35 +534,21 @@ void pomakniKazaljkeZa(int brojMinuta)
 // Executes one full 6-second impulse immediately
 static void odradiJedanPomakBlokirajuci()
 {
-  // First phase: energize selected relay
-  int relej = odaberiRelej();
-  if (relej == 0) {
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-  } else {
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-  }
+  // First phase: aktiviraj relej prema trenutnom paritetu K_minuta.
+  aktivirajRelejskuFazu(false);
   
   // Wait for first phase
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
   
-  // Second phase: switch to other relay
-  if (relej == 0) {
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-  } else {
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-  }
+  // Gasimo oba releja prije druge faze.
+  digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
+  digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
   
   // Brief pause between phases
   odradiPauzuSaLCD(200);
   
-  // Activate second phase relay
-  if (relej == 0) {
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, HIGH);
-  } else {
-    digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, HIGH);
-    digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-  }
+  // Activate second phase relay (suprotni od prve faze).
+  aktivirajRelejskuFazu(true);
   
   // Wait for second phase
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
@@ -641,6 +611,7 @@ void kompenzirajKazaljke(bool pametanMod)
   // Move in blocking mode (used during boot or correction)
   // Execute one impulse for each minute of difference
   for (int i = 0; i < razlika; i++) {
+    osvjeziWatchdog();
     odradiJedanPomakBlokirajuci();
   }
   
