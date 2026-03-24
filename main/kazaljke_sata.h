@@ -15,3 +15,7 @@ bool suKazaljkeUSinkronu();
 int dohvatiMemoriraneKazaljkeMinuta();
 void oznaciKazaljkeKaoSinkronizirane();
 void obavijestiKazaljkeDSTPromjena(int pomakMinuta);
+
+// Ručna pozicija i brza korekcija kazaljki
+void postaviRucnuPozicijuKazaljki(int satKazaljke, int minutaKazaljke);
+void pokreniBudnoKorekciju();

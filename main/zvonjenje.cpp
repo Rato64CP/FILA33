@@ -3,8 +3,8 @@
 // Celebration and Funeral modes moved to otkucavanje.cpp
 //
 // System Requirements:
-// - uključiZvono()/isključiZvono() for BELL1/BELL2 only
-// - obradiCavleNaPloči() after plate N phase completes
+// - ukljuciZvono()/iskljuciZvono() for BELL1/BELL2 only
+// - obradiCavleNaPloci() after plate N phase completes
 // - aktivirajZvonaAkoTrebaju() at HH:XX:30 (30s after minute start)
 // - jeLiInerciaAktivna() - 90 second inertia from BELL commands only
 // - MQTT: toranj/bell1/cmd, toranj/bell2/cmd, toranj/bell1/state, toranj/bell2/state
@@ -88,7 +88,7 @@ static void deaktivirajBell2_Relej() {
 
 // Process plate mechanical cam inputs (5 sensors)
 // Called at minute boundary after plate N-phase completes
-void obradiCavleNaPloči() {
+void obradiCavleNaPloci() {
   DateTime sada = dohvatiTrenutnoVrijeme();
   unsigned long sadaMs = millis();
   
@@ -128,7 +128,7 @@ void obradiCavleNaPloči() {
   
   // Activate bells
   if (treba_bell1 && !zvona.bell1_aktivan) {
-    uključiZvono(1);
+    ukljuciZvono(1);
     zvona.bell1_start_ms = sadaMs;
     zvona.bell1_duration_ms = trajanje_bell;
     
@@ -137,7 +137,7 @@ void obradiCavleNaPloči() {
   }
   
   if (treba_bell2 && !zvona.bell2_aktivan) {
-    uključiZvono(2);
+    ukljuciZvono(2);
     zvona.bell2_start_ms = sadaMs;
     zvona.bell2_duration_ms = trajanje_bell;
     
@@ -174,7 +174,7 @@ void aktivirajZvonaAkoTrebaju() {
       unsigned long trajanje = dohvatiTrajanjeZvonjenjaRadniMs();
       if (trajanje == 0) trajanje = 120000UL;
       
-      uključiZvono(1);
+      ukljuciZvono(1);
       zvona.bell1_start_ms = sadaMs;
       zvona.bell1_duration_ms = trajanje;
       
@@ -188,7 +188,7 @@ void aktivirajZvonaAkoTrebaju() {
       unsigned long trajanje = dohvatiTrajanjeZvonjenjaRadniMs();
       if (trajanje == 0) trajanje = 120000UL;
       
-      uključiZvono(2);
+      ukljuciZvono(2);
       zvona.bell2_start_ms = sadaMs;
       zvona.bell2_duration_ms = trajanje;
       
@@ -203,7 +203,7 @@ void aktivirajZvonaAkoTrebaju() {
 // ==================== PUBLIC API ====================
 
 // Enable Bell N (1=Bell1, 2=Bell2)
-void uključiZvono(int zvono) {
+void ukljuciZvono(int zvono) {
   if (zvono == 1) {
     if (!zvona.bell1_aktivan) {
       aktivirajBell1_Relej();
@@ -217,13 +217,8 @@ void uključiZvono(int zvono) {
   }
 }
 
-// ASCII spelling variant
-void ukljuciZvono(int zvono) {
-  uključiZvono(zvono);
-}
-
 // Disable Bell N
-void isključiZvono(int zvono) {
+void iskljuciZvono(int zvono) {
   if (zvono == 1) {
     if (zvona.bell1_aktivan) {
       deaktivirajBell1_Relej();
@@ -239,11 +234,6 @@ void isključiZvono(int zvono) {
     inercija.inercija_aktivna = true;
     inercija.vrijeme_pocetka = millis();
   }
-}
-
-// ASCII spelling variant
-void iskljuciZvono(int zvono) {
-  isključiZvono(zvono);
 }
 
 // Check if inertia is active
@@ -272,12 +262,12 @@ bool jeZvonoUTijeku() {
 
 // Activate bell with specific duration (for MQTT and mechanical inputs)
 void aktivirajZvonjenje(int zvono) {
-  uključiZvono(zvono);
+  ukljuciZvono(zvono);
 }
 
 // Deactivate bell (for MQTT)
 void deaktivirajZvonjenje(int zvono) {
-  isključiZvono(zvono);
+  iskljuciZvono(zvono);
 }
 
 // ==================== CELEBRATION/FUNERAL STUBS ====================
@@ -346,7 +336,7 @@ void upravljajZvonom() {
   if (zvona.bell1_aktivan) {
     unsigned long proteklo = sadaMs - zvona.bell1_start_ms;
     if (proteklo >= zvona.bell1_duration_ms) {
-      isključiZvono(1);
+      iskljuciZvono(1);
       String log = F("Bell1: trajanje isteklo");
       posaljiPCLog(log);
     }
@@ -356,7 +346,7 @@ void upravljajZvonom() {
   if (zvona.bell2_aktivan) {
     unsigned long proteklo = sadaMs - zvona.bell2_start_ms;
     if (proteklo >= zvona.bell2_duration_ms) {
-      isključiZvono(2);
+      iskljuciZvono(2);
       String log = F("Bell2: trajanje isteklo");
       posaljiPCLog(log);
     }
@@ -367,7 +357,7 @@ void upravljajZvonom() {
   DateTime sada = dohvatiTrenutnoVrijeme();
   if (sada.minute() != zadnja_minuta_mehanike) {
     zadnja_minuta_mehanike = sada.minute();
-    obradiCavleNaPloči();
+    obradiCavleNaPloci();
   }
   
   // Automatic bell activation

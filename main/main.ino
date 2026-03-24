@@ -35,6 +35,7 @@
 #include <EEPROM.h>
 #include <string.h>
 #include <stdio.h>
+#include "watchdog.h"
 
 // ==================== PIN DEFINITIONS ====================
 

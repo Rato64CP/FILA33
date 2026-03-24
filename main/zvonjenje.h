@@ -8,18 +8,16 @@ void inicijalizirajZvona();
 void upravljajZvonom();
 
 // Enable Bell 1 or 2
-void uključiZvono(int zvono);
-void ukljuciZvono(int zvono);  // ASCII variant
+void ukljuciZvono(int zvono);
 
 // Disable Bell 1 or 2
-void isključiZvono(int zvono);
-void iskljuciZvono(int zvono);  // ASCII variant
+void iskljuciZvono(int zvono);
 
 // Check if any bell is ringing
 bool jeZvonoUTijeku();
 
 // Process mechanical plate inputs
-void obradiCavleNaPloči();
+void obradiCavleNaPloci();
 
 // Activate bells if conditions met
 void aktivirajZvonaAkoTrebaju();
