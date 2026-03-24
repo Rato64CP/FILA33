@@ -5,6 +5,7 @@
 
 void inicijalizirajKazaljke();
 void upravljajKazaljkama();
+void upravljajKorekcijomKazaljki();
 void postaviTrenutniPolozajKazaljki(int trenutnaMinuta);
 // Ako je pametanMod ukljucen, funkcije ce izbjeci nepotrebne pomake
 // kada je razlika mala i umjesto toga sacekati sljedeci impuls.

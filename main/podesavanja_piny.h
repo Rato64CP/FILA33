@@ -61,7 +61,7 @@
 // ==================== CELEBRATION AND FUNERAL BUTTONS ====================
 // New buttons for celebration and funeral modes with mutual exclusion
 
-#define PIN_KEY_CELEBRATION           41  // Celebration button toggle (PIN 41)
+#define PIN_KEY_CELEBRATION           43  // Celebration button toggle (PIN 43)
 #define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
 
 // ==================== SERIAL COMMUNICATION ====================

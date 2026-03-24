@@ -8,7 +8,7 @@
 // - CELEBRATION: Alternating hammers every 600ms (200 BPM tempo)
 // - FUNERAL: Single hammer every 1.5s (40 BPM slow rhythm)
 // - Celebration + Funeral modes ONLY in otkucavanje.cpp, NOT in zvonjenje.cpp
-// - PIN 41 (PIN_KEY_CELEBRATION): Celebration button toggle with 30ms debouncing
+// - PIN 43 (PIN_KEY_CELEBRATION): Celebration button toggle with 30ms debouncing
 // - PIN 42 (PIN_KEY_FUNERAL): Funeral button toggle with 30ms debouncing
 // - MQTT: toranj/slavljenje/cmd (celebration), toranj/mrt/cmd (funeral)
 
@@ -108,7 +108,7 @@ static DateTime zadnje_izmjereno_vrijeme;       // Track minute boundaries
 
 // Button state tracking with debouncing
 static struct {
-  // Celebration button (PIN 41)
+  // Celebration button (PIN 43)
   bool prethodno_stanje_slavljenja;           // Previous state of celebration button
   unsigned long vrijeme_promjene_slavljenja;  // When state change started
   bool debounce_u_tijeku_slavljenja;          // Is debouncing in progress
@@ -427,9 +427,9 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
   }
 }
 
-// ==================== BUTTON DEBOUNCING (PIN 41 & 42) ====================
+// ==================== BUTTON DEBOUNCING (PIN 43 & 42) ====================
 
-// Debounce celebration button (PIN 41) with 30ms window
+// Debounce celebration button (PIN 43) with 30ms window
 static void provjeriDugmeSlavljenja(unsigned long sadaMs) {
   bool trenutnoStanje = (digitalRead(PIN_KEY_CELEBRATION) == LOW);  // LOW = pressed
   
@@ -560,7 +560,7 @@ void upravljajOtkucavanjem() {
   unsigned long sadaMs = millis();
   DateTime sada = dohvatiTrenutnoVrijeme();
   
-  // Check celebration/funeral buttons (PIN 41/42) with debouncing
+  // Check celebration/funeral buttons (PIN 43/42) with debouncing
   provjeriDugmeSlavljenja(sadaMs);
   provjeriDugmeMrtvackog(sadaMs);
   

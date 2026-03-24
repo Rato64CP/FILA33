@@ -29,3 +29,6 @@ bool jeMQTTPovezan();
 
 // Reconnect to MQTT broker
 void reconnectMQTT();
+
+// Obrada linije s ESP-a koju je pročitao serijski sloj (Serial3 owner).
+void obradiMQTTLinijuIzESPa(const String& line);
