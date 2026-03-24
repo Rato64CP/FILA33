@@ -378,7 +378,7 @@ void objavi(const String& tema, const String& vrijednost) {
   komanda += "|";
   komanda += vrijednost;
   
-  Serial3.println(komanda);  // Send to ESP8266
+  posaljiESPKomandu(komanda);  // Send to ESP8266
 }
 
 void pretplati(const String& tema) {
@@ -389,7 +389,7 @@ void pretplati(const String& tema) {
   String komanda = "MQTT:SUB|";
   komanda += tema;
   
-  Serial3.println(komanda);  // Send to ESP8266
+  posaljiESPKomandu(komanda);  // Send to ESP8266
 }
 
 bool jeMQTTPovezan() {
@@ -417,7 +417,7 @@ void reconnectMQTT() {
   komanda += "|";
   komanda += String(MQTT_PORT);
   
-  Serial3.println(komanda);
+  posaljiESPKomandu(komanda);
   
   posaljiPCLog(F("MQTT: Reconnect attempt sent to ESP8266"));
 }
@@ -425,9 +425,6 @@ void reconnectMQTT() {
 // ==================== INITIALIZATION & MAIN LOOP ====================
 
 void inicijalizirajMQTT() {
-  // Initialize Serial3 for ESP8266 communication
-  Serial3.begin(9600);
-  
   mqtt_connected = false;
   last_status_publish = 0;
   last_mqtt_reconnect = 0;
@@ -452,7 +449,7 @@ void upravljajMQTT() {
     last_connection_check = sada;
     
     // Check if connected by querying ESP8266
-    Serial3.println("MQTT:STATUS");
+    posaljiESPKomandu("MQTT:STATUS");
   }
   
   // Try to reconnect if not connected
@@ -470,35 +467,44 @@ void upravljajMQTT() {
     discovery_published = true;
   }
   
-  // Process incoming MQTT messages from ESP8266
-  while (Serial3.available()) {
-    String line = Serial3.readStringUntil('\n');
-    line.trim();
-    
-    // Parse ESP8266 MQTT callback format: "MQTT:MSG|topic|payload"
-    if (line.startsWith("MQTT:MSG|")) {
-      int pipe1 = line.indexOf('|', 9);
-      int pipe2 = line.lastIndexOf('|');
-      
-      if (pipe1 > 0 && pipe2 > pipe1) {
-        String tema = line.substring(9, pipe1);
-        String poruka = line.substring(pipe2 + 1);
-        
-        obradiMQTTKomandu(tema, poruka);
-      }
+}
+
+void obradiMQTTLinijuIzESPa(const String& line) {
+  if (!line.startsWith("MQTT:")) {
+    return;
+  }
+
+  // Parse ESP8266 MQTT callback format: "MQTT:MSG|topic|payload"
+  if (line.startsWith("MQTT:MSG|")) {
+    int pipe1 = line.indexOf('|', 9);
+    int pipe2 = line.lastIndexOf('|');
+
+    if (pipe1 > 0 && pipe2 > pipe1) {
+      String tema = line.substring(9, pipe1);
+      String poruka = line.substring(pipe2 + 1);
+      obradiMQTTKomandu(tema, poruka);
     }
-    // Parse connection status: "MQTT:CONNECTED" or "MQTT:DISCONNECTED"
-    else if (line == "MQTT:CONNECTED") {
-      if (!mqtt_connected) {
-        mqtt_connected = true;
-        posaljiPCLog(F("MQTT: Connected to broker"));
-      }
+    return;
+  }
+
+  // Parse connection status: "MQTT:CONNECTED" or "MQTT:DISCONNECTED"
+  if (line == "MQTT:CONNECTED") {
+    if (!mqtt_connected) {
+      mqtt_connected = true;
+      posaljiPCLog(F("MQTT: Connected to broker"));
     }
-    else if (line == "MQTT:DISCONNECTED") {
-      if (mqtt_connected) {
-        mqtt_connected = false;
-        posaljiPCLog(F("MQTT: Disconnected from broker"));
-      }
+    return;
+  }
+
+  if (line == "MQTT:DISCONNECTED") {
+    if (mqtt_connected) {
+      mqtt_connected = false;
+      posaljiPCLog(F("MQTT: Disconnected from broker"));
     }
+    return;
+  }
+
+  if (line.startsWith("MQTT:")) {
+    posaljiPCLog(String(F("MQTT: Nepoznata linija s ESP-a: ")) + line);
   }
 }

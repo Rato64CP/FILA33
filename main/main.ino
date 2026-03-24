@@ -52,7 +52,7 @@ void loop() {
 
   upravljajZvonom();
   upravljajOtkucavanjem();
-  upravljajKazaljkama();
+  upravljajKorekcijomKazaljki();
   upravljajPlocom();
 
   upravljajMQTT();

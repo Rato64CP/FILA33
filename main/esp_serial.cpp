@@ -9,6 +9,7 @@
 #include "pc_serial.h"
 #include "kazaljke_sata.h"
 #include "postavke.h"
+#include "mqtt_handler.h"
 
 // Always use Serial3 (for Mega 2560 tower clock)
 static HardwareSerial &espSerijskiPort = Serial3;
@@ -39,6 +40,10 @@ void posaljiWifiPostavkeESP() {
   espSerijskiPort.println(dohvatiZadaniGateway());
 
   posaljiPCLog(F("Poslane WiFi postavke ESP-u"));
+}
+
+void posaljiESPKomandu(const String& komanda) {
+  espSerijskiPort.println(komanda);
 }
 
 static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
@@ -111,12 +116,11 @@ void obradiESPSerijskuKomunikaciju() {
           espSerijskiPort.println(F("ACK:NTP"));
           posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
 
-          // Check and compensate hands after new NTP sync
+          // Check and start dynamic hand correction after new NTP sync
           if (!suKazaljkeUSinkronu()) {
             posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP"));
-            kompenzirajKazaljke(false);
-            oznaciKazaljkeKaoSinkronizirane();
-            posaljiPCLog(F("Kompenzacija kazaljki dovrsen nakon NTP sinkronizacije"));
+            pokreniBudnoKorekciju();
+            posaljiPCLog(F("Pokrenuta dinamička korekcija kazaljki nakon NTP sinkronizacije"));
           } else {
             posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
           }
@@ -151,6 +155,10 @@ void obradiESPSerijskuKomunikaciju() {
           espSerijskiPort.println(F("ERR:CMD"));
           posaljiPCLog(String(F("Nepoznata CMD naredba: ")) + komanda);
         }
+      }
+      // MQTT transport line - route to MQTT handler
+      else if (ulazniBuffer.startsWith("MQTT:")) {
+        obradiMQTTLinijuIzESPa(ulazniBuffer);
       }
       // Other lines - just log
       else {

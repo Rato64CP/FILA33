@@ -5,16 +5,9 @@
 #include "pc_serial.h"
 #include "debouncing.h"
 #include "menu_system.h"
+#include "podesavanja_piny.h"
 
 // ==================== KEYPAD CONFIGURATION ====================
-
-// Define 6-key keypad pins (assuming standard digital pins)
-#define PIN_KEY_UP      36
-#define PIN_KEY_DOWN    37
-#define PIN_KEY_LEFT    38
-#define PIN_KEY_RIGHT   39
-#define PIN_KEY_SELECT  40
-#define PIN_KEY_BACK    41
 
 // Key state tracking
 static struct {
