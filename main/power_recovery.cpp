@@ -30,6 +30,7 @@ static unsigned long boot_time = 0;
 static unsigned long last_state_save_time = 0;
 static uint32_t reset_counter = 0;
 static uint32_t uptime_counter = 0;
+static bool boot_recovery_odraden = false;
 
 struct SystemStateBackup {
   uint32_t hand_position_k_minuta;
@@ -69,6 +70,12 @@ void povecajUptimeBrojac() {
 }
 
 void odradiBootRecovery() {
+  if (boot_recovery_odraden) {
+    posaljiPCLog(F("Power Recovery: Boot recovery već odrađen, preskačem"));
+    return;
+  }
+  boot_recovery_odraden = true;
+
   posaljiPCLog(F("Power Recovery: Boot recovery sequence started"));
 
   if (!watchdog_reset && !power_loss_detected) {
@@ -191,11 +198,11 @@ bool provjeriZdravostEEPROM() {
 void inicijalizirajPowerRecovery() {
   boot_time = millis();
   last_state_save_time = boot_time;
+  boot_recovery_odraden = false;
 
   if (!provjeriZdravostEEPROM()) {
     posaljiPCLog(F("Power Recovery: WARNING - EEPROM health issues detected"));
   }
 
-  odradiBootRecovery();
   spremiKriticalnoStanje();
 }

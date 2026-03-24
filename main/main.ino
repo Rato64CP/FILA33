@@ -28,7 +28,6 @@ void setup() {
   ucitajPostavke();
 
   inicijalizirajTipke();
-  inicijalizirajDebouncing();
   inicijalizirajESP();
   inicijalizirajMQTT();
   inicijalizirajMenuSistem();

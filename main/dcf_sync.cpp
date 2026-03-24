@@ -150,8 +150,7 @@ void inicijalizirajDCF() {
   // Initialize last check timestamp to force check on first call
   zadnjaProvjeraMillis = 0;
   
-  posaljiPCLog(F("DCF77: Inicijaliziran na PIN "));
-  String log = F("PIN = ");
+  String log = F("DCF77: Inicijaliziran na PIN = ");
   log += PIN_DCF_SIGNAL;
   posaljiPCLog(log);
 }
