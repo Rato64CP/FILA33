@@ -1,6 +1,10 @@
 // lcd_display.h
 #pragma once
 
+#include <LiquidCrystal_I2C.h>
+
+extern LiquidCrystal_I2C lcd;
+
 void inicijalizirajLCD();
 void prikaziSat();
 void prikaziPostavke();

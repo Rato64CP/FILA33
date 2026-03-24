@@ -1,7 +1,6 @@
 // watchdog.cpp – Watchdog monitoring za 24/7 pouzdanost
 #include <Arduino.h>
 #include <avr/wdt.h>
-#include <EEPROM.h>
 #include "watchdog.h"
 #include "pc_serial.h"
 
@@ -45,26 +44,4 @@ void osvjeziWatchdog() {
   // Resetiraj WDT brojač
   // Mora se pozivati najmanje svakih 8 sekundi kako bi se izbjeglo resetiranje
   wdt_reset();
-}
-
-// ==================== GRACEFUL SHUTDOWN ====================
-
-void gracioznoGasenje() {
-  // Funkcija za graceful shutdown prije gubitka napajanja
-  // Korisne je ako je dostupan signal za detekciju pada napona (Power Loss Detection)
-  
-  posaljiPCLog(F("WDT: Graceful shutdown u tijeku..."));
-  
-  // Spremi kritične podatke prije nego što se napajanje izgubi
-  // (već se sprema u okretna_ploca.cpp, kazaljke_sata.cpp, itd.)
-  
-  // Isključi sve releje kako bi se izbjegla oštećenja
-  // (to se radi u individualnim modulima)
-  
-  // Sačekaj malo kako bi se osigurao schrijani EEPROM
-  delay(100);
-  
-  // Sada možemo bezbjedno čekati na gubitak napajanja
-  // Watchdog će resetirati sistem ako se oporavimo
-  posaljiPCLog(F("WDT: Spreman za gubitak napajanja"));
 }
