@@ -38,9 +38,11 @@ void setup() {
   inicijalizirajPlocu();
   inicijalizirajDCF();
 
+  inicijalizirajWatchdog();
+  oznaciWatchdogReset(jeWatchdogResetDetektiran());
+  oznaciGubitakNapajanja(jePowerLossResetDetektiran());
   inicijalizirajPowerRecovery();
   odradiBootRecovery();
-  inicijalizirajWatchdog();
 }
 
 void loop() {
