@@ -10,6 +10,8 @@
 static EepromLayout::PostavkeSpremnik postavke = {
   6,              // satOd: Otkucavanje od 6h
   22,             // satDo: Otkucavanje do 22h
+  22,             // tihiSatiOd: Početak tihih sati za satne otkucaje
+  6,              // tihiSatiDo: Kraj tihih sati za satne otkucaje
   600,            // plocaPocetakMinuta: 10:00
   1200,           // plocaKrajMinuta: 20:00
   150,            // trajanjeImpulsaCekicaMs: 150 ms
@@ -53,8 +55,13 @@ void ucitajPostavke() {
   
   // Validacija učitanih vrijednosti
   if (postavke.satOd < 0) postavke.satOd = 6;
+  if (postavke.satOd > 23) postavke.satOd = 6;
+  if (postavke.satDo < 0) postavke.satDo = 22;
   if (postavke.satDo > 23) postavke.satDo = 22;
   if (postavke.satDo <= postavke.satOd) postavke.satDo = postavke.satOd + 8;
+  if (postavke.satDo > 23) postavke.satDo = 23;
+  if (postavke.tihiSatiOd < 0 || postavke.tihiSatiOd > 23) postavke.tihiSatiOd = 22;
+  if (postavke.tihiSatiDo < 0 || postavke.tihiSatiDo > 23) postavke.tihiSatiDo = 6;
   osigurajNullTerminiraneMreznePostavke();
   
   if (postavke.trajanjeImpulsaCekicaMs < 50) postavke.trajanjeImpulsaCekicaMs = 150;
@@ -95,6 +102,49 @@ bool dohvatiDozvoljenoZvonjenjeBell2() {
 
 bool jeDozvoljenoOtkucavanjeUSatu(int sat) {
   return sat >= postavke.satOd && sat < postavke.satDo;
+}
+
+bool jeTihiPeriodAktivanZaSatneOtkucaje(int sat) {
+  sat = constrain(sat, 0, 23);
+
+  // Ako su sati jednaki, tihi period je isključen.
+  if (postavke.tihiSatiOd == postavke.tihiSatiDo) {
+    return false;
+  }
+
+  // Raspon preko ponoći, npr. 22->6.
+  if (postavke.tihiSatiOd > postavke.tihiSatiDo) {
+    return sat >= postavke.tihiSatiOd || sat < postavke.tihiSatiDo;
+  }
+
+  // Standardni raspon unutar istog dana, npr. 13->16.
+  return sat >= postavke.tihiSatiOd && sat < postavke.tihiSatiDo;
+}
+
+int dohvatiTihiPeriodOdSata() {
+  return postavke.tihiSatiOd;
+}
+
+int dohvatiTihiPeriodDoSata() {
+  return postavke.tihiSatiDo;
+}
+
+void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo) {
+  satOd = constrain(satOd, 0, 23);
+  satDo = constrain(satDo, 0, 23);
+
+  postavke.tihiSatiOd = satOd;
+  postavke.tihiSatiDo = satDo;
+
+  WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
+                      EepromLayout::SLOTOVI_POSTAVKE,
+                      postavke);
+
+  String log = F("Tihi sati satnih otkucaja: ");
+  log += postavke.tihiSatiOd;
+  log += F("-");
+  log += postavke.tihiSatiDo;
+  posaljiPCLog(log);
 }
 
 unsigned int dohvatiTrajanjeImpulsaCekica() {

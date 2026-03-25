@@ -16,6 +16,10 @@ bool dohvatiDozvoljenoZvonjenjeBell2();
 
 // Doba dana za zvona
 bool jeDozvoljenoOtkucavanjeUSatu(int sat);
+bool jeTihiPeriodAktivanZaSatneOtkucaje(int sat);
+int dohvatiTihiPeriodOdSata();
+int dohvatiTihiPeriodDoSata();
+void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo);
 
 // Trajanja raznih zvona i akcija (ms)
 unsigned int dohvatiTrajanjeImpulsaCekica();

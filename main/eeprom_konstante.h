@@ -57,6 +57,8 @@ struct PostavkeSpremnik {
   // Bell operation hours
   int satOd;                              // Hour to start striking (e.g., 6)
   int satDo;                              // Hour to stop striking (e.g., 22)
+  int tihiSatiOd;                         // Početni sat tihog perioda za satne otkucaje
+  int tihiSatiDo;                         // Završni sat tihog perioda za satne otkucaje
   
   // Plate operation window (in minutes from midnight)
   int plocaPocetakMinuta;                 // Plate start time (e.g., 299 = 04:59)

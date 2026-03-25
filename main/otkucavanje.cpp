@@ -19,6 +19,7 @@
 // Hammer pulse timing (relay impulse control)
 const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;  // 150ms hammer strike
 const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;       // 400ms between strikes
+const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;          // 2s između satnih udaraca
 
 // Slavljenje: točan uzorak 1-2-2 s definiranim pauzama
 const unsigned long SLAVLJENJE_TRAJANJE_UDARCA_MS = 150UL;
@@ -560,8 +561,11 @@ void upravljajOtkucavanjem() {
         int broj = sada.hour() % 12;
         if (broj == 0) broj = 12;  // 12h format
         
-        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour())) {
+        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) &&
+            !jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
           otkucajSate(broj);
+        } else if (jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
+          posaljiPCLog(F("Satno otkucavanje preskoceno: tihi sati"));
         }
       } else if (sada.minute() == 30 && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
         // Half-hour - single strike
@@ -583,6 +587,12 @@ void upravljajOtkucavanjem() {
   // Get timing configuration from settings
   unsigned long trajanje_impulsa = dohvatiTrajanjeImpulsaCekica();
   unsigned long pauza_mezi = dohvatiPauzuIzmeduUdaraca();
+
+  // Za puni sat sekvenca mora biti fiksna: 150 ms impuls + 2 s pauza.
+  if (otkucavanje.vrsta == OTKUCAVANJE_SATI) {
+    trajanje_impulsa = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
+    pauza_mezi = SATNO_OTKUCAJ_PAUZA_MS;
+  }
   
   if (trajanje_impulsa == 0) trajanje_impulsa = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   if (pauza_mezi == 0) pauza_mezi = PAUZA_MEZI_UDARACA_DEFAULT;
