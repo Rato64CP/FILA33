@@ -39,7 +39,7 @@ static const int BROJ_STAVKI_POSTAVKI = 4;
 static const char* stavkePostavki[] = {
   "Vrijeme",
   "Mod zvona",
-  "Sat zvona",
+  "Tihi sati",
   "Povratak"
 };
 
@@ -76,6 +76,12 @@ static int privremeniSat = 0;
 static int privremenaMinuta = 0;
 static int privremenaSekuned = 0;
 static int faza_vremena = 0; // 0 = hours, 1 = minutes, 2 = seconds, 3 = confirm
+
+// ==================== QUIET HOURS ADJUSTMENT ====================
+
+static int tihiSatOd = 22;
+static int tihiSatDo = 6;
+static int faza_tihih_sati = 0; // 0 = OD, 1 = DO
 
 // ==================== I2C ADDRESS DETECTION ====================
 
@@ -175,6 +181,21 @@ static void prikaziPrilagodbanjeVremena() {
   }
   redak1[sizeof(redak1) - 1] = '\0';
   redak2[sizeof(redak2) - 1] = '\0';
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziPodesavanjeTihihSati() {
+  char redak1[17];
+  char redak2[17];
+
+  if (faza_tihih_sati == 0) {
+    strncpy(redak1, "Tihi sati: OD", sizeof(redak1) - 1);
+  } else {
+    strncpy(redak1, "Tihi sati: DO", sizeof(redak1) - 1);
+  }
+  redak1[sizeof(redak1) - 1] = '\0';
+
+  snprintf(redak2, sizeof(redak2), "OD:%02d DO:%02d", tihiSatOd, tihiSatDo);
   prikaziPoruku(redak1, redak2);
 }
 
@@ -316,9 +337,12 @@ static void obradiKlucPostavke(KeyEvent event) {
         trenutnoStanje = MENU_STATE_MODE_SELECT;
         posaljiPCLog(F("Ulazak u izbor moda"));
       } else if (odabraniIndex == 2) {
-        // Time enable/disable
-        postaviBlokaduOtkucavanja(jeZvonoUTijeku());
-        posaljiPCLog(F("Toggle otkucavanja"));
+        // Quiet hours for hourly strikes
+        tihiSatOd = dohvatiTihiPeriodOdSata();
+        tihiSatDo = dohvatiTihiPeriodDoSata();
+        faza_tihih_sati = 0;
+        trenutnoStanje = MENU_STATE_QUIET_HOURS;
+        posaljiPCLog(F("Ulazak u podesavanje tihih sati"));
       } else if (odabraniIndex == 3) {
         // Back
         odabraniIndex = 1;
@@ -328,6 +352,42 @@ static void obradiKlucPostavke(KeyEvent event) {
     case KEY_BACK:
       odabraniIndex = 1;
       trenutnoStanje = MENU_STATE_MAIN_MENU;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucTihiSati(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      if (faza_tihih_sati == 0) {
+        tihiSatOd = (tihiSatOd + 1) % 24;
+      } else {
+        tihiSatDo = (tihiSatDo + 1) % 24;
+      }
+      break;
+    case KEY_DOWN:
+      if (faza_tihih_sati == 0) {
+        tihiSatOd = (tihiSatOd - 1 + 24) % 24;
+      } else {
+        tihiSatDo = (tihiSatDo - 1 + 24) % 24;
+      }
+      break;
+    case KEY_SELECT:
+      if (faza_tihih_sati == 0) {
+        faza_tihih_sati = 1;
+      } else {
+        postaviTihiPeriodSatnihOtkucaja(tihiSatOd, tihiSatDo);
+        faza_tihih_sati = 0;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+        posaljiPCLog(F("Tihi sati spremljeni"));
+      }
+      break;
+    case KEY_BACK:
+      faza_tihih_sati = 0;
+      trenutnoStanje = MENU_STATE_SETTINGS;
+      posaljiPCLog(F("Tihi sati: odustajanje bez spremanja"));
       break;
     default:
       break;
@@ -592,6 +652,10 @@ void obradiKluc(KeyEvent event) {
     case MENU_STATE_TIME_ADJUST:
       obradiKlucPrilagodbanjeVremena(event);
       break;
+
+    case MENU_STATE_QUIET_HOURS:
+      obradiKlucTihiSati(event);
+      break;
     
     case MENU_STATE_MODE_SELECT:
       obradiKlucModeSelect(event);
@@ -651,6 +715,9 @@ void osvjeziLCDZaMeni() {
       break;
     case MENU_STATE_TIME_ADJUST:
       prikaziPrilagodbanjeVremena();
+      break;
+    case MENU_STATE_QUIET_HOURS:
+      prikaziPodesavanjeTihihSati();
       break;
     case MENU_STATE_MODE_SELECT:
       prikaziIzbiraModaZvona();
