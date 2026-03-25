@@ -555,22 +555,25 @@ void upravljajOtkucavanjem() {
     if (sada.minute() != zadnja_minuta) {
       zadnja_minuta = sada.minute();
       
-      // Check if it's hour (minute==0) or half-hour (minute==30)
+      // Provjera automatskog otkucavanja na puni sat (00) i pola sata (30)
       if (sada.minute() == 0 && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        // Hour - ring hour count
+        // Puni sat: broj udaraca u 12-satnom formatu
         int broj = sada.hour() % 12;
-        if (broj == 0) broj = 12;  // 12h format
+        if (broj == 0) broj = 12;  // 12-satni format
         
-        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) &&
-            !jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
+        bool tihiSatiAktivni = jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour());
+        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) && !tihiSatiAktivni) {
           otkucajSate(broj);
-        } else if (jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
+        } else if (tihiSatiAktivni) {
           posaljiPCLog(F("Satno otkucavanje preskoceno: tihi sati"));
         }
       } else if (sada.minute() == 30 && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        // Half-hour - single strike
-        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour())) {
+        // Pola sata: jedan udarac, također blokiran tijekom tihih sati
+        bool tihiSatiAktivni = jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour());
+        if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) && !tihiSatiAktivni) {
           otkucajPolasata();
+        } else if (tihiSatiAktivni) {
+          posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi sati"));
         }
       }
     }
