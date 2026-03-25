@@ -32,9 +32,6 @@ static struct {
   unsigned long trajanje_ms;
 } inercija = {false, 0, TRAJANJE_INERCIJE_MS};
 
-// Track last activated minute
-static int zadnja_aktivirana_minuta = -1;
-
 // ==================== RELAY CONTROL ====================
 
 // Enable Bell 1 relay
@@ -135,60 +132,6 @@ void obradiCavleNaPloci() {
   }
 }
 
-// ==================== AUTOMATIC BELL ACTIVATION ====================
-
-// Activate bells at HH:XX:30
-void aktivirajZvonaAkoTrebaju() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  unsigned long sadaMs = millis();
-  
-  // Only at second 30
-  if (sada.second() != 30) {
-    return;
-  }
-  
-  // Prevent duplicates
-  if (sada.minute() == zadnja_aktivirana_minuta) {
-    return;
-  }
-  
-  // Check if allowed in this hour
-  if (!jeDozvoljenoOtkucavanjeUSatu(sada.hour())) {
-    return;
-  }
-  
-  // Hour (minute==0) - Bell 1
-  if (sada.minute() == 0) {
-    if (dohvatiDozvoljenoZvonjenjeBell1()) {
-      unsigned long trajanje = dohvatiTrajanjeZvonjenjaRadniMs();
-      if (trajanje == 0) trajanje = 120000UL;
-      
-      ukljuciZvono(1);
-      zvona.bell1_start_ms = sadaMs;
-      zvona.bell1_duration_ms = trajanje;
-      
-      String log = F("Autom: Bell1 za puni sat");
-      posaljiPCLog(log);
-    }
-  } 
-  // Half-hour (minute==30) - Bell 2
-  else if (sada.minute() == 30) {
-    if (dohvatiDozvoljenoZvonjenjeBell2()) {
-      unsigned long trajanje = dohvatiTrajanjeZvonjenjaRadniMs();
-      if (trajanje == 0) trajanje = 120000UL;
-      
-      ukljuciZvono(2);
-      zvona.bell2_start_ms = sadaMs;
-      zvona.bell2_duration_ms = trajanje;
-      
-      String log = F("Autom: Bell2 za pola sata");
-      posaljiPCLog(log);
-    }
-  }
-  
-  zadnja_aktivirana_minuta = sada.minute();
-}
-
 // ==================== PUBLIC API ====================
 
 // Enable Bell N (1=Bell1, 2=Bell2)
@@ -279,8 +222,6 @@ void inicijalizirajZvona() {
   zvona.bell1_aktivan = false;
   zvona.bell2_aktivan = false;
   inercija.inercija_aktivna = false;
-  zadnja_aktivirana_minuta = -1;
-  
   posaljiPCLog(F("Zvona: inicijalizirana - BELL CONTROL ONLY"));
 }
 
@@ -320,6 +261,4 @@ void upravljajZvonom() {
     obradiCavleNaPloci();
   }
   
-  // Automatic bell activation
-  aktivirajZvonaAkoTrebaju();
 }
