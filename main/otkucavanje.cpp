@@ -28,11 +28,14 @@
 const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;  // 150ms hammer strike
 const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;       // 400ms between strikes
 
-// Celebration mode tempo: alternating hammers every 600ms
-const unsigned long SLAVLJENJE_TEMPO_MS = 600UL;              // 200 BPM alternating rhythm
+// Slavljenje: točan uzorak 1-2-2 s definiranim pauzama
+const unsigned long SLAVLJENJE_TRAJANJE_UDARCA_MS = 150UL;
+const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS = 300UL;
+const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS = 150UL;
 
-// Funeral mode tempo: slow single hammer every 1500ms
-const unsigned long MRTVACKO_TEMPO_MS = 1500UL;               // 40 BPM slow rhythm
+// Mrtvačko: oba čekića 150ms, zatim 10s pauza
+const unsigned long MRTVACKO_TRAJANJE_UDARCA_MS = 150UL;
+const unsigned long MRTVACKO_PAUZA_MS = 10000UL;
 
 // Button debouncing: 30ms window for noise immunity
 const unsigned long DEBOUNCE_BUTTON_MS = 30UL;
@@ -70,33 +73,31 @@ static struct {
   false
 };
 
-// Celebration mode state: alternating hammer strikes every 600ms
+// Stanje slavljenja: beskonačni slijed 1,2,2 dok je način rada aktivan
 static struct {
   bool slavljenje_aktivno;            // Is celebration mode running
   unsigned long vrijeme_pocetka_ms;   // When celebration started
-  unsigned long trajanje_ms;          // How long celebration should last
-  int trenutni_cekic;                 // 1=hammer1, 2=hammer2 (alternating)
-  unsigned long vrijeme_zadnje_promjene_ms; // When we last switched hammers
-  bool cekic_aktivan;                 // Is hammer currently energized
+  int trenutni_korak;                 // 0=Č1, 1=Č2, 2=Č2
+  unsigned long vrijeme_koraka_ms;    // Vrijeme početka trenutne faze
+  bool cekic_aktivan;                 // Je li čekić trenutno uključen
+  int aktivni_pin;                    // Trenutno aktivni čekić (ako je uključen)
 } slavljenje = {
   false,
   0,
   0,
-  1,
   0,
-  false
+  false,
+  -1
 };
 
-// Funeral mode state: slow single hammer every 1500ms
+// Stanje mrtvačkog: oba čekića zajedno pa duga pauza
 static struct {
   bool mrtvacko_aktivno;              // Is funeral mode running
   unsigned long vrijeme_pocetka_ms;   // When funeral mode started
-  unsigned long trajanje_ms;          // How long funeral mode should last
-  bool cekic_aktivan;                 // Is hammer currently energized
-  unsigned long vrijeme_zadnje_promjene_ms; // When we last toggled hammer
+  bool cekici_aktivni;                // Jesu li oba čekića trenutno uključena
+  unsigned long vrijeme_faze_ms;      // Vrijeme početka trenutačne faze
 } mrtvacko = {
   false,
-  0,
   0,
   false,
   0
@@ -136,6 +137,12 @@ static void deaktivirajCekic_Internal(int pin) {
   if (pin == PIN_CEKIC_MUSKI || pin == PIN_CEKIC_ZENSKI) {
     digitalWrite(pin, LOW);
   }
+}
+
+// Sigurnosno gašenje oba čekića
+static void deaktivirajObaCekica_Internal() {
+  deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+  deaktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
 }
 
 // Check if operation can proceed (not blocked by bell inertia)
@@ -247,9 +254,7 @@ void otkucajPolasata() {
 
 // ==================== CELEBRATION MODE ====================
 
-// Start celebration mode: alternating hammers every 600ms (200 BPM)
-// Can be triggered automatically by mechanical cam or manually
-// MQTT: toranj/slavljenje/cmd with "on" payload
+// Pokretanje slavljenja: slijed Č1, Č2, Č2 s točno definiranim pauzama
 void zapocniSlavljenje() {
   unsigned long sadaMs = millis();
   
@@ -265,23 +270,15 @@ void zapocniSlavljenje() {
     return;
   }
   
-  // Get celebration duration from user settings
-  unsigned long trajanje = dohvatiTrajanjeSlavljenjaMs();
-  if (trajanje == 0) {
-    trajanje = 120000UL;  // Default 2 minutes if not configured
-  }
-  
   slavljenje.slavljenje_aktivno = true;
   slavljenje.vrijeme_pocetka_ms = sadaMs;
-  slavljenje.trajanje_ms = trajanje;
-  slavljenje.trenutni_cekic = 1;  // Start with hammer 1
-  slavljenje.vrijeme_zadnje_promjene_ms = sadaMs;
-  slavljenje.cekic_aktivan = false;
-  
-  String log = F("Slavljenje: pokrenuto, trajanje=");
-  log += trajanje;
-  log += F("ms");
-  posaljiPCLog(log);
+  slavljenje.trenutni_korak = 0; // Korak A: ČEKIĆ 1
+  slavljenje.vrijeme_koraka_ms = sadaMs;
+  slavljenje.cekic_aktivan = true;
+  slavljenje.aktivni_pin = PIN_CEKIC_MUSKI;
+  aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+
+  posaljiPCLog(F("Slavljenje: pokrenuto (uzorak Č1-Č2-Č2)"));
   signalizirajCelebration_Mode();
 }
 
@@ -289,13 +286,9 @@ void zapocniSlavljenje() {
 void zaustaviSlavljenje() {
   if (slavljenje.slavljenje_aktivno) {
     slavljenje.slavljenje_aktivno = false;
-    
-    // Deactivate any active hammer
-    if (slavljenje.cekic_aktivan) {
-      deaktivirajCekic_Internal(slavljenje.trenutni_cekic == 1 ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI);
-      slavljenje.cekic_aktivan = false;
-    }
-    
+    deaktivirajObaCekica_Internal();
+    slavljenje.cekic_aktivan = false;
+    slavljenje.aktivni_pin = -1;
     posaljiPCLog(F("Slavljenje: zaustavljeno"));
   }
 }
@@ -305,50 +298,40 @@ bool jeSlavljenjeUTijeku() {
   return slavljenje.slavljenje_aktivno;
 }
 
-// Update celebration mode (alternating 600ms tempo)
+// Ažuriranje slavljenja (neblokirajući automat stanja)
 static void azurirajSlavljenje(unsigned long sadaMs) {
   if (!slavljenje.slavljenje_aktivno) {
     return;
   }
-  
-  // Check if duration has expired
-  unsigned long proteklo = sadaMs - slavljenje.vrijeme_pocetka_ms;
-  if (proteklo >= slavljenje.trajanje_ms) {
-    zaustaviSlavljenje();
+
+  const unsigned long proteklo = sadaMs - slavljenje.vrijeme_koraka_ms;
+  const unsigned long trazena_pauza = (slavljenje.trenutni_korak == 0)
+      ? SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS
+      : SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS;
+
+  if (slavljenje.cekic_aktivan) {
+    if (proteklo >= SLAVLJENJE_TRAJANJE_UDARCA_MS) {
+      deaktivirajCekic_Internal(slavljenje.aktivni_pin);
+      slavljenje.cekic_aktivan = false;
+      slavljenje.aktivni_pin = -1;
+      slavljenje.vrijeme_koraka_ms = sadaMs;
+    }
     return;
   }
-  
-  // Alternate between hammers every 600ms (200 BPM)
-  unsigned long proteklo_promjene = sadaMs - slavljenje.vrijeme_zadnje_promjene_ms;
-  
-  if (proteklo_promjene >= SLAVLJENJE_TEMPO_MS) {
-    slavljenje.vrijeme_zadnje_promjene_ms = sadaMs;
-    
-    // Switch to other hammer
-    slavljenje.trenutni_cekic = (slavljenje.trenutni_cekic == 1) ? 2 : 1;
-    
-    int pin = (slavljenje.trenutni_cekic == 1) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
-    
-    // Deactivate old, activate new
-    if (slavljenje.cekic_aktivan) {
-      int stari_pin = (slavljenje.trenutni_cekic == 2) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
-      deaktivirajCekic_Internal(stari_pin);
-    }
-    
-    aktivirajCekic_Internal(pin);
+
+  if (proteklo >= trazena_pauza) {
+    slavljenje.trenutni_korak = (slavljenje.trenutni_korak + 1) % 3;
+    const int sljedeci_pin = (slavljenje.trenutni_korak == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
+    aktivirajCekic_Internal(sljedeci_pin);
+    slavljenje.aktivni_pin = sljedeci_pin;
     slavljenje.cekic_aktivan = true;
-    
-    String log = F("Slavljenje: hammer ");
-    log += slavljenje.trenutni_cekic;
-    posaljiPCLog(log);
+    slavljenje.vrijeme_koraka_ms = sadaMs;
   }
 }
 
 // ==================== FUNERAL MODE ====================
 
-// Start funeral mode: slow single hammer every 1500ms (40 BPM)
-// Traditional slow bell-like striking
-// MQTT: toranj/mrt/cmd with "on" payload
+// Pokretanje mrtvačkog: oba čekića 150ms, zatim 10s pauza
 void zapocniMrtvacko() {
   unsigned long sadaMs = millis();
   
@@ -366,11 +349,12 @@ void zapocniMrtvacko() {
   
   mrtvacko.mrtvacko_aktivno = true;
   mrtvacko.vrijeme_pocetka_ms = sadaMs;
-  mrtvacko.trajanje_ms = 300000UL;  // Fixed 5 minutes for funeral mode
-  mrtvacko.cekic_aktivan = false;
-  mrtvacko.vrijeme_zadnje_promjene_ms = sadaMs;
-  
-  posaljiPCLog(F("Mrtvačko: pokrenuto, trajanje=5min"));
+  mrtvacko.cekici_aktivni = true;
+  mrtvacko.vrijeme_faze_ms = sadaMs;
+  aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+
+  posaljiPCLog(F("Mrtvačko: pokrenuto (oba čekića 150ms / pauza 10s)"));
   signalizirajFuneral_Mode();
 }
 
@@ -378,13 +362,8 @@ void zapocniMrtvacko() {
 void zaustaviMrtvacko() {
   if (mrtvacko.mrtvacko_aktivno) {
     mrtvacko.mrtvacko_aktivno = false;
-    
-    // Deactivate hammer if active
-    if (mrtvacko.cekic_aktivan) {
-      deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
-      mrtvacko.cekic_aktivan = false;
-    }
-    
+    deaktivirajObaCekica_Internal();
+    mrtvacko.cekici_aktivni = false;
     posaljiPCLog(F("Mrtvačko: zaustavljeno"));
   }
 }
@@ -394,36 +373,28 @@ bool jeMrtvackoUTijeku() {
   return mrtvacko.mrtvacko_aktivno;
 }
 
-// Update funeral mode (slow 1500ms tempo)
+// Ažuriranje mrtvačkog (neblokirajući automat stanja)
 static void azurirajMrtvacko(unsigned long sadaMs) {
   if (!mrtvacko.mrtvacko_aktivno) {
     return;
   }
-  
-  // Check if duration has expired
-  unsigned long proteklo = sadaMs - mrtvacko.vrijeme_pocetka_ms;
-  if (proteklo >= mrtvacko.trajanje_ms) {
-    zaustaviMrtvacko();
+
+  const unsigned long proteklo = sadaMs - mrtvacko.vrijeme_faze_ms;
+
+  if (mrtvacko.cekici_aktivni) {
+    if (proteklo >= MRTVACKO_TRAJANJE_UDARCA_MS) {
+      deaktivirajObaCekica_Internal();
+      mrtvacko.cekici_aktivni = false;
+      mrtvacko.vrijeme_faze_ms = sadaMs;
+    }
     return;
   }
-  
-  // Toggle hammer every 1500ms (40 BPM slow rhythm)
-  unsigned long proteklo_promjene = sadaMs - mrtvacko.vrijeme_zadnje_promjene_ms;
-  
-  if (proteklo_promjene >= MRTVACKO_TEMPO_MS) {
-    mrtvacko.vrijeme_zadnje_promjene_ms = sadaMs;
-    
-    if (mrtvacko.cekic_aktivan) {
-      // Turn off hammer
-      deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
-      mrtvacko.cekic_aktivan = false;
-      posaljiPCLog(F("Mrtvačko: hammer off"));
-    } else {
-      // Turn on hammer
-      aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
-      mrtvacko.cekic_aktivan = true;
-      posaljiPCLog(F("Mrtvačko: hammer on"));
-    }
+
+  if (proteklo >= MRTVACKO_PAUZA_MS) {
+    aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+    aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+    mrtvacko.cekici_aktivni = true;
+    mrtvacko.vrijeme_faze_ms = sadaMs;
   }
 }
 
@@ -531,16 +502,15 @@ void inicijalizirajOtkucavanje() {
 
   slavljenje.slavljenje_aktivno = false;
   slavljenje.vrijeme_pocetka_ms = 0;
-  slavljenje.trajanje_ms = 0;
-  slavljenje.trenutni_cekic = 1;
-  slavljenje.vrijeme_zadnje_promjene_ms = 0;
+  slavljenje.trenutni_korak = 0;
+  slavljenje.vrijeme_koraka_ms = 0;
   slavljenje.cekic_aktivan = false;
+  slavljenje.aktivni_pin = -1;
 
   mrtvacko.mrtvacko_aktivno = false;
   mrtvacko.vrijeme_pocetka_ms = 0;
-  mrtvacko.trajanje_ms = 0;
-  mrtvacko.cekic_aktivan = false;
-  mrtvacko.vrijeme_zadnje_promjene_ms = 0;
+  mrtvacko.cekici_aktivni = false;
+  mrtvacko.vrijeme_faze_ms = 0;
 
   dugmad.prethodno_stanje_slavljenja = true;
   dugmad.vrijeme_promjene_slavljenja = 0;
@@ -570,9 +540,17 @@ void upravljajOtkucavanjem() {
   // Update funeral mode (if active)
   azurirajMrtvacko(sadaMs);
   
-  // Check if bell inertia became active (should block striking)
-  if (jeLiInerciaAktivna() && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-    ponistiAktivnoOtkucavanje();
+  // Ako se pojavi inercija, odmah sigurno zaustavi sve aktivne načine rada čekića
+  if (jeLiInerciaAktivna()) {
+    if (slavljenje.slavljenje_aktivno) {
+      zaustaviSlavljenje();
+    }
+    if (mrtvacko.mrtvacko_aktivno) {
+      zaustaviMrtvacko();
+    }
+    if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
+      ponistiAktivnoOtkucavanje();
+    }
   }
   
   // Manage normal striking sequences (hour/half-hour)
@@ -665,6 +643,12 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
     // Stop any active striking
     if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
       ponistiAktivnoOtkucavanje();
+    }
+    if (slavljenje.slavljenje_aktivno) {
+      zaustaviSlavljenje();
+    }
+    if (mrtvacko.mrtvacko_aktivno) {
+      zaustaviMrtvacko();
     }
   } else {
     posaljiPCLog(F("Blokada otkucavanja: ISKLJUČENA"));
