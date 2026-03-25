@@ -6,6 +6,7 @@
 #include "lcd_display.h"
 #include "postavke.h"
 #include "pc_serial.h"
+#include "debouncing.h"
 
 // ==================== CONSTANTS ====================
 
@@ -31,6 +32,12 @@ static struct {
   unsigned long vrijeme_pocetka;
   unsigned long trajanje_ms;
 } inercija = {false, 0, TRAJANJE_INERCIJE_MS};
+
+// Ručno upravljanje fizičkim sklopkama (override nad automatikom)
+static struct {
+  bool bell1_override_aktivan;
+  bool bell2_override_aktivan;
+} manualnoUpravljanje = {false, false};
 
 // ==================== RELAY CONTROL ====================
 
@@ -218,10 +225,16 @@ void inicijalizirajZvona() {
   pinMode(PIN_ULAZA_PLOCE_4, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_5, INPUT_PULLUP);
   
+  // Configure manual bell toggle inputs (GND switches)
+  pinMode(PIN_BELL1_SWITCH, INPUT_PULLUP);
+  pinMode(PIN_BELL2_SWITCH, INPUT_PULLUP);
+  
   // Initialize state
   zvona.bell1_aktivan = false;
   zvona.bell2_aktivan = false;
   inercija.inercija_aktivna = false;
+  manualnoUpravljanje.bell1_override_aktivan = false;
+  manualnoUpravljanje.bell2_override_aktivan = false;
   posaljiPCLog(F("Zvona: inicijalizirana - BELL CONTROL ONLY"));
 }
 
@@ -229,12 +242,46 @@ void inicijalizirajZvona() {
 
 void upravljajZvonom() {
   unsigned long sadaMs = millis();
+  SwitchState novoStanje = SWITCH_RELEASED;
+  
+  // Manual inputs with debouncing and edge detection (20-50ms)
+  if (obradiDebouncedInput(PIN_BELL1_SWITCH, 30, &novoStanje)) {
+    if (novoStanje == SWITCH_PRESSED) {
+      manualnoUpravljanje.bell1_override_aktivan = true;
+      ukljuciZvono(1);
+      posaljiPCLog(F("Manual BELL1 ON"));
+    } else {
+      manualnoUpravljanje.bell1_override_aktivan = false;
+      iskljuciZvono(1);
+      posaljiPCLog(F("Manual BELL1 OFF"));
+    }
+  }
+  
+  if (obradiDebouncedInput(PIN_BELL2_SWITCH, 30, &novoStanje)) {
+    if (novoStanje == SWITCH_PRESSED) {
+      manualnoUpravljanje.bell2_override_aktivan = true;
+      ukljuciZvono(2);
+      posaljiPCLog(F("Manual BELL2 ON"));
+    } else {
+      manualnoUpravljanje.bell2_override_aktivan = false;
+      iskljuciZvono(2);
+      posaljiPCLog(F("Manual BELL2 OFF"));
+    }
+  }
+  
+  // Ako je ručni override aktivan, ručno stanje ima prioritet nad MQTT/web automatikom.
+  if (manualnoUpravljanje.bell1_override_aktivan && !zvona.bell1_aktivan) {
+    ukljuciZvono(1);
+  }
+  if (manualnoUpravljanje.bell2_override_aktivan && !zvona.bell2_aktivan) {
+    ukljuciZvono(2);
+  }
   
   // Update inertia
   jeLiInerciaAktivna();
   
   // Manage Bell 1 duration
-  if (zvona.bell1_aktivan) {
+  if (zvona.bell1_aktivan && !manualnoUpravljanje.bell1_override_aktivan) {
     unsigned long proteklo = sadaMs - zvona.bell1_start_ms;
     if (proteklo >= zvona.bell1_duration_ms) {
       iskljuciZvono(1);
@@ -244,7 +291,7 @@ void upravljajZvonom() {
   }
   
   // Manage Bell 2 duration
-  if (zvona.bell2_aktivan) {
+  if (zvona.bell2_aktivan && !manualnoUpravljanje.bell2_override_aktivan) {
     unsigned long proteklo = sadaMs - zvona.bell2_start_ms;
     if (proteklo >= zvona.bell2_duration_ms) {
       iskljuciZvono(2);

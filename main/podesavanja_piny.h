@@ -64,6 +64,12 @@
 #define PIN_KEY_CELEBRATION           43  // Celebration button toggle (PIN 43)
 #define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
 
+// ==================== MANUAL BELL TOGGLE INPUTS ====================
+// Fizičke sklopke na GND za ručno upravljanje zvonima toranjskog sata
+
+#define PIN_BELL1_SWITCH              44  // Ručna sklopka za BELL 1 (LOW=ON)
+#define PIN_BELL2_SWITCH              45  // Ručna sklopka za BELL 2 (LOW=ON)
+
 // ==================== SERIAL COMMUNICATION ====================
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
