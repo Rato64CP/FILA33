@@ -19,9 +19,6 @@ bool jeZvonoUTijeku();
 // Process mechanical plate inputs
 void obradiCavleNaPloci();
 
-// Activate bells if conditions met
-void aktivirajZvonaAkoTrebaju();
-
 // Activate/deactivate bell with duration
 void aktivirajZvonjenje(int zvono);
 void deaktivirajZvonjenje(int zvono);
