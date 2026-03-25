@@ -2,15 +2,7 @@
 // Mechanical hammer striking (via relay impulses) with celebration and funeral modes
 // CELEBRATION and FUNERAL modes are ONLY in this file (NOT in zvonjenje.cpp)
 //
-// System Changes:
-// - REMOVED: Celebration and Funeral mode code from zvonjenje.cpp
-// - ADDED: Full Celebration and Funeral implementation in this file
-// - CELEBRATION: Alternating hammers every 600ms (200 BPM tempo)
-// - FUNERAL: Single hammer every 1.5s (40 BPM slow rhythm)
-// - Celebration + Funeral modes ONLY in otkucavanje.cpp, NOT in zvonjenje.cpp
-// - PIN 43 (PIN_KEY_CELEBRATION): Celebration button toggle with 30ms debouncing
-// - PIN 42 (PIN_KEY_FUNERAL): Funeral button toggle with 30ms debouncing
-// - MQTT: toranj/slavljenje/cmd (celebration), toranj/mrt/cmd (funeral)
+
 
 #include <Arduino.h>
 #include <RTClib.h>

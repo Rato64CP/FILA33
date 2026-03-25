@@ -2,10 +2,7 @@
 // K-minuta (0-719) stored in external EEPROM for 12-hour cycle (720 minutes = 12 hours)
 // Normal mode (<10 min difference): continuous impulses until synchronized
 // Aggressive mode (>=10 min difference): impulses every 6 seconds without waiting for minute boundary
-// Dynamic calculation: re-read RTC and calculate new difference after EVERY impulse
-// Even/odd relay selection: if K-minuta is even, trigger next ODD relay; if odd, trigger EVEN relay
-// Parity enforcement: strict alternation - even K → odd relay, odd K → even relay
-// DST waiting state threshold: 70 minutes to handle ±60 minute DST transitions plus 10-minute safety margin
+
 
 #include <Arduino.h>
 #include <RTClib.h>

@@ -1,14 +1,3 @@
-// zvonjenje.cpp – BELL CONTROL ONLY (NO CELEBRATION/FUNERAL)
-// Bell system for hourly (Bell 1) and half-hourly (Bell 2) strikes
-// Celebration and Funeral modes moved to otkucavanje.cpp
-//
-// System Requirements:
-// - ukljuciZvono()/iskljuciZvono() for BELL1/BELL2 only
-// - obradiCavleNaPloci() after plate N phase completes
-// - aktivirajZvonaAkoTrebaju() at HH:XX:30 (30s after minute start)
-// - jeLiInerciaAktivna() - 90 second inertia from BELL commands only
-// - MQTT: toranj/bell1/cmd, toranj/bell2/cmd, toranj/bell1/state, toranj/bell2/state
-
 #include <Arduino.h>
 #include <RTClib.h>
 #include "zvonjenje.h"
