@@ -93,13 +93,25 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   }
 }
 
+String formatUnifiedState(const EepromLayout::UnifiedMotionState& stanje) {
+  String log = F("hand=");
+  log += stanje.hand_position;
+  log += F(" phase=");
+  log += stanje.hand_phase;
+  log += F(" plate=");
+  log += stanje.plate_position;
+  log += F(" phase=");
+  log += stanje.plate_phase;
+  return log;
+}
+
 void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
   if (stanje.hand_phase == FAZA_PRVI_RELEJ && (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS) {
     stanje.hand_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
     aktivirajRelejePoFazi(stanje);
     spremiStanjeAkoPromjena(stanje);
-    posaljiPCLog(F("Kazaljke: faza 2"));
+    posaljiPCLog(String(F("Kazaljke: faza 2, ")) + formatUnifiedState(stanje));
     return;
   }
 
@@ -108,7 +120,7 @@ void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sa
     stanje.hand_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
     spremiStanjeAkoPromjena(stanje);
-    posaljiPCLog(F("Kazaljke: korak dovrsen"));
+    posaljiPCLog(String(F("Kazaljke: korak dovrsen, ")) + formatUnifiedState(stanje));
   }
 }
 
@@ -130,7 +142,7 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   pocetakFazeMs = sadaMs;
   aktivirajRelejePoFazi(stanje);
   spremiStanjeAkoPromjena(stanje);
-  posaljiPCLog(F("Kazaljke: pokrenut novi korak"));
+  posaljiPCLog(String(F("Kazaljke: start koraka, ")) + formatUnifiedState(stanje));
 }
 
 }  // namespace
@@ -146,6 +158,7 @@ void inicijalizirajKazaljke() {
 
   pocetakFazeMs = millis();
   zadnjaProvjeraMs = millis();
+  posaljiPCLog(String(F("STATE: ")) + formatUnifiedState(stanje));
   posaljiPCLog(F("Kazaljke: inicijalizirane kroz jedinstveni model stanja"));
 }
 
