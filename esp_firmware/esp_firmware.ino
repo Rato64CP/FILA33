@@ -202,16 +202,16 @@ void osvjeziNTPSat() {
 
   if (promjena && ntpKlijent.isTimeSet()) {
     if (!ntpIkadPostavljen) {
-      Serial.print("NTP: Prvi put postavljeno vrijeme, epoch=");
+      Serial.print("NTPLOG: Prvi put postavljeno vrijeme, epoch=");
       Serial.println(ntpKlijent.getEpochTime());
       ntpIkadPostavljen = true;
     } else if (sada - zadnjiLog > 60000) { // svake minute malo loga
-      Serial.print("NTP: osvjezeno, epoch=");
+      Serial.print("NTPLOG: osvjezeno, epoch=");
       Serial.println(ntpKlijent.getEpochTime());
       zadnjiLog = sada;
     }
   } else if (!ntpKlijent.isTimeSet() && (sada - zadnjiLog > 10000)) {
-    Serial.println("NTP: jos nije postavljeno vrijeme, cekam...");
+    Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
     zadnjiLog = sada;
   }
 }
@@ -221,7 +221,7 @@ void posaljiNTPPremaMegai() {
   time_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
   struct tm lokalniTm;
   if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
-    Serial.println("NTP: konverzija lokalnog vremena nije uspjela, preskacem slanje");
+    Serial.println("NTPLOG: konverzija lokalnog vremena nije uspjela, preskacem slanje");
     return;
   }
 

@@ -29,6 +29,7 @@
 #include "otkucavanje.h"
 #include "esp_serial.h"
 #include "pc_serial.h"
+#include "postavke.h"
 
 // ==================== MQTT CONFIGURATION ====================
 
@@ -425,6 +426,11 @@ void reconnectMQTT() {
 // ==================== INITIALIZATION & MAIN LOOP ====================
 
 void inicijalizirajMQTT() {
+  if (!jeMQTTOmogucen()) {
+    posaljiPCLog(F("MQTT: inicijalizacija preskočena (onemogućeno u postavkama)"));
+    return;
+  }
+
   mqtt_connected = false;
   last_status_publish = 0;
   last_mqtt_reconnect = 0;
@@ -441,6 +447,10 @@ void inicijalizirajMQTT() {
 }
 
 void upravljajMQTT() {
+  if (!jeMQTTOmogucen()) {
+    return;
+  }
+
   // Check for MQTT connection status from ESP8266
   static unsigned long last_connection_check = 0;
   unsigned long sada = millis();
@@ -470,6 +480,10 @@ void upravljajMQTT() {
 }
 
 void obradiMQTTLinijuIzESPa(const String& line) {
+  if (!jeMQTTOmogucen()) {
+    return;
+  }
+
   if (!line.startsWith("MQTT:")) {
     return;
   }
