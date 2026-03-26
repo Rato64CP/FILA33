@@ -60,6 +60,8 @@ void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sa
 }
 
 void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
+  const EepromLayout::UnifiedMotionState najnovijeStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+  stanje = najnovijeStanje;
   if (stanje.hand_active != HAND_NEAKTIVNO) {
     return;
   }
@@ -78,8 +80,12 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   stanje.hand_start_ms = sadaMs;
   aktivirajRelejeKazaljki(stanje);
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-  posaljiPCLog(F("Kazaljke: start"));
-  UnifiedMotionStateStore::logirajStanje(stanje);
+  const EepromLayout::UnifiedMotionState potvrdenoStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+  if (potvrdenoStanje.hand_active == HAND_AKTIVNO &&
+      potvrdenoStanje.hand_start_ms == stanje.hand_start_ms) {
+    posaljiPCLog(F("Kazaljke: start"));
+    UnifiedMotionStateStore::logirajStanje(potvrdenoStanje);
+  }
 }
 
 }  // namespace

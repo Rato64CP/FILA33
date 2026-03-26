@@ -15,6 +15,8 @@ constexpr uint8_t HAND_NEAKTIVNO = 0;
 constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
 constexpr uint8_t FAZA_STABILNO = 0;
 constexpr uint8_t UNIFIED_VERZIJA = EepromLayout::UNIFIED_STANJE_VERZIJA;
+bool cacheInicijaliziran = false;
+EepromLayout::UnifiedMotionState cacheStanje{};
 
 bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
   return stanje.hand_position < BROJ_MINUTA_CIKLUS &&
@@ -88,12 +90,23 @@ String formatStanja(const EepromLayout::UnifiedMotionState& stanje) {
 }  // namespace
 
 bool ucitaj(EepromLayout::UnifiedMotionState& stanje) {
+  if (cacheInicijaliziran) {
+    stanje = cacheStanje;
+    return true;
+  }
+
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_UNIFIED_STANJE,
                             EepromLayout::SLOTOVI_UNIFIED_STANJE,
                             stanje)) {
     return false;
   }
-  return jeValjanoStanje(stanje);
+  if (!jeValjanoStanje(stanje)) {
+    return false;
+  }
+
+  cacheStanje = stanje;
+  cacheInicijaliziran = true;
+  return true;
 }
 
 EepromLayout::UnifiedMotionState dohvatiIliMigriraj() {
@@ -108,13 +121,21 @@ EepromLayout::UnifiedMotionState dohvatiIliMigriraj() {
 }
 
 void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
-  EepromLayout::UnifiedMotionState trenutno{};
-  if (ucitaj(trenutno) && memcmp(&trenutno, &stanje, sizeof(stanje)) == 0) {
+  if (cacheInicijaliziran && memcmp(&cacheStanje, &stanje, sizeof(stanje)) == 0) {
     return;
   }
+
+  EepromLayout::UnifiedMotionState trenutno{};
+  if (!cacheInicijaliziran && ucitaj(trenutno) &&
+      memcmp(&trenutno, &stanje, sizeof(stanje)) == 0) {
+    return;
+  }
+
   WearLeveling::spremi(EepromLayout::BAZA_UNIFIED_STANJE,
                        EepromLayout::SLOTOVI_UNIFIED_STANJE,
                        stanje);
+  cacheStanje = stanje;
+  cacheInicijaliziran = true;
 }
 
 void logirajStanje(const EepromLayout::UnifiedMotionState& stanje) {
