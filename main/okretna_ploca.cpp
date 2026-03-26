@@ -205,8 +205,8 @@ static void sinkronizirajPlocuNaBootu()
   }
 
   DateTime now = dohvatiTrenutnoVrijeme();
-  const int ciljPozicija = izracunajCiljnuPoziciju(now);
-  const int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
+  int ciljPozicija = izracunajCiljnuPoziciju(now);
+  int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
 
   String log = F("Ploca boot sinkronizacija: start=");
   if (pozicijaPloce < 10) log += '0';
@@ -226,10 +226,29 @@ static void sinkronizirajPlocuNaBootu()
     return;
   }
 
-  for (int i = 0; i < razlika; ++i) {
+  const int MAX_BOOT_SYNC_KORAKA = BROJ_POZICIJA * 3;
+  int odradeniKoraci = 0;
+
+  while (true) {
+    now = dohvatiTrenutnoVrijeme();
+    ciljPozicija = izracunajCiljnuPoziciju(now);
+    razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
+
+    if (razlika == 0) {
+      break;
+    }
+
     odradiJedanKorakPloceBlokirajuci();
+
+    ++odradeniKoraci;
+    if (odradeniKoraci >= MAX_BOOT_SYNC_KORAKA) {
+      posaljiPCLog(F("Ploca boot sinkronizacija: prekinuta zbog sigurnosne granice koraka"));
+      break;
+    }
   }
 
+  now = dohvatiTrenutnoVrijeme();
+  ciljPozicija = izracunajCiljnuPoziciju(now);
   pozicijaPloce = ciljPozicija;
   ciljKorakaPloce = ciljPozicija;
   spremiStanjePloceEEPROM(pozicijaPloce, 'N');
