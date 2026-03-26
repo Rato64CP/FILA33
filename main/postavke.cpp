@@ -40,10 +40,6 @@ static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
 // Default postavke
 static EepromLayout::PostavkeSpremnik postavke = napraviZadanePostavke();
 
-static bool postavkeLCDBlinkanje = false;
-static char redak1Buffer[17] = "Postavke";
-static char redak2Buffer[17] = "Ucitavanje...";
-
 static uint16_t izracunajChecksumPostavki(const EepromLayout::PostavkeSpremnik& ulaz) {
   EepromLayout::PostavkeSpremnik kopija = ulaz;
   kopija.checksum = 0;
@@ -227,17 +223,6 @@ void ucitajPostavke() {
                         EepromLayout::SLOTOVI_POSTAVKE,
                         postavke);
   }
-}
-
-const char* dohvatiPostavkeRedak1() {
-  strncpy(redak1Buffer, "Postavke", sizeof(redak1Buffer) - 1);
-  redak1Buffer[sizeof(redak1Buffer) - 1] = '\0';
-  return redak1Buffer;
-}
-
-const char* dohvatiPostavkeRedak2() {
-  snprintf(redak2Buffer, sizeof(redak2Buffer), "Otkl %d-%d h", postavke.satOd, postavke.satDo);
-  return redak2Buffer;
 }
 
 bool dohvatiDozvoljenoZvonjenjeBell1() {

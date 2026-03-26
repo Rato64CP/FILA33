@@ -53,7 +53,6 @@ static const char* stavkeModa[] = {
 
 // ==================== CONFIRMATION DIALOG ====================
 
-static bool cekamo_da_ne = false;
 static bool zadnja_izboru_je_da = true;
 static const char* porukaZaKonfirmaciju[2] = {"", ""};
 static void (*funkcijaNaDA)() = NULL;
@@ -746,23 +745,4 @@ void osvjeziLCDZaMeni() {
     default:
       break;
   }
-}
-
-int dohvatiOdabraniIndex() {
-  return odabraniIndex;
-}
-
-void potvrdiAkciju(bool da) {
-  if (da && funkcijaNaDA != NULL) {
-    funkcijaNaDA();
-  }
-  povratakNaGlavniPrikaz();
-}
-
-void ulaziUManjuLozinkom() {
-  u_modu_lozinke = true;
-  memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
-  pozicija_lozinke = 0;
-  trenutnoStanje = MENU_STATE_PASSWORD_ENTRY;
-  posaljiPCLog(F("Ulazak u modu unosa lozinke"));
 }

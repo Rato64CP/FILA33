@@ -6,10 +6,6 @@
 // Inicijalizacija postavki iz EEPROM-a
 void ucitajPostavke();
 
-// Prikaz trenutnih postavki na LCD-u
-const char* dohvatiPostavkeRedak1();
-const char* dohvatiPostavkeRedak2();
-
 // Dozvoljenost zvona
 bool dohvatiDozvoljenoZvonjenjeBell1();
 bool dohvatiDozvoljenoZvonjenjeBell2();
