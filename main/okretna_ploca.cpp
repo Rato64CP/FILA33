@@ -197,6 +197,48 @@ static void oporaviNedovrseniKorakPloce()
   posaljiPCLog(log);
 }
 
+static void sinkronizirajPlocuNaBootu()
+{
+  if (!jePlocaKonfigurirana()) {
+    posaljiPCLog(F("Ploca boot sinkronizacija: onemogucena"));
+    return;
+  }
+
+  DateTime now = dohvatiTrenutnoVrijeme();
+  const int ciljPozicija = izracunajCiljnuPoziciju(now);
+  const int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, ciljPozicija);
+
+  String log = F("Ploca boot sinkronizacija: start=");
+  if (pozicijaPloce < 10) log += '0';
+  log += pozicijaPloce;
+  log += F(" cilj=");
+  if (ciljPozicija < 10) log += '0';
+  log += ciljPozicija;
+  log += F(" koraci=");
+  log += razlika;
+  posaljiPCLog(log);
+
+  if (razlika == 0) {
+    zadnjaAktiviranaMinutaDana = now.hour() * 60 + now.minute();
+    ciklusUTijeku = false;
+    drugaFaza = false;
+    posaljiPCLog(F("Ploca boot sinkronizacija: vec u ciljnoj poziciji"));
+    return;
+  }
+
+  for (int i = 0; i < razlika; ++i) {
+    odradiJedanKorakPloceBlokirajuci();
+  }
+
+  pozicijaPloce = ciljPozicija;
+  ciljKorakaPloce = ciljPozicija;
+  spremiStanjePloceEEPROM(pozicijaPloce, 'N');
+  zadnjaAktiviranaMinutaDana = now.hour() * 60 + now.minute();
+  ciklusUTijeku = false;
+  drugaFaza = false;
+  posaljiPCLog(F("Ploca boot sinkronizacija: zavrsena"));
+}
+
 static void pokreniPrvuFazuPloce(int ciljPozicija)
 {
   ciljKorakaPloce = constrain(ciljPozicija, 0, BROJ_POZICIJA - 1);
@@ -475,7 +517,9 @@ void inicijalizirajPlocu()
   autoSlavljenjeAktivno = false;
   autoSlavljenjeKraj = 0;
   plocaAktivnaRanije = true;
+
   oporaviNedovrseniKorakPloce();
+  sinkronizirajPlocuNaBootu();
   
   String log = F("Ploca inicijalizirana");
   posaljiPCLog(log);
