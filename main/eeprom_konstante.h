@@ -123,18 +123,24 @@ constexpr int SLOT_SIZE_BOOT_FLAGS =
 
 // ==================== JEDINSTVENO STANJE KRETANJA ====================
 // Jedinstveni state-model za toranjski sat (kazaljke + okretna ploča).
-// Faze: 0=stabilno, 1=prvi relej aktivan, 2=drugi relej aktivan.
+// Kazaljke koriste jedan impuls od 6 s:
+// - hand_active: 0=mirovanje, 1=impuls u tijeku
+// - hand_relay: 0=nijedan, 1=PARNI, 2=NEPARNI
+// Okretna ploča zadržava dvije faze:
+// - plate_phase: 0=stabilno, 1=PARNI relej, 2=NEPARNI relej
 
 struct UnifiedMotionState {
-  uint16_t hand_position;   // 0-719
-  uint8_t hand_phase;       // 0-2
+  uint16_t hand_position;   // 0-719 (K-minuta)
+  uint8_t hand_active;      // 0/1
+  uint8_t hand_relay;       // 0=nijedan, 1=PARNI, 2=NEPARNI
+  uint32_t hand_start_ms;   // millis() trenutak početka impulsa kazaljki
   uint8_t plate_position;   // 0-63
-  uint8_t plate_phase;      // 0-2
+  uint8_t plate_phase;      // 0-2 (ploča i dalje radi u dvije faze)
   uint8_t version;          // verzija zapisa
-  uint16_t reserved;        // poravnanje / buduće proširenje
+  uint8_t reserved;         // buduće proširenje
 };
 
-constexpr uint8_t UNIFIED_STANJE_VERZIJA = 1;
+constexpr uint8_t UNIFIED_STANJE_VERZIJA = 2;
 
 constexpr int BAZA_UNIFIED_STANJE =
   BAZA_BOOT_FLAGS + (SLOTOVI_BOOT_FLAGS * SLOT_SIZE_BOOT_FLAGS);

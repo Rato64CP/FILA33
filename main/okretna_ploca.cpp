@@ -48,9 +48,11 @@ unsigned long autoSlavljenjeKraj = 0;
 
 bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
   return stanje.hand_position < 720 &&
-         stanje.hand_phase <= FAZA_DRUGI_RELEJ &&
+         stanje.hand_active <= 1 &&
+         stanje.hand_relay <= 2 &&
          stanje.plate_position < BROJ_POZICIJA &&
-         stanje.plate_phase <= FAZA_DRUGI_RELEJ;
+         stanje.plate_phase <= FAZA_DRUGI_RELEJ &&
+         stanje.version == EepromLayout::UNIFIED_STANJE_VERZIJA;
 }
 
 bool ucitajStanje(EepromLayout::UnifiedMotionState& stanje) {
@@ -79,7 +81,9 @@ EepromLayout::UnifiedMotionState dohvatiIliMigrirajStanje() {
   }
 
   stanje.hand_position = 0;
-  stanje.hand_phase = FAZA_STABILNO;
+  stanje.hand_active = 0;
+  stanje.hand_relay = 0;
+  stanje.hand_start_ms = 0;
   stanje.plate_position = POZICIJA_NOCI;
   stanje.plate_phase = FAZA_STABILNO;
   stanje.version = EepromLayout::UNIFIED_STANJE_VERZIJA;
@@ -137,8 +141,12 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
 String formatUnifiedState(const EepromLayout::UnifiedMotionState& stanje) {
   String log = F("hand=");
   log += stanje.hand_position;
-  log += F(" phase=");
-  log += stanje.hand_phase;
+  log += F(" active=");
+  log += stanje.hand_active;
+  log += F(" relay=");
+  log += stanje.hand_relay;
+  log += F(" start=");
+  log += stanje.hand_start_ms;
   log += F(" plate=");
   log += stanje.plate_position;
   log += F(" phase=");
