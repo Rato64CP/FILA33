@@ -134,13 +134,13 @@ void obradiESPSerijskuKomunikaciju() {
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
           const int satniKljuc = izracunajSatniKljuc(ntpVrijeme);
           if (ntpVrijeme.minute() != 0) {
-            espSerijskiPort.println(F("ACK:NTP"));
+            espSerijskiPort.println(F("SKIP:NTP"));
             String log = F("NTP preskocen: minuta nije 00 (");
             log += iso;
             log += ')';
             posaljiPCLog(log);
           } else if (satniKljuc == zadnjiPrihvaceniNtpSatniKljuc) {
-            espSerijskiPort.println(F("ACK:NTP"));
+            espSerijskiPort.println(F("SKIP:NTP"));
             String log = F("NTP preskocen: vec prihvacen za isti sat (");
             log += iso;
             log += ')';

@@ -153,7 +153,7 @@ static bool jeOperacijaDozvoljena() {
 }
 
 // Clear all striking state
-static void ponistiAktivnoOtkucavanje() {
+static void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHelper* razlog = nullptr) {
   if (otkucavanje.aktivni_pin >= 0) {
     deaktivirajCekic_Internal(otkucavanje.aktivni_pin);
   }
@@ -164,14 +164,21 @@ static void ponistiAktivnoOtkucavanje() {
   otkucavanje.vrijeme_pocetka_ms = 0;
   otkucavanje.vrijeme_zadnje_aktivacije = 0;
   
-  String log = F("Otkucavanje: operacija otkazana");
+  String log = jeOtkazivanje
+      ? String(F("Otkucavanje: operacija otkazana"))
+      : String(F("Otkucavanje: sekvenca dovrsena"));
+  if (razlog != nullptr) {
+    log += F(" (");
+    log += String(razlog);
+    log += ')';
+  }
   posaljiPCLog(log);
 }
 
 // Start next strike in sequence
 static void pokreniSljedeciUdarac() {
   if (otkucavanje.preostali_udarci <= 0) {
-    ponistiAktivnoOtkucavanje();
+    ponistiAktivnoOtkucavanje(false, F("nema preostalih udaraca"));
     return;
   }
   
@@ -542,7 +549,7 @@ void upravljajOtkucavanjem() {
       zaustaviMrtvacko();
     }
     if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-      ponistiAktivnoOtkucavanje();
+      ponistiAktivnoOtkucavanje(true, F("aktivna inercija zvona"));
     }
   }
   
@@ -583,7 +590,7 @@ void upravljajOtkucavanjem() {
   
   // Manage ongoing striking operation
   if (!jeOperacijaDozvoljena() && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-    ponistiAktivnoOtkucavanje();
+    ponistiAktivnoOtkucavanje(true, F("blokada ili inercija tijekom sekvence"));
     return;
   }
   
@@ -625,7 +632,7 @@ void upravljajOtkucavanjem() {
           pokreniSljedeciUdarac();
         } else {
           // Sequence complete
-          ponistiAktivnoOtkucavanje();
+          ponistiAktivnoOtkucavanje(false, F("odradjeni svi udarci"));
         }
       }
     }
@@ -647,7 +654,7 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
     
     // Stop any active striking
     if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-      ponistiAktivnoOtkucavanje();
+      ponistiAktivnoOtkucavanje(true, F("korisnicka blokada otkucavanja"));
     }
     if (slavljenje.slavljenje_aktivno) {
       zaustaviSlavljenje();
