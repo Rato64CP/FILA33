@@ -31,8 +31,11 @@ static char line1_buffer[17];
 // Timestamp of last Line 1 refresh (1-second interval)
 static unsigned long last_line1_refresh = 0;
 
-// Day notation tracking (for R/N indicator: R=Running/correcting, N=Normal)
-static char day_notation = 'N';  // N=normal, R=running correction
+// Oznaka stanja na prvom retku LCD-a:
+// N = normalan rad toranjskog sata
+// R = aktivna korekcija kazaljki ili okretne ploce
+// E = greska / recovery stanje
+static char status_oznaka = 'N';
 
 // WiFi status flag (W=WiFi active, space=inactive)
 static char wifi_status = ' ';
@@ -155,20 +158,19 @@ static void build_line1() {
     source_str += " ";
   }
   
-  // Get R/N notation (R=running correction, N=normal)
-  char rn_notation = day_notation;
+  // Oznaka stanja toranjskog sata za kraj prvog retka
+  char oznaka_stanja = status_oznaka;
   
   // Get WiFi status (W=active, space=inactive)
   // TODO: Set wifi_status based on actual ESP connection
   
-  // Format Line 1: HH:MM:SS SRC R N W
-  // Total: 8 (time) + 1 (space) + 3 (source) + 1 (space) + 1 (R/N) + 1 (pad) + 1 (W)
-  // = 16 chars exactly
+  // Format staje tocno u 16 znakova:
+  // 8 (vrijeme) + 1 + 3 (izvor) + 1 + 1 (status) + 1 + 1 (WiFi)
   snprintf(line1_buffer, sizeof(line1_buffer),
-           "%02d:%02d:%02d %s %c   %c",
+           "%02d:%02d:%02d %s %c %c",
            now.hour(), now.minute(), now.second(),
            source_str.c_str(),
-           rn_notation,
+           oznaka_stanja,
            wifi_status);
   
   // Ensure exactly 16 chars with null terminator
@@ -311,34 +313,35 @@ void signalizirajNTP_Sync() {
 void signalizirajHand_Correction() {
   current_activity = ACTIVITY_HAND_CORRECTION;
   set_activity_message("Correcting hands", 4000, false);
-  day_notation = 'R';  // Show R/N indicator as "R" during correction
+  status_oznaka = 'R';  // Korekcija kazaljki je aktivna
 }
 
 // Signal plate position correction
 void signalizirajPlate_Correction() {
   current_activity = ACTIVITY_PLATE_CORRECTION;
   set_activity_message("Correcting plate", 4000, false);
+  status_oznaka = 'R';  // Korekcija okretne ploce je aktivna
 }
 
 // Signal RTC battery error
 void signalizirajError_RTC() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message("ERROR: RTC batt ", 0, true);  // No timeout for errors
-  day_notation = 'E';  // Mark as error in Line 1
+  status_oznaka = 'E';  // Greska je vidljiva i na prvom retku
 }
 
 // Signal EEPROM error
 void signalizirajError_EEPROM() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message("ERROR: EEPROM   ", 0, true);
-  day_notation = 'E';
+  status_oznaka = 'E';
 }
 
 // Signal I2C communication error
 void signalizirajError_I2C() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message("ERROR: I2C comm ", 0, true);
-  day_notation = 'E';
+  status_oznaka = 'E';
 }
 
 // Signal celebration mode active
@@ -441,13 +444,13 @@ void odradiPauzuSaLCD(unsigned long duration_ms) {
 
 // ==================== STATE HELPERS ====================
 
-// Update day notation based on current state
+// Vrati oznaku u normalu kada nema korekcije ni greske
 void azurirajOznakuDana_External() {
-  // If no error and no correction, mark as normal
+  // Kad sat nije u korekciji ili recovery stanju, oznaka je N
   if (current_activity != ACTIVITY_ERROR && 
       current_activity != ACTIVITY_HAND_CORRECTION &&
       current_activity != ACTIVITY_PLATE_CORRECTION) {
-    day_notation = 'N';
+    status_oznaka = 'N';
   }
 }
 
@@ -478,7 +481,7 @@ void obrisiSveAktivnosti() {
   memset(activity_message, ' ', 16);
   activity_message[16] = '\0';
   activity_is_error = false;
-  day_notation = 'N';
+  status_oznaka = 'N';
   blink_visible = true;
 }
 
@@ -490,7 +493,7 @@ void obrisiGresku() {
     memset(activity_message, ' ', 16);
     activity_message[16] = '\0';
     activity_is_error = false;
-    day_notation = 'N';
+    status_oznaka = 'N';
     blink_visible = true;
   }
 }
