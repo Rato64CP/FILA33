@@ -60,6 +60,15 @@ static unsigned long autoSlavljenjeKraj = 0;
 
 static bool plocaAktivnaRanije = true;
 
+enum MarkerFazePloce {
+  MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA = 0,
+  MARKER_PLOCA_PRIJE_FAZE_1 = 1,
+  MARKER_PLOCA_FAZA_1_U_TIJEKU = 2,
+  MARKER_PLOCA_IZMEDU_FAZA = 3,
+  MARKER_PLOCA_FAZA_2_U_TIJEKU = 4,
+  MARKER_PLOCA_NAKON_FAZE_2 = 5
+};
+
 // ==================== HELPER FUNCTIONS ====================
 
 static int dohvatiPocetakOperacijeMinute()
@@ -133,19 +142,75 @@ static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija)
   return razlika;
 }
 
+static void spremiMarkerFazePloce(int marker)
+{
+  WearLeveling::spremi(EepromLayout::BAZA_MARKER_FAZE_PLOCE,
+                       EepromLayout::SLOTOVI_MARKER_FAZE_PLOCE,
+                       marker);
+}
+
+static int ucitajMarkerFazePloce()
+{
+  int marker = MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_MARKER_FAZE_PLOCE,
+                            EepromLayout::SLOTOVI_MARKER_FAZE_PLOCE,
+                            marker)) {
+    return MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
+  }
+  if (marker < MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA || marker > MARKER_PLOCA_NAKON_FAZE_2) {
+    return MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
+  }
+  return marker;
+}
+
+static void oporaviNedovrseniKorakPloce()
+{
+  int marker = ucitajMarkerFazePloce();
+  if (marker == MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA) {
+    return;
+  }
+
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+  ciklusUTijeku = false;
+  drugaFaza = false;
+
+  String log = F("Ploca oporavak: marker=");
+  log += marker;
+  log += F(" -> ");
+
+  if (marker == MARKER_PLOCA_PRIJE_FAZE_1) {
+    log += F("korak nije zapocet, ostaje pozicija");
+  } else if (marker == MARKER_PLOCA_FAZA_1_U_TIJEKU || marker == MARKER_PLOCA_IZMEDU_FAZA) {
+    log += F("prekid prije faze 2, vracam na pocetnu poziciju");
+  } else if (marker == MARKER_PLOCA_FAZA_2_U_TIJEKU || marker == MARKER_PLOCA_NAKON_FAZE_2) {
+    pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
+    WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                         EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                         pozicijaPloce);
+    log += F("faza 2 zapoceta/zavrsena, potvrdujem sljedecu poziciju=");
+    log += pozicijaPloce;
+  }
+
+  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
+  posaljiPCLog(log);
+}
+
 // Activate first phase of plate rotation
 static void pokreniPrvuFazuPloce()
 {
+  spremiMarkerFazePloce(MARKER_PLOCA_PRIJE_FAZE_1);
+  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
+                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
+                       pozicijaPloce);
+
+  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_1_U_TIJEKU);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
   vrijemeStarta = millis();
   ciklusUTijeku = true;
   drugaFaza = false;
-  
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
   
   String log = F("Ploca: prva faza, pozicija=");
   log += pozicijaPloce;
@@ -155,6 +220,8 @@ static void pokreniPrvuFazuPloce()
 // Complete plate rotation step
 static void zavrsiCiklusPloce()
 {
+  spremiMarkerFazePloce(MARKER_PLOCA_NAKON_FAZE_2);
+
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   ciklusUTijeku = false;
@@ -164,6 +231,7 @@ static void zavrsiCiklusPloce()
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
+  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
   
   String log = F("Ploca: korak zavrsen, pozicija=");
   log += pozicijaPloce;
@@ -173,24 +241,28 @@ static void zavrsiCiklusPloce()
 // Execute one complete rotation step in blocking mode
 static void odradiJedanKorakPloceBlokirajuci()
 {
-  // FIRST PHASE
-  digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
-  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-  
+  spremiMarkerFazePloce(MARKER_PLOCA_PRIJE_FAZE_1);
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
+
+  // FIRST PHASE
+  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_1_U_TIJEKU);
+  digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
+  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
   String logPhase1 = F("Ploca (blok): faza 1");
   posaljiPCLog(logPhase1);
   
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
   
+  spremiMarkerFazePloce(MARKER_PLOCA_IZMEDU_FAZA);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   odradiPauzuSaLCD(200);
   osvjeziWatchdog();
   
   // SECOND PHASE
+  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_2_U_TIJEKU);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
   
   String logPhase2 = F("Ploca (blok): faza 2");
@@ -199,6 +271,7 @@ static void odradiJedanKorakPloceBlokirajuci()
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
   osvjeziWatchdog();
   
+  spremiMarkerFazePloce(MARKER_PLOCA_NAKON_FAZE_2);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
@@ -209,6 +282,7 @@ static void odradiJedanKorakPloceBlokirajuci()
   WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
                        EepromLayout::SLOTOVI_POZICIJA_PLOCE,
                        pozicijaPloce);
+  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
   
   String logComplete = F("Ploca (blok): korak zavrsen");
   posaljiPCLog(logComplete);
@@ -417,6 +491,7 @@ void inicijalizirajPlocu()
   autoSlavljenjeAktivno = false;
   autoSlavljenjeKraj = 0;
   plocaAktivnaRanije = true;
+  oporaviNedovrseniKorakPloce();
   
   String log = F("Ploca inicijalizirana");
   posaljiPCLog(log);
@@ -439,6 +514,7 @@ void upravljajPlocom()
       digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
       ciklusUTijeku = false;
       drugaFaza = false;
+      spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
       
       posaljiPCLog(F("Ploca: zaustavljena - izvan dozvoljenog vremena"));
     } else if (plocaAktivnaRanije) {
@@ -495,6 +571,8 @@ void upravljajPlocom()
   if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
+    spremiMarkerFazePloce(MARKER_PLOCA_IZMEDU_FAZA);
+    spremiMarkerFazePloce(MARKER_PLOCA_FAZA_2_U_TIJEKU);
     
     vrijemeStarta = millis();
     drugaFaza = true;
