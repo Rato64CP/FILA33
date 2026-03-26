@@ -1,7 +1,5 @@
 #include <Arduino.h>
 #include <RTClib.h>
-#include <string.h>
-
 #include "okretna_ploca.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
@@ -10,6 +8,7 @@
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
+#include "unified_motion_state.h"
 
 namespace {
 constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
@@ -46,68 +45,6 @@ unsigned long autoSlavljenjeTrajanje = 0;
 bool autoSlavljenjeAktivno = false;
 unsigned long autoSlavljenjeKraj = 0;
 
-bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
-  return stanje.hand_position < 720 &&
-         stanje.hand_active <= 1 &&
-         stanje.hand_relay <= 2 &&
-         stanje.plate_position < BROJ_POZICIJA &&
-         stanje.plate_phase <= FAZA_DRUGI_RELEJ &&
-         stanje.version == EepromLayout::UNIFIED_STANJE_VERZIJA;
-}
-
-bool ucitajStanje(EepromLayout::UnifiedMotionState& stanje) {
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_UNIFIED_STANJE,
-                            EepromLayout::SLOTOVI_UNIFIED_STANJE,
-                            stanje)) {
-    return false;
-  }
-  return jeValjanoStanje(stanje);
-}
-
-void spremiStanjeAkoPromjena(const EepromLayout::UnifiedMotionState& novoStanje) {
-  EepromLayout::UnifiedMotionState trenutno{};
-  if (ucitajStanje(trenutno) && memcmp(&trenutno, &novoStanje, sizeof(novoStanje)) == 0) {
-    return;
-  }
-  WearLeveling::spremi(EepromLayout::BAZA_UNIFIED_STANJE,
-                       EepromLayout::SLOTOVI_UNIFIED_STANJE,
-                       novoStanje);
-}
-
-EepromLayout::UnifiedMotionState dohvatiIliMigrirajStanje() {
-  EepromLayout::UnifiedMotionState stanje{};
-  if (ucitajStanje(stanje)) {
-    return stanje;
-  }
-
-  stanje.hand_position = 0;
-  stanje.hand_active = 0;
-  stanje.hand_relay = 0;
-  stanje.hand_start_ms = 0;
-  stanje.plate_position = POZICIJA_NOCI;
-  stanje.plate_phase = FAZA_STABILNO;
-  stanje.version = EepromLayout::UNIFIED_STANJE_VERZIJA;
-  stanje.reserved = 0;
-
-  // Migracija legacy zapisa "XXP/N" ako postoji.
-  struct LegacyPloce { char zapis[4]; } legacy{};
-  if (WearLeveling::ucitaj(EepromLayout::BAZA_STANJE_PLOCE,
-                           EepromLayout::SLOTOVI_STANJE_PLOCE,
-                           legacy)) {
-    if (legacy.zapis[0] >= '0' && legacy.zapis[0] <= '9' &&
-        legacy.zapis[1] >= '0' && legacy.zapis[1] <= '9') {
-      int poz = (legacy.zapis[0] - '0') * 10 + (legacy.zapis[1] - '0');
-      if (poz >= 0 && poz < BROJ_POZICIJA) {
-        stanje.plate_position = static_cast<uint8_t>(poz);
-        stanje.plate_phase = (legacy.zapis[2] == 'P') ? FAZA_PRVI_RELEJ : FAZA_STABILNO;
-      }
-    }
-  }
-
-  spremiStanjeAkoPromjena(stanje);
-  return stanje;
-}
-
 int izracunajCiljnuPoziciju(const DateTime& now) {
   if (!jePlocaKonfigurirana()) {
     return POZICIJA_NOCI;
@@ -138,29 +75,14 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   }
 }
 
-String formatUnifiedState(const EepromLayout::UnifiedMotionState& stanje) {
-  String log = F("hand=");
-  log += stanje.hand_position;
-  log += F(" active=");
-  log += stanje.hand_active;
-  log += F(" relay=");
-  log += stanje.hand_relay;
-  log += F(" start=");
-  log += stanje.hand_start_ms;
-  log += F(" plate=");
-  log += stanje.plate_position;
-  log += F(" phase=");
-  log += stanje.plate_phase;
-  return log;
-}
-
 void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
   if (stanje.plate_phase == FAZA_PRVI_RELEJ && (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
     aktivirajRelejePoFazi(stanje);
-    spremiStanjeAkoPromjena(stanje);
-    posaljiPCLog(String(F("Ploca: faza 2, ")) + formatUnifiedState(stanje));
+    UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+    posaljiPCLog(F("Ploca: faza 2"));
+    UnifiedMotionStateStore::logirajStanje(stanje);
     return;
   }
 
@@ -168,8 +90,9 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
     stanje.plate_position = static_cast<uint8_t>((stanje.plate_position + 1) % BROJ_POZICIJA);
     stanje.plate_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
-    spremiStanjeAkoPromjena(stanje);
-    posaljiPCLog(String(F("Ploca: korak dovrsen, ")) + formatUnifiedState(stanje));
+    UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+    posaljiPCLog(F("Ploca: korak dovrsen"));
+    UnifiedMotionStateStore::logirajStanje(stanje);
   }
 }
 
@@ -187,8 +110,9 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   stanje.plate_phase = FAZA_PRVI_RELEJ;
   pocetakFazeMs = sadaMs;
   aktivirajRelejePoFazi(stanje);
-  spremiStanjeAkoPromjena(stanje);
-  posaljiPCLog(String(F("Ploca: start koraka, ")) + formatUnifiedState(stanje));
+  UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+  posaljiPCLog(F("Ploca: start"));
+  UnifiedMotionStateStore::logirajStanje(stanje);
 }
 
 bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
@@ -281,13 +205,13 @@ void inicijalizirajPlocu() {
                        offsetMinuta);
   offsetMinuta = constrain(offsetMinuta, 0, 14);
 
-  EepromLayout::UnifiedMotionState stanje = dohvatiIliMigrirajStanje();
+  EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   aktivirajRelejePoFazi(stanje);
 
   pocetakFazeMs = millis();
   zadnjaProvjeraMs = millis();
   zadnjiSlotUlaza = -1;
-  posaljiPCLog(String(F("STATE: ")) + formatUnifiedState(stanje));
+  UnifiedMotionStateStore::logirajStanje(stanje);
   posaljiPCLog(F("Ploca: inicijalizirana kroz jedinstveni model stanja"));
 }
 
@@ -304,7 +228,7 @@ void upravljajPlocom() {
     }
   }
 
-  EepromLayout::UnifiedMotionState stanje = dohvatiIliMigrirajStanje();
+  EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   aktivirajRelejePoFazi(stanje);
 
   if (stanje.plate_phase != FAZA_STABILNO) {
@@ -316,10 +240,10 @@ void upravljajPlocom() {
 }
 
 void postaviTrenutniPolozajPloce(int pozicija) {
-  EepromLayout::UnifiedMotionState stanje = dohvatiIliMigrirajStanje();
+  EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   stanje.plate_position = static_cast<uint8_t>(constrain(pozicija, 0, BROJ_POZICIJA - 1));
   stanje.plate_phase = FAZA_STABILNO;
-  spremiStanjeAkoPromjena(stanje);
+  UnifiedMotionStateStore::spremiAkoPromjena(stanje);
 }
 
 void postaviOffsetMinuta(int offset) {
@@ -330,7 +254,7 @@ void postaviOffsetMinuta(int offset) {
 }
 
 int dohvatiPozicijuPloce() {
-  return dohvatiIliMigrirajStanje().plate_position;
+  return UnifiedMotionStateStore::dohvatiIliMigriraj().plate_position;
 }
 
 int dohvatiOffsetMinuta() {
@@ -342,7 +266,7 @@ void kompenzirajPlocu(bool) {
 }
 
 bool jePlocaUSinkronu() {
-  EepromLayout::UnifiedMotionState stanje = dohvatiIliMigrirajStanje();
+  EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   return stanje.plate_phase == FAZA_STABILNO &&
          stanje.plate_position == izracunajCiljnuPoziciju(dohvatiTrenutnoVrijeme());
 }
