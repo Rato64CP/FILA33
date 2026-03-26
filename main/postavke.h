@@ -37,6 +37,8 @@ int dohvatiKrajPloceMinute();
 const char* dohvatiWifiSsid();
 const char* dohvatiWifiLozinku();
 bool koristiDhcpMreza();
+bool jeMQTTOmogucen();
 const char* dohvatiStatickuIP();
 const char* dohvatiMreznuMasku();
 const char* dohvatiZadaniGateway();
+void postaviMQTTOmogucen(bool omogucen);

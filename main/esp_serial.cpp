@@ -86,6 +86,11 @@ static bool parsirajISOVrijeme(const String& iso, DateTime& dt) {
   return true;
 }
 
+static bool jeStrogiNTPPayload(const String& payload) {
+  DateTime ignorirano;
+  return parsirajISOVrijeme(payload, ignorirano);
+}
+
 void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
@@ -110,6 +115,13 @@ void obradiESPSerijskuKomunikaciju() {
       // NTP message
       if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
+        if (!jeStrogiNTPPayload(iso)) {
+          espSerijskiPort.println(F("ERR:NTP"));
+          posaljiPCLog(String(F("Neispravan NTP format: ")) + iso);
+          ulazniBuffer = "";
+          continue;
+        }
+
         DateTime ntpVrijeme;
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
           azurirajVrijemeIzNTP(ntpVrijeme);
@@ -125,9 +137,6 @@ void obradiESPSerijskuKomunikaciju() {
             posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
           }
 
-        } else {
-          espSerijskiPort.println(F("ERR:NTP"));
-          posaljiPCLog(String(F("Neispravan NTP format: ")) + iso);
         }
       }
       // CMD message

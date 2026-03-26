@@ -35,11 +35,12 @@ static const char* stavkeGlavnogMenuja[] = {
   "Povratak"
 };
 
-static const int BROJ_STAVKI_POSTAVKI = 4;
+static const int BROJ_STAVKI_POSTAVKI = 5;
 static const char* stavkePostavki[] = {
   "Vrijeme",
   "Mod zvona",
   "Tihi sati",
+  "MQTT",
   "Povratak"
 };
 
@@ -131,7 +132,11 @@ static void prikaziPostavkeMenu() {
   // Fixed: Use prikaziPoruku instead of directly accessing lcd
   char redak1[17] = "POSTAVKE";
   char redak2[17];
-  snprintf(redak2, sizeof(redak2), "> %s", stavkePostavki[odabraniIndex]);
+  if (odabraniIndex == 3) {
+    snprintf(redak2, sizeof(redak2), "> MQTT: %s", jeMQTTOmogucen() ? "ON" : "OFF");
+  } else {
+    snprintf(redak2, sizeof(redak2), "> %s", stavkePostavki[odabraniIndex]);
+  }
   prikaziPoruku(redak1, redak2);
 }
 
@@ -344,6 +349,10 @@ static void obradiKlucPostavke(KeyEvent event) {
         trenutnoStanje = MENU_STATE_QUIET_HOURS;
         posaljiPCLog(F("Ulazak u podesavanje tihih sati"));
       } else if (odabraniIndex == 3) {
+        bool novoStanje = !jeMQTTOmogucen();
+        postaviMQTTOmogucen(novoStanje);
+        posaljiPCLog(novoStanje ? F("Izbornik: MQTT postavljen na ON") : F("Izbornik: MQTT postavljen na OFF"));
+      } else if (odabraniIndex == 4) {
         // Back
         odabraniIndex = 1;
         trenutnoStanje = MENU_STATE_MAIN_MENU;

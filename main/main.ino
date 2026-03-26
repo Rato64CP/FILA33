@@ -29,7 +29,11 @@ void setup() {
 
   inicijalizirajTipke();
   inicijalizirajESP();
-  inicijalizirajMQTT();
+  if (jeMQTTOmogucen()) {
+    inicijalizirajMQTT();
+  } else {
+    posaljiPCLog(F("MQTT: onemogućen u postavkama, inicijalizacija preskočena"));
+  }
   inicijalizirajMenuSistem();
 
   inicijalizirajZvona();
@@ -57,7 +61,9 @@ void loop() {
   upravljajKorekcijomKazaljki();
   upravljajPlocom();
 
-  upravljajMQTT();
+  if (jeMQTTOmogucen()) {
+    upravljajMQTT();
+  }
   osvjeziDCFSinkronizaciju();
   spremiKriticalnoStanje();
 

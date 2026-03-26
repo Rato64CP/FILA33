@@ -83,6 +83,7 @@ struct PostavkeSpremnik {
   char wifiSsid[33];                      // WiFi network name (32 chars + null)
   char wifiLozinka[33];                   // WiFi password (32 chars + null)
   bool koristiDhcp;                       // Use DHCP or static IP
+  bool mqttOmogucen;                      // Omogućuje MQTT integraciju preko ESP8266
   char statickaIp[16];                    // Static IP address (15 chars + null)
   char mreznaMaska[16];                   // Subnet mask (15 chars + null)
   char zadaniGateway[16];                 // Default gateway (15 chars + null)

@@ -24,6 +24,7 @@ static EepromLayout::PostavkeSpremnik postavke = {
   "WiFi",         // wifiSsid: default SSID
   "password",     // wifiLozinka: default lozinka
   true,           // koristiDhcp: DHCP po defaultu
+  false,          // mqttOmogucen: MQTT je po defaultu isključen
   "192.168.1.100",// statickaIp: fallback static IP
   "255.255.255.0",// mreznaMaska: standard subnet mask
   "192.168.1.1"   // zadaniGateway: standard gateway
@@ -62,6 +63,7 @@ void ucitajPostavke() {
   if (postavke.satDo > 23) postavke.satDo = 23;
   if (postavke.tihiSatiOd < 0 || postavke.tihiSatiOd > 23) postavke.tihiSatiOd = 22;
   if (postavke.tihiSatiDo < 0 || postavke.tihiSatiDo > 23) postavke.tihiSatiDo = 6;
+  if (postavke.mqttOmogucen != false && postavke.mqttOmogucen != true) postavke.mqttOmogucen = false;
   osigurajNullTerminiraneMreznePostavke();
   
   if (postavke.trajanjeImpulsaCekicaMs < 50) postavke.trajanjeImpulsaCekicaMs = 150;
@@ -73,6 +75,8 @@ void ucitajPostavke() {
   log += postavke.satDo;
   log += F(", WiFi SSID: ");
   log += postavke.wifiSsid;
+  log += F(", MQTT: ");
+  log += postavke.mqttOmogucen ? F("ON") : F("OFF");
   posaljiPCLog(log);
   
   // Spremi ponovno za sigurnost
@@ -192,6 +196,10 @@ bool koristiDhcpMreza() {
   return postavke.koristiDhcp;
 }
 
+bool jeMQTTOmogucen() {
+  return postavke.mqttOmogucen;
+}
+
 const char* dohvatiStatickuIP() {
   return postavke.statickaIp;
 }
@@ -202,4 +210,17 @@ const char* dohvatiMreznuMasku() {
 
 const char* dohvatiZadaniGateway() {
   return postavke.zadaniGateway;
+}
+
+void postaviMQTTOmogucen(bool omogucen) {
+  if (postavke.mqttOmogucen == omogucen) {
+    return;
+  }
+
+  postavke.mqttOmogucen = omogucen;
+  WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
+                      EepromLayout::SLOTOVI_POSTAVKE,
+                      postavke);
+
+  posaljiPCLog(omogucen ? F("Postavke: MQTT uključen") : F("Postavke: MQTT isključen"));
 }
