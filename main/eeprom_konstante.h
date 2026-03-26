@@ -35,6 +35,14 @@ constexpr int BAZA_OFFSET_MINUTA =
 constexpr int SLOTOVI_OFFSET_MINUTA = 4;            // 4 wear-leveling slots
 constexpr int SLOT_SIZE_OFFSET_MINUTA = 4;          // sizeof(int)
 
+// ==================== OZNAKA FAZE OKRETNE PLOCE ====================
+// Persistira stanje koraka okretne ploče radi sigurnog oporavka nakon nestanka napajanja.
+
+constexpr int BAZA_MARKER_FAZE_PLOCE =
+  BAZA_OFFSET_MINUTA + (SLOTOVI_OFFSET_MINUTA * SLOT_SIZE_OFFSET_MINUTA);
+constexpr int SLOTOVI_MARKER_FAZE_PLOCE = 4;        // 4 wear-leveling slots
+constexpr int SLOT_SIZE_MARKER_FAZE_PLOCE = 4;      // sizeof(int)
+
 // ==================== TIME SOURCE TRACKING ====================
 // Tracks which source provided current time (RTC, NTP, or DCF)
 
@@ -44,7 +52,7 @@ struct ZadnjaSinkronizacija {
 };
 
 constexpr int BAZA_ZADNJA_SINKRONIZACIJA = 
-  BAZA_OFFSET_MINUTA + (SLOTOVI_OFFSET_MINUTA * SLOT_SIZE_OFFSET_MINUTA);
+  BAZA_MARKER_FAZE_PLOCE + (SLOTOVI_MARKER_FAZE_PLOCE * SLOT_SIZE_MARKER_FAZE_PLOCE);
 constexpr int SLOTOVI_ZADNJA_SINKRONIZACIJA = 6;    // 6 wear-leveling slots
 constexpr int SLOT_SIZE_ZADNJA_SINKRONIZACIJA = 
   sizeof(ZadnjaSinkronizacija);
@@ -117,7 +125,8 @@ constexpr int SLOT_SIZE_BOOT_FLAGS =
 // 0-23             | K-minuta (int)         | 4 bytes   | 6     | 24 bytes
 // 24-47            | Plate position (int)   | 4 bytes   | 6     | 24 bytes
 // 48-63            | Offset minuta (int)    | 4 bytes   | 4     | 16 bytes
-// 64-127           | Sync info (struct)     | 8 bytes   | 6     | 48 bytes
+// 64-79            | Marker faze ploce      | 4 bytes   | 4     | 16 bytes
+// 80-127           | Sync info (struct)     | 8 bytes   | 6     | 48 bytes
 // 128-527          | Settings (struct)      | 64 bytes  | 6     | 384 bytes
 // 528-767          | Boot state (struct)    | 40 bytes  | 6     | 240 bytes
 // 768-4095         | RESERVED               | -         | -     | 3328 bytes
