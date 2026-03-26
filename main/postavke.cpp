@@ -25,13 +25,13 @@ static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
     120000UL,       // trajanjeSlavljenjaMs: 2 minute slavljenje
     2,              // brojZvona: 2 zvona
     "1234",         // pristupLozinka: default lozinka
-    "WiFi",         // wifiSsid: default SSID
-    "password",     // wifiLozinka: default lozinka
+    "SVETI PETAR",         // wifiSsid: default SSID
+    "cista2906",     // wifiLozinka: default lozinka
     true,           // koristiDhcp: DHCP po defaultu
     false,          // mqttOmogucen: MQTT je po defaultu isključen
-    "192.168.1.100",// statickaIp: fallback static IP
+    "192.168.8.230",// statickaIp: fallback static IP
     "255.255.255.0",// mreznaMaska: standard subnet mask
-    "192.168.1.1",  // zadaniGateway: standard gateway
+    "192.168.8.1",  // zadaniGateway: standard gateway
     0               // checksum: popunjava se prije spremanja
   };
   return zadane;
