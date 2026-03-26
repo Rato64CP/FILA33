@@ -17,6 +17,7 @@ constexpr uint8_t HAND_RELEJ_PARNI = 1;
 constexpr uint8_t HAND_RELEJ_NEPARNI = 2;
 
 unsigned long zadnjaProvjeraMs = 0;
+bool poravnanjeTaktaNaCekanju = true;
 
 int izracunajDvanaestSatneMinute(const DateTime& vrijeme) {
   return (vrijeme.hour() % 12) * 60 + vrijeme.minute();
@@ -24,6 +25,22 @@ int izracunajDvanaestSatneMinute(const DateTime& vrijeme) {
 
 uint8_t odrediRelejKazaljki(const EepromLayout::UnifiedMotionState& stanje) {
   return (stanje.hand_position % 2 == 0) ? HAND_RELEJ_PARNI : HAND_RELEJ_NEPARNI;
+}
+
+bool poravnajTaktKazaljkiAkoTreba(unsigned long sadaMs) {
+  if (!poravnanjeTaktaNaCekanju) {
+    return true;
+  }
+
+  const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if ((rtcVrijeme.second() % 6) != 0) {
+    return false;
+  }
+
+  zadnjaProvjeraMs = sadaMs - TRAJANJE_FAZE_MS;
+  poravnanjeTaktaNaCekanju = false;
+  posaljiPCLog(F("Kazaljke: takt poravnat na RTC 6s granicu"));
+  return true;
 }
 
 void aktivirajRelejeKazaljki(const EepromLayout::UnifiedMotionState& stanje) {
@@ -65,6 +82,9 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   if (stanje.hand_active != HAND_NEAKTIVNO) {
     return;
   }
+  if (!poravnajTaktKazaljkiAkoTreba(sadaMs)) {
+    return;
+  }
   if ((sadaMs - zadnjaProvjeraMs) < TRAJANJE_FAZE_MS) {
     return;
   }
@@ -102,6 +122,7 @@ void inicijalizirajKazaljke() {
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
 
   zadnjaProvjeraMs = millis();
+  poravnanjeTaktaNaCekanju = true;
   UnifiedMotionStateStore::logirajStanje(stanje);
   posaljiPCLog(F("Kazaljke: inicijalizirane kroz jedinstveni model stanja"));
 }
@@ -126,6 +147,10 @@ void upravljajKorekcijomKazaljki() {
 
 void pokreniBudnoKorekciju() {
   zadnjaProvjeraMs = 0;
+}
+
+void zatraziPoravnanjeTaktaKazaljki() {
+  poravnanjeTaktaNaCekanju = true;
 }
 
 void postaviRucnuPozicijuKazaljki(int satKazaljke, int minutaKazaljke) {

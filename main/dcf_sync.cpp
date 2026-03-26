@@ -9,6 +9,8 @@
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "pc_serial.h"
+#include "kazaljke_sata.h"
+#include "okretna_ploca.h"
 
 // ==================== DCF77 CONFIGURATION ====================
 
@@ -222,6 +224,8 @@ void osvjeziDCFSinkronizaciju() {
             String trenutniIzvor = dohvatiIzvorVremena();
             if (trenutniIzvor != "NTP" || jeSinkronizacijaZastarjela()) {
               azurirajVrijemeIzDCF(novi);
+              zatraziPoravnanjeTaktaKazaljki();
+              zatraziPoravnanjeTaktaPloce();
               
               String log = F("DCF77: Sinkronizacija - ");
               log += novi.year();

@@ -24,6 +24,7 @@ constexpr uint8_t FAZA_DRUGI_RELEJ = 2;
 
 unsigned long pocetakFazeMs = 0;
 unsigned long zadnjaProvjeraMs = 0;
+bool poravnanjeTaktaNaCekanju = true;
 
 int offsetMinuta = 14;
 int zadnjiSlotUlaza = -1;
@@ -60,6 +61,26 @@ int izracunajCiljnuPoziciju(const DateTime& now) {
   if (pozicija < 0) pozicija = 0;
   if (pozicija > POZICIJA_NOCI) pozicija = POZICIJA_NOCI;
   return pozicija;
+}
+
+bool poravnajTaktPloceAkoTreba(unsigned long sadaMs,
+                               const EepromLayout::UnifiedMotionState& stanje) {
+  if (!poravnanjeTaktaNaCekanju) {
+    return true;
+  }
+  if (stanje.plate_phase != FAZA_STABILNO) {
+    return false;
+  }
+
+  const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if ((rtcVrijeme.second() % 6) != 0) {
+    return false;
+  }
+
+  zadnjaProvjeraMs = sadaMs - TRAJANJE_FAZE_MS;
+  poravnanjeTaktaNaCekanju = false;
+  posaljiPCLog(F("Ploca: takt poravnat na RTC 6s granicu"));
+  return true;
 }
 
 void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
@@ -210,6 +231,7 @@ void inicijalizirajPlocu() {
 
   pocetakFazeMs = millis();
   zadnjaProvjeraMs = millis();
+  poravnanjeTaktaNaCekanju = true;
   zadnjiSlotUlaza = -1;
   UnifiedMotionStateStore::logirajStanje(stanje);
   posaljiPCLog(F("Ploca: inicijalizirana kroz jedinstveni model stanja"));
@@ -233,6 +255,9 @@ void upravljajPlocom() {
 
   if (stanje.plate_phase != FAZA_STABILNO) {
     obradiKorak(stanje, sadaMs);
+    return;
+  }
+  if (!poravnajTaktPloceAkoTreba(sadaMs, stanje)) {
     return;
   }
 
@@ -273,4 +298,8 @@ bool jePlocaUSinkronu() {
 
 void oznaciPlocuKaoSinkroniziranu() {
   zadnjaProvjeraMs = 0;
+}
+
+void zatraziPoravnanjeTaktaPloce() {
+  poravnanjeTaktaNaCekanju = true;
 }

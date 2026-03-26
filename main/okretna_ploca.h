@@ -11,3 +11,4 @@ int dohvatiOffsetMinuta();
 void kompenzirajPlocu(bool pametniMod);
 bool jePlocaUSinkronu();
 void oznaciPlocuKaoSinkroniziranu();
+void zatraziPoravnanjeTaktaPloce();

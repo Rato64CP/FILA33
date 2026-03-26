@@ -8,6 +8,7 @@
 #include "otkucavanje.h"
 #include "pc_serial.h"
 #include "kazaljke_sata.h"
+#include "okretna_ploca.h"
 #include "postavke.h"
 #include "mqtt_handler.h"
 #include "lcd_display.h"
@@ -134,6 +135,8 @@ void obradiESPSerijskuKomunikaciju() {
         DateTime ntpVrijeme;
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
           azurirajVrijemeIzNTP(ntpVrijeme);
+          zatraziPoravnanjeTaktaKazaljki();
+          zatraziPoravnanjeTaktaPloce();
           espSerijskiPort.println(F("ACK:NTP"));
           posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
 
