@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "time_glob.h"
+#include "unified_motion_state.h"
 #include "watchdog.h"
 
 // ==================== LCD HARDWARE CONFIGURATION ====================
@@ -73,6 +74,19 @@ static bool activity_is_error = false;
 static bool blink_visible = true;
 static unsigned long last_blink_toggle = 0;
 static const unsigned long BLINK_INTERVAL_MS = 200;  // 200ms on/off
+
+static char izracunajOznakuStanjaLCD() {
+  if (current_activity == ACTIVITY_ERROR || activity_is_error) {
+    return 'E';
+  }
+
+  const EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+  if (stanje.hand_active != 0 || stanje.plate_phase != 0) {
+    return 'R';
+  }
+
+  return 'N';
+}
 
 // ==================== DATE TRACKING ====================
 
@@ -158,7 +172,8 @@ static void build_line1() {
     source_str += " ";
   }
   
-  // Oznaka stanja toranjskog sata za kraj prvog retka
+  // Oznaka stanja toranjskog sata racuna se iz stvarnog stanja kazaljki i ploce
+  status_oznaka = izracunajOznakuStanjaLCD();
   char oznaka_stanja = status_oznaka;
   
   // Get WiFi status (W=active, space=inactive)
