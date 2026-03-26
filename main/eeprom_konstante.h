@@ -120,6 +120,27 @@ constexpr int SLOTOVI_BOOT_FLAGS = 6;               // 6 wear-leveling slots
 constexpr int SLOT_SIZE_BOOT_FLAGS = 
   sizeof(SystemStateBackup);
 
+
+// ==================== JEDINSTVENO STANJE KRETANJA ====================
+// Jedinstveni state-model za toranjski sat (kazaljke + okretna ploča).
+// Faze: 0=stabilno, 1=prvi relej aktivan, 2=drugi relej aktivan.
+
+struct UnifiedMotionState {
+  uint16_t hand_position;   // 0-719
+  uint8_t hand_phase;       // 0-2
+  uint8_t plate_position;   // 0-63
+  uint8_t plate_phase;      // 0-2
+  uint8_t version;          // verzija zapisa
+  uint16_t reserved;        // poravnanje / buduće proširenje
+};
+
+constexpr uint8_t UNIFIED_STANJE_VERZIJA = 1;
+
+constexpr int BAZA_UNIFIED_STANJE =
+  BAZA_BOOT_FLAGS + (SLOTOVI_BOOT_FLAGS * SLOT_SIZE_BOOT_FLAGS);
+constexpr int SLOTOVI_UNIFIED_STANJE = 8;
+constexpr int SLOT_SIZE_UNIFIED_STANJE = sizeof(UnifiedMotionState);
+
 // ==================== MEMORY MAP SUMMARY ====================
 // Total EEPROM size: 4096 bytes
 //
@@ -138,7 +159,7 @@ constexpr int SLOT_SIZE_BOOT_FLAGS =
 
 // Verify EEPROM layout doesn't exceed capacity
 static_assert(
-  (BAZA_BOOT_FLAGS + SLOTOVI_BOOT_FLAGS * SLOT_SIZE_BOOT_FLAGS) <= 4096,
+  (BAZA_UNIFIED_STANJE + SLOTOVI_UNIFIED_STANJE * SLOT_SIZE_UNIFIED_STANJE) <= 4096,
   "EEPROM layout exceeds 24C32 capacity (4096 bytes)"
 );
 
