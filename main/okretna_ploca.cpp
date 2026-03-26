@@ -510,13 +510,16 @@ void upravljajPlocom()
   
   if (!plocaAktivna) {
     if (ciklusUTijeku) {
-      digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-      digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-      ciklusUTijeku = false;
-      drugaFaza = false;
-      spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
-      
-      posaljiPCLog(F("Ploca: zaustavljena - izvan dozvoljenog vremena"));
+      if (drugaFaza) {
+        zavrsiCiklusPloce();
+        posaljiPCLog(F("Ploca: dovrsen korak prije nocnog rezima"));
+      } else {
+        digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+        digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+        ciklusUTijeku = false;
+        drugaFaza = false;
+        posaljiPCLog(F("Ploca: zaustavljena - izvan dozvoljenog vremena"));
+      }
     } else if (plocaAktivnaRanije) {
       posaljiPCLog(F("Ploca: onemogucena - nocni rezim"));
     }
@@ -569,10 +572,10 @@ void upravljajPlocom()
   unsigned long proteklo = millis() - vrijemeStarta;
   
   if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
-    digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
     spremiMarkerFazePloce(MARKER_PLOCA_IZMEDU_FAZA);
+    digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
     spremiMarkerFazePloce(MARKER_PLOCA_FAZA_2_U_TIJEKU);
+    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
     
     vrijemeStarta = millis();
     drugaFaza = true;
