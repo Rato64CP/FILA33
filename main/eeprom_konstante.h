@@ -56,6 +56,9 @@ constexpr int SLOT_SIZE_ZADNJA_SINKRONIZACIJA =
 // Includes bell/hammer timing, WiFi credentials, operation hours
 
 struct PostavkeSpremnik {
+  uint16_t potpis;                         // Potpis zapisa za provjeru kompatibilnosti layouta
+  uint8_t verzija;                         // Verzija zapisa postavki u EEPROM-u
+
   // Bell operation hours
   int satOd;                              // Hour to start striking (e.g., 6)
   int satDo;                              // Hour to stop striking (e.g., 22)
@@ -87,7 +90,11 @@ struct PostavkeSpremnik {
   char statickaIp[16];                    // Static IP address (15 chars + null)
   char mreznaMaska[16];                   // Subnet mask (15 chars + null)
   char zadaniGateway[16];                 // Default gateway (15 chars + null)
+  uint16_t checksum;                       // Checksum cijele strukture (bez ovog polja)
 };
+
+constexpr uint16_t POSTAVKE_POTPIS = 0x5453;        // "TS" = Toranjski Sat
+constexpr uint8_t POSTAVKE_VERZIJA = 2;
 
 constexpr int BAZA_POSTAVKE = 
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);
@@ -116,17 +123,16 @@ constexpr int SLOT_SIZE_BOOT_FLAGS =
 // ==================== MEMORY MAP SUMMARY ====================
 // Total EEPROM size: 4096 bytes
 //
-// Address Range    | Data Type              | Size      | Slots | Total
-// 0-23             | K-minuta (int)         | 4 bytes   | 6     | 24 bytes
-// 24-47            | Plate state "XXP/N"    | 4 bytes   | 6     | 24 bytes
-// 48-63            | Offset minuta (int)    | 4 bytes   | 4     | 16 bytes
-// 64-111           | Sync info (struct)     | 8 bytes   | 6     | 48 bytes
-// 112-511          | Settings (struct)      | 64 bytes  | 6     | 384 bytes
-// 512-751          | Boot state (struct)    | 40 bytes  | 6     | 240 bytes
-// 752-4095         | RESERVED               | -         | -     | 3344 bytes
+// Segment          | Data Type              | Size/slot | Slots | Total
+// KAZALJKE         | K-minuta (int)         | 4 bytes   | 6     | 24 bytes
+// STANJE_PLOCE     | "XXP/N"                | 4 bytes   | 6     | 24 bytes
+// OFFSET_MINUTA    | int                    | 4 bytes   | 4     | 16 bytes
+// ZADNJA_SYNC      | ZadnjaSinkronizacija   | 8 bytes   | 6     | 48 bytes
+// POSTAVKE         | PostavkeSpremnik       | dinamično | 6     | sizeof(PostavkeSpremnik)*6
+// BOOT_FLAGS       | SystemStateBackup      | dinamično | 6     | sizeof(SystemStateBackup)*6
 //
-// TOTAL USED: 720 bytes (~18% of 4096 bytes)
-// RESERVED:   3376 bytes (~82% - for future expansion)
+// Napomena: stvarni raspored računa se preko constexpr izraza iznad (BAZA_* + SLOT_SIZE_*),
+// pa ovaj sažetak služi informativno i treba ga ažurirati kad se mijenja veličina struktura.
 
 // ==================== VALIDATION MACROS ====================
 
