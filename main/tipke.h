@@ -3,4 +3,4 @@
 
 void inicijalizirajTipke();
 void provjeriTipke();
-bool uPostavkama();
+

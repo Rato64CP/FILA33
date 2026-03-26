@@ -22,10 +22,6 @@ static struct {
   {PIN_KEY_BACK, KEY_BACK}
 };
 
-static bool meniJeAktivan = false;
-static unsigned long zadnjaDjetelnost = 0;
-static const unsigned long TIMEOUT_MENIJA = 30000; // 30 seconds
-
 // ==================== KEYPAD INITIALIZATION ====================
 
 void inicijalizirajTipke() {
@@ -43,14 +39,6 @@ void inicijalizirajTipke() {
 // ==================== KEY SCANNING ====================
 
 void provjeriTipke() {
-  unsigned long sadaMs = millis();
-  
-  // Timeout menija ako nema aktivnosti
-  if (meniJeAktivan && (sadaMs - zadnjaDjetelnost) > TIMEOUT_MENIJA) {
-    meniJeAktivan = false;
-    posaljiPCLog(F("Meni: timeout, povratak na prikaz sata"));
-  }
-  
   // Scan all 6 keys with debouncing
   for (int i = 0; i < 6; i++) {
     uint8_t pin = keypadMapping[i].pin;
@@ -61,9 +49,6 @@ void provjeriTipke() {
     
     if (promjena && novoStanje == SWITCH_PRESSED) {
       // Key was pressed
-      zadnjaDjetelnost = sadaMs;
-      meniJeAktivan = true;
-      
       String log = F("Tipka: ");
       switch (event) {
         case KEY_UP:
@@ -94,10 +79,4 @@ void provjeriTipke() {
       obradiKluc(event);
     }
   }
-}
-
-// ==================== MENU STATE ====================
-
-bool uPostavkama() {
-  return meniJeAktivan && dohvatiMenuState() != MENU_STATE_DISPLAY_TIME;
 }

@@ -44,12 +44,3 @@ void povratakNaGlavniPrikaz();
 
 // Update LCD display based on current menu state
 void osvjeziLCDZaMeni();
-
-// Get current selected menu item index
-int dohvatiOdabraniIndex();
-
-// Confirm action in confirmation dialog
-void potvrdiAkciju(bool da);
-
-// Enter password mode
-void ulaziUManjuLozinkom();
