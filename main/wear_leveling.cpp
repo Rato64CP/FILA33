@@ -41,12 +41,6 @@ bool napisiSlot(int adresa, const void* izvor, size_t duljina) {
     log += F(" duljina=");
     log += duljina;
     posaljiPCLog(log);
-  } else {
-    String log = F("WearLeveling: zapisi OK adresa=");
-    log += adresa;
-    log += F(" duljina=");
-    log += duljina;
-    posaljiPCLog(log);
   }
   
   return uspjeh;

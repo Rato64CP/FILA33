@@ -134,12 +134,25 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   }
 }
 
+String formatUnifiedState(const EepromLayout::UnifiedMotionState& stanje) {
+  String log = F("hand=");
+  log += stanje.hand_position;
+  log += F(" phase=");
+  log += stanje.hand_phase;
+  log += F(" plate=");
+  log += stanje.plate_position;
+  log += F(" phase=");
+  log += stanje.plate_phase;
+  return log;
+}
+
 void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
   if (stanje.plate_phase == FAZA_PRVI_RELEJ && (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
     aktivirajRelejePoFazi(stanje);
     spremiStanjeAkoPromjena(stanje);
+    posaljiPCLog(String(F("Ploca: faza 2, ")) + formatUnifiedState(stanje));
     return;
   }
 
@@ -148,6 +161,7 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
     stanje.plate_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
     spremiStanjeAkoPromjena(stanje);
+    posaljiPCLog(String(F("Ploca: korak dovrsen, ")) + formatUnifiedState(stanje));
   }
 }
 
@@ -166,6 +180,7 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   pocetakFazeMs = sadaMs;
   aktivirajRelejePoFazi(stanje);
   spremiStanjeAkoPromjena(stanje);
+  posaljiPCLog(String(F("Ploca: start koraka, ")) + formatUnifiedState(stanje));
 }
 
 bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
@@ -264,6 +279,7 @@ void inicijalizirajPlocu() {
   pocetakFazeMs = millis();
   zadnjaProvjeraMs = millis();
   zadnjiSlotUlaza = -1;
+  posaljiPCLog(String(F("STATE: ")) + formatUnifiedState(stanje));
   posaljiPCLog(F("Ploca: inicijalizirana kroz jedinstveni model stanja"));
 }
 

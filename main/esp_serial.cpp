@@ -18,6 +18,7 @@ static const unsigned long ESP_BRZINA = 9600;
 static const size_t ESP_ULAZNI_BUFFER_MAX = 256;
 
 String ulazniBuffer = "";
+int zadnjiPrihvaceniNtpSatniKljuc = -1;
 
 void inicijalizirajESP() {
   espSerijskiPort.begin(ESP_BRZINA);
@@ -91,6 +92,13 @@ static bool jeStrogiNTPPayload(const String& payload) {
   return parsirajISOVrijeme(payload, ignorirano);
 }
 
+static int izracunajSatniKljuc(const DateTime& vrijeme) {
+  return vrijeme.year() * 1000000L +
+         vrijeme.month() * 10000L +
+         vrijeme.day() * 100L +
+         vrijeme.hour();
+}
+
 void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
@@ -124,19 +132,34 @@ void obradiESPSerijskuKomunikaciju() {
 
         DateTime ntpVrijeme;
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
-          azurirajVrijemeIzNTP(ntpVrijeme);
-          espSerijskiPort.println(F("ACK:NTP"));
-          posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
-
-          // Check and start dynamic hand correction after new NTP sync
-          if (!suKazaljkeUSinkronu()) {
-            posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP"));
-            pokreniBudnoKorekciju();
-            posaljiPCLog(F("Pokrenuta dinamička korekcija kazaljki nakon NTP sinkronizacije"));
+          const int satniKljuc = izracunajSatniKljuc(ntpVrijeme);
+          if (ntpVrijeme.minute() != 0) {
+            espSerijskiPort.println(F("ACK:NTP"));
+            String log = F("NTP preskocen: minuta nije 00 (");
+            log += iso;
+            log += ')';
+            posaljiPCLog(log);
+          } else if (satniKljuc == zadnjiPrihvaceniNtpSatniKljuc) {
+            espSerijskiPort.println(F("ACK:NTP"));
+            String log = F("NTP preskocen: vec prihvacen za isti sat (");
+            log += iso;
+            log += ')';
+            posaljiPCLog(log);
           } else {
-            posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
-          }
+            azurirajVrijemeIzNTP(ntpVrijeme);
+            zadnjiPrihvaceniNtpSatniKljuc = satniKljuc;
+            espSerijskiPort.println(F("ACK:NTP"));
+            posaljiPCLog(String(F("Primljen NTP iz ESP-a (satna sinkronizacija): ")) + iso);
 
+            // Check and start dynamic hand correction after new NTP sync
+            if (!suKazaljkeUSinkronu()) {
+              posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP"));
+              pokreniBudnoKorekciju();
+              posaljiPCLog(F("Pokrenuta dinamička korekcija kazaljki nakon NTP sinkronizacije"));
+            } else {
+              posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
+            }
+          }
         }
       }
       // CMD message
