@@ -18,16 +18,15 @@
 
 // ==================== CONSTANTS ====================
 
-const unsigned long POLA_OKRETA_MS = 6000UL;      // Full 6-second impulse cycle
 const unsigned long FAZA_TRAJANJE_MS = 3000UL;    // Each phase is 3 seconds
 
 const int BROJ_POZICIJA = 64;                      // 64 positions total (0-63)
-const int VRIJEME_POCETKA_OPERACIJE = 299;         // 04:59 in minutes from midnight
-const int VRIJEME_KRAJA_OPERACIJE = 1244;          // 20:44 in minutes from midnight
+const int VRIJEME_POCETKA_OPERACIJE_ZADANO = 299;  // 04:59 in minutes from midnight
+const int VRIJEME_KRAJA_OPERACIJE_ZADANO = 1244;   // 20:44 in minutes from midnight
 const int POZICIJA_NOCI = 63;                      // Night position (locked)
 const int MINUTNI_BLOK = 15;                       // Each position covers 15 minutes
 
-const int MAKS_PAMETNI_POMAK_MINUTA = 15;
+const int MAKS_PAMETNI_POMAK_KORAKA = 1;
 
 // ==================== GLOBAL STATE VARIABLES ====================
 
@@ -38,12 +37,6 @@ static unsigned long vrijemeStarta = 0;
 static bool ciklusUTijeku = false;                
 static bool drugaFaza = false;                    
 static int zadnjaAktiviranaMinuta = -1;           
-
-static bool plocaUSinkronu = true;                
-
-static bool korekcija_u_tijeku = false;           
-static int trenutnaBrojKorakaNaKorekciji = 0;     
-static unsigned long vremePosljednjegImpulsa = 0; 
 
 static const uint8_t BROJ_ULAZA_PLOCE = 5;
 static const uint8_t PIN_ULAZA_PLOCE[BROJ_ULAZA_PLOCE] = {
@@ -69,6 +62,24 @@ static bool plocaAktivnaRanije = true;
 
 // ==================== HELPER FUNCTIONS ====================
 
+static int dohvatiPocetakOperacijeMinute()
+{
+  int pocetak = dohvatiPocetakPloceMinute();
+  if (pocetak < 0 || pocetak > 1439) {
+    return VRIJEME_POCETKA_OPERACIJE_ZADANO;
+  }
+  return pocetak;
+}
+
+static int dohvatiKrajOperacijeMinute()
+{
+  int kraj = dohvatiKrajPloceMinute();
+  if (kraj < 0 || kraj > 1439) {
+    return VRIJEME_KRAJA_OPERACIJE_ZADANO;
+  }
+  return kraj;
+}
+
 // Calculate expected plate position based on RTC time
 static int izracunajCiljnuPoziciju(const DateTime& now)
 {
@@ -77,7 +88,7 @@ static int izracunajCiljnuPoziciju(const DateTime& now)
   }
   
   int ukupnoMinuta = now.hour() * 60 + now.minute();
-  int pocetak = VRIJEME_POCETKA_OPERACIJE;
+  int pocetak = dohvatiPocetakOperacijeMinute();
   int diff = ukupnoMinuta - pocetak;
   
   if (diff < 0) {
@@ -104,8 +115,8 @@ static bool jeVrijemeUPlocnomIntervalu(const DateTime& now)
   }
   
   int minutaDana = now.hour() * 60 + now.minute();
-  int pocetak = VRIJEME_POCETKA_OPERACIJE;      
-  int kraj = VRIJEME_KRAJA_OPERACIJE;           
+  int pocetak = dohvatiPocetakOperacijeMinute();
+  int kraj = dohvatiKrajOperacijeMinute();
   
   return (minutaDana >= pocetak && minutaDana <= kraj);
 }
@@ -396,11 +407,6 @@ void inicijalizirajPlocu()
   drugaFaza = false;
   zadnjaAktiviranaMinuta = -1;
   zadnjiSlotUlaza = -1;
-  korekcija_u_tijeku = false;
-  trenutnaBrojKorakaNaKorekciji = 0;
-  vremePosljednjegImpulsa = 0;
-  plocaUSinkronu = true;
-  
   for (uint8_t i = 0; i < 2; ++i) {
     autoZvonoAktivno[i] = false;
     autoZvonoKraj[i] = 0;
@@ -556,7 +562,7 @@ void kompenzirajPlocu(bool pametniMod)
   log += razlika;
   posaljiPCLog(log);
   
-  if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_MINUTA) {
+  if (pametniMod && razlika <= MAKS_PAMETNI_POMAK_KORAKA) {
     posaljiPCLog(F("Ploca kompenzacija: pametni mod - cekam"));
     return;
   }
@@ -565,8 +571,6 @@ void kompenzirajPlocu(bool pametniMod)
     zadnjaAktiviranaMinuta = now.minute();
     ciklusUTijeku = false;
     drugaFaza = false;
-    plocaUSinkronu = true;
-    
     posaljiPCLog(F("Ploca kompenzacija: vec u sinkronu"));
     return;
   }
@@ -583,8 +587,6 @@ void kompenzirajPlocu(bool pametniMod)
   zadnjaAktiviranaMinuta = now.minute();
   ciklusUTijeku = false;
   drugaFaza = false;
-  plocaUSinkronu = true;
-  
   log = F("Ploca kompenzacija: zavrsena");
   posaljiPCLog(log);
 }
@@ -606,7 +608,6 @@ void oznaciPlocuKaoSinkroniziranu()
 {
   DateTime now = dohvatiTrenutnoVrijeme();
   zadnjaAktiviranaMinuta = now.minute();
-  plocaUSinkronu = true;
   
   String log = F("Ploca: oznacena kao sinkronizirana");
   posaljiPCLog(log);
