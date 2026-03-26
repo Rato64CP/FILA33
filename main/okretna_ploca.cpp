@@ -18,7 +18,7 @@
 
 // ==================== CONSTANTS ====================
 
-const unsigned long FAZA_TRAJANJE_MS = 3000UL;    // Each phase is 3 seconds
+const unsigned long FAZA_TRAJANJE_MS = 6000UL;     // Svaka faza releja traje točno 6 sekundi
 
 const int BROJ_POZICIJA = 64;                      // 64 positions total (0-63)
 const int VRIJEME_POCETKA_OPERACIJE_ZADANO = 299;  // 04:59 in minutes from midnight
@@ -32,11 +32,12 @@ const int MAKS_PAMETNI_POMAK_KORAKA = 1;
 
 int pozicijaPloce = 0;
 int offsetMinuta = 14;
+static int ciljKorakaPloce = 0;
 
 static unsigned long vrijemeStarta = 0;           
 static bool ciklusUTijeku = false;                
 static bool drugaFaza = false;                    
-static int zadnjaAktiviranaMinuta = -1;           
+static int zadnjaAktiviranaMinutaDana = -1;
 
 static const uint8_t BROJ_ULAZA_PLOCE = 5;
 static const uint8_t PIN_ULAZA_PLOCE[BROJ_ULAZA_PLOCE] = {
@@ -60,36 +61,12 @@ static unsigned long autoSlavljenjeKraj = 0;
 
 static bool plocaAktivnaRanije = true;
 
-enum MarkerFazePloce {
-  MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA = 0,
-  MARKER_PLOCA_PRIJE_FAZE_1 = 1,
-  MARKER_PLOCA_FAZA_1_U_TIJEKU = 2,
-  MARKER_PLOCA_IZMEDU_FAZA = 3,
-  MARKER_PLOCA_FAZA_2_U_TIJEKU = 4,
-  MARKER_PLOCA_NAKON_FAZE_2 = 5
+struct StanjePloceEEPROM {
+  char zapis[4];
 };
 
 // ==================== HELPER FUNCTIONS ====================
 
-static int dohvatiPocetakOperacijeMinute()
-{
-  int pocetak = dohvatiPocetakPloceMinute();
-  if (pocetak < 0 || pocetak > 1439) {
-    return VRIJEME_POCETKA_OPERACIJE_ZADANO;
-  }
-  return pocetak;
-}
-
-static int dohvatiKrajOperacijeMinute()
-{
-  int kraj = dohvatiKrajPloceMinute();
-  if (kraj < 0 || kraj > 1439) {
-    return VRIJEME_KRAJA_OPERACIJE_ZADANO;
-  }
-  return kraj;
-}
-
-// Calculate expected plate position based on RTC time
 static int izracunajCiljnuPoziciju(const DateTime& now)
 {
   if (!jePlocaKonfigurirana()) {
@@ -97,7 +74,7 @@ static int izracunajCiljnuPoziciju(const DateTime& now)
   }
   
   int ukupnoMinuta = now.hour() * 60 + now.minute();
-  int pocetak = dohvatiPocetakOperacijeMinute();
+  int pocetak = VRIJEME_POCETKA_OPERACIJE_ZADANO;
   int diff = ukupnoMinuta - pocetak;
   
   if (diff < 0) {
@@ -116,7 +93,6 @@ static int izracunajCiljnuPoziciju(const DateTime& now)
   return pozicija;
 }
 
-// Check if current time is within operating window (04:59-20:44)
 static bool jeVrijemeUPlocnomIntervalu(const DateTime& now)
 {
   if (!jePlocaKonfigurirana()) {
@@ -124,8 +100,8 @@ static bool jeVrijemeUPlocnomIntervalu(const DateTime& now)
   }
   
   int minutaDana = now.hour() * 60 + now.minute();
-  int pocetak = dohvatiPocetakOperacijeMinute();
-  int kraj = dohvatiKrajOperacijeMinute();
+  int pocetak = VRIJEME_POCETKA_OPERACIJE_ZADANO;
+  int kraj = VRIJEME_KRAJA_OPERACIJE_ZADANO;
   
   return (minutaDana >= pocetak && minutaDana <= kraj);
 }
@@ -142,31 +118,57 @@ static int izracunajBrojKorakaNaprijed(int trenutnaPozicija, int ciljnaPozicija)
   return razlika;
 }
 
-static void spremiMarkerFazePloce(int marker)
+static bool jeValjanZapisPloce(const StanjePloceEEPROM& stanje)
 {
-  WearLeveling::spremi(EepromLayout::BAZA_MARKER_FAZE_PLOCE,
-                       EepromLayout::SLOTOVI_MARKER_FAZE_PLOCE,
-                       marker);
+  if (stanje.zapis[0] < '0' || stanje.zapis[0] > '9' ||
+      stanje.zapis[1] < '0' || stanje.zapis[1] > '9') {
+    return false;
+  }
+  if (stanje.zapis[2] != 'P' && stanje.zapis[2] != 'N') {
+    return false;
+  }
+  int poz = (stanje.zapis[0] - '0') * 10 + (stanje.zapis[1] - '0');
+  return poz >= 0 && poz <= POZICIJA_NOCI;
 }
 
-static int ucitajMarkerFazePloce()
+static int dekodirajPoziciju(const StanjePloceEEPROM& stanje)
 {
-  int marker = MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_MARKER_FAZE_PLOCE,
-                            EepromLayout::SLOTOVI_MARKER_FAZE_PLOCE,
-                            marker)) {
-    return MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
+  return (stanje.zapis[0] - '0') * 10 + (stanje.zapis[1] - '0');
+}
+
+static bool spremiStanjePloceEEPROM(int pozicija, char faza)
+{
+  if (pozicija < 0 || pozicija > POZICIJA_NOCI) {
+    return false;
   }
-  if (marker < MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA || marker > MARKER_PLOCA_NAKON_FAZE_2) {
-    return MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA;
+  if (faza != 'P' && faza != 'N') {
+    return false;
   }
-  return marker;
+  StanjePloceEEPROM stanje{};
+  stanje.zapis[0] = static_cast<char>('0' + (pozicija / 10));
+  stanje.zapis[1] = static_cast<char>('0' + (pozicija % 10));
+  stanje.zapis[2] = faza;
+  stanje.zapis[3] = '\0';
+  return WearLeveling::spremi(EepromLayout::BAZA_STANJE_PLOCE,
+                              EepromLayout::SLOTOVI_STANJE_PLOCE,
+                              stanje);
+}
+
+static bool ucitajStanjePloceEEPROM(StanjePloceEEPROM& stanje)
+{
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_STANJE_PLOCE,
+                            EepromLayout::SLOTOVI_STANJE_PLOCE,
+                            stanje)) {
+    return false;
+  }
+  return jeValjanZapisPloce(stanje);
 }
 
 static void oporaviNedovrseniKorakPloce()
 {
-  int marker = ucitajMarkerFazePloce();
-  if (marker == MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA) {
+  StanjePloceEEPROM stanje{};
+  if (!ucitajStanjePloceEEPROM(stanje)) {
+    spremiStanjePloceEEPROM(pozicijaPloce, 'N');
     return;
   }
 
@@ -174,37 +176,31 @@ static void oporaviNedovrseniKorakPloce()
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   ciklusUTijeku = false;
   drugaFaza = false;
+  int spremljenaPozicija = dekodirajPoziciju(stanje);
+  pozicijaPloce = spremljenaPozicija;
+  ciljKorakaPloce = spremljenaPozicija;
 
-  String log = F("Ploca oporavak: marker=");
-  log += marker;
+  String log = F("Ploca oporavak: ");
+  log += stanje.zapis;
   log += F(" -> ");
 
-  if (marker == MARKER_PLOCA_PRIJE_FAZE_1) {
-    log += F("korak nije zapocet, ostaje pozicija");
-  } else if (marker == MARKER_PLOCA_FAZA_1_U_TIJEKU || marker == MARKER_PLOCA_IZMEDU_FAZA) {
-    log += F("prekid prije faze 2, vracam na pocetnu poziciju");
-  } else if (marker == MARKER_PLOCA_FAZA_2_U_TIJEKU || marker == MARKER_PLOCA_NAKON_FAZE_2) {
-    pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
-    WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                         EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                         pozicijaPloce);
-    log += F("faza 2 zapoceta/zavrsena, potvrdujem sljedecu poziciju=");
-    log += pozicijaPloce;
+  if (stanje.zapis[2] == 'P') {
+    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
+    odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
+    osvjeziWatchdog();
+    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+    spremiStanjePloceEEPROM(spremljenaPozicija, 'N');
+    log += F("dovrsena NEPARNI faza i potvrdeno N");
+  } else {
+    log += F("stabilno stanje N, nema dodatnog koraka");
   }
-
-  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
   posaljiPCLog(log);
 }
 
-// Activate first phase of plate rotation
-static void pokreniPrvuFazuPloce()
+static void pokreniPrvuFazuPloce(int ciljPozicija)
 {
-  spremiMarkerFazePloce(MARKER_PLOCA_PRIJE_FAZE_1);
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
-
-  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_1_U_TIJEKU);
+  ciljKorakaPloce = constrain(ciljPozicija, 0, BROJ_POZICIJA - 1);
+  spremiStanjePloceEEPROM(ciljKorakaPloce, 'P');
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
@@ -212,42 +208,39 @@ static void pokreniPrvuFazuPloce()
   ciklusUTijeku = true;
   drugaFaza = false;
   
-  String log = F("Ploca: prva faza, pozicija=");
-  log += pozicijaPloce;
+  String log = F("Ploca: prva faza, cilj=");
+  if (ciljKorakaPloce < 10) log += '0';
+  log += ciljKorakaPloce;
+  log += 'P';
   posaljiPCLog(log);
 }
 
 // Complete plate rotation step
 static void zavrsiCiklusPloce()
 {
-  spremiMarkerFazePloce(MARKER_PLOCA_NAKON_FAZE_2);
-
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   ciklusUTijeku = false;
   drugaFaza = false;
   
-  pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
-  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
+  pozicijaPloce = ciljKorakaPloce;
+  spremiStanjePloceEEPROM(pozicijaPloce, 'N');
   
   String log = F("Ploca: korak zavrsen, pozicija=");
+  if (pozicijaPloce < 10) log += '0';
   log += pozicijaPloce;
+  log += 'N';
   posaljiPCLog(log);
 }
 
 // Execute one complete rotation step in blocking mode
 static void odradiJedanKorakPloceBlokirajuci()
 {
-  spremiMarkerFazePloce(MARKER_PLOCA_PRIJE_FAZE_1);
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
+  const int ciljPozicija = (pozicijaPloce + 1) % BROJ_POZICIJA;
+  ciljKorakaPloce = ciljPozicija;
+  spremiStanjePloceEEPROM(ciljKorakaPloce, 'P');
 
   // FIRST PHASE
-  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_1_U_TIJEKU);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, HIGH);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
@@ -256,13 +249,11 @@ static void odradiJedanKorakPloceBlokirajuci()
   
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
   
-  spremiMarkerFazePloce(MARKER_PLOCA_IZMEDU_FAZA);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   odradiPauzuSaLCD(200);
   osvjeziWatchdog();
   
   // SECOND PHASE
-  spremiMarkerFazePloce(MARKER_PLOCA_FAZA_2_U_TIJEKU);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
   
   String logPhase2 = F("Ploca (blok): faza 2");
@@ -271,18 +262,14 @@ static void odradiJedanKorakPloceBlokirajuci()
   odradiPauzuSaLCD(FAZA_TRAJANJE_MS);
   osvjeziWatchdog();
   
-  spremiMarkerFazePloce(MARKER_PLOCA_NAKON_FAZE_2);
   digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
   digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
   
   odradiPauzuSaLCD(400);
   osvjeziWatchdog();
   
-  pozicijaPloce = (pozicijaPloce + 1) % BROJ_POZICIJA;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
-  spremiMarkerFazePloce(MARKER_PLOCA_NEMA_AKTIVNOG_KORAKA);
+  pozicijaPloce = ciljKorakaPloce;
+  spremiStanjePloceEEPROM(pozicijaPloce, 'N');
   
   String logComplete = F("Ploca (blok): korak zavrsen");
   posaljiPCLog(logComplete);
@@ -450,18 +437,15 @@ void inicijalizirajPlocu()
     pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
   }
   
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_POZICIJA_PLOCE,
-                            EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                            pozicijaPloce)) {
-    pozicijaPloce = 0;
-    posaljiPCLog(F("Ploca: pozicija inicijalizirana na 0"));
+  StanjePloceEEPROM stanje{};
+  if (!ucitajStanjePloceEEPROM(stanje)) {
+    pozicijaPloce = POZICIJA_NOCI;
+    spremiStanjePloceEEPROM(pozicijaPloce, 'N');
+    posaljiPCLog(F("Ploca: inicijalizirano stanje 63N"));
   } else {
-    if (pozicijaPloce < 0 || pozicijaPloce >= BROJ_POZICIJA) {
-      pozicijaPloce = 0;
-      String log = F("Ploca: pozicija van dosega, resetirano");
-      posaljiPCLog(log);
-    }
+    pozicijaPloce = dekodirajPoziciju(stanje);
   }
+  ciljKorakaPloce = pozicijaPloce;
   
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA,
                             EepromLayout::SLOTOVI_OFFSET_MINUTA,
@@ -479,7 +463,7 @@ void inicijalizirajPlocu()
   vrijemeStarta = 0;
   ciklusUTijeku = false;
   drugaFaza = false;
-  zadnjaAktiviranaMinuta = -1;
+  zadnjaAktiviranaMinutaDana = -1;
   zadnjiSlotUlaza = -1;
   for (uint8_t i = 0; i < 2; ++i) {
     autoZvonoAktivno[i] = false;
@@ -503,6 +487,7 @@ void upravljajPlocom()
 {
   DateTime now = dohvatiTrenutnoVrijeme();
   unsigned long sadaMs = millis();
+  const int minutaDana = now.hour() * 60 + now.minute();
   
   azurirajAutomatskaZvonjenja(sadaMs);
   
@@ -525,6 +510,12 @@ void upravljajPlocom()
     }
     
     plocaAktivnaRanije = false;
+    if (!ciklusUTijeku && pozicijaPloce != POZICIJA_NOCI) {
+      pozicijaPloce = POZICIJA_NOCI;
+      ciljKorakaPloce = POZICIJA_NOCI;
+      spremiStanjePloceEEPROM(POZICIJA_NOCI, 'N');
+      posaljiPCLog(F("Ploca: nocni rezim - stanje 63N"));
+    }
     zadnjiSlotUlaza = -1;
     return;
   }
@@ -547,22 +538,26 @@ void upravljajPlocom()
     }
   }
   
-  int minuta = now.minute();
   int cilj = izracunajCiljnuPoziciju(now);
   
   int razlika = izracunajBrojKorakaNaprijed(pozicijaPloce, cilj);
+  const bool jeTerminKoraka = (minutaDana >= VRIJEME_POCETKA_OPERACIJE_ZADANO) &&
+                              (minutaDana <= VRIJEME_KRAJA_OPERACIJE_ZADANO) &&
+                              (((minutaDana - VRIJEME_POCETKA_OPERACIJE_ZADANO) % MINUTNI_BLOK) == 0) &&
+                              (now.second() == 0);
   
   bool trebaPokrenuti = (!ciklusUTijeku &&
-                         minuta != zadnjaAktiviranaMinuta &&
-                         (minuta % MINUTNI_BLOK == offsetMinuta) &&
+                         minutaDana != zadnjaAktiviranaMinutaDana &&
+                         jeTerminKoraka &&
                          razlika > 0);
   
   if (trebaPokrenuti) {
     String log = F("Ploca: pokretanje koraka");
     posaljiPCLog(log);
     
-    pokreniPrvuFazuPloce();
-    zadnjaAktiviranaMinuta = minuta;
+    const int sljedecaPozicija = (pozicijaPloce + 1) % BROJ_POZICIJA;
+    pokreniPrvuFazuPloce(sljedecaPozicija);
+    zadnjaAktiviranaMinutaDana = minutaDana;
   }
   
   if (!ciklusUTijeku) {
@@ -572,9 +567,7 @@ void upravljajPlocom()
   unsigned long proteklo = millis() - vrijemeStarta;
   
   if (!drugaFaza && proteklo >= FAZA_TRAJANJE_MS) {
-    spremiMarkerFazePloce(MARKER_PLOCA_IZMEDU_FAZA);
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-    spremiMarkerFazePloce(MARKER_PLOCA_FAZA_2_U_TIJEKU);
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, HIGH);
     
     vrijemeStarta = millis();
@@ -593,12 +586,9 @@ void upravljajPlocom()
 void postaviTrenutniPolozajPloce(int pozicija)
 {
   pozicijaPloce = constrain(pozicija, 0, BROJ_POZICIJA - 1);
-  
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
-  
-  zadnjaAktiviranaMinuta = -1;
+  ciljKorakaPloce = pozicijaPloce;
+  spremiStanjePloceEEPROM(pozicijaPloce, 'N');
+  zadnjaAktiviranaMinutaDana = -1;
   
   String log = F("Ploca: postavljena pozicija=");
   log += pozicijaPloce;
@@ -649,7 +639,7 @@ void kompenzirajPlocu(bool pametniMod)
   }
   
   if (razlika == 0) {
-    zadnjaAktiviranaMinuta = now.minute();
+    zadnjaAktiviranaMinutaDana = now.hour() * 60 + now.minute();
     ciklusUTijeku = false;
     drugaFaza = false;
     posaljiPCLog(F("Ploca kompenzacija: vec u sinkronu"));
@@ -661,11 +651,10 @@ void kompenzirajPlocu(bool pametniMod)
   }
   
   pozicijaPloce = ciljPozicija;
-  WearLeveling::spremi(EepromLayout::BAZA_POZICIJA_PLOCE,
-                       EepromLayout::SLOTOVI_POZICIJA_PLOCE,
-                       pozicijaPloce);
+  ciljKorakaPloce = ciljPozicija;
+  spremiStanjePloceEEPROM(pozicijaPloce, 'N');
   
-  zadnjaAktiviranaMinuta = now.minute();
+  zadnjaAktiviranaMinutaDana = now.hour() * 60 + now.minute();
   ciklusUTijeku = false;
   drugaFaza = false;
   log = F("Ploca kompenzacija: zavrsena");
@@ -688,7 +677,7 @@ bool jePlocaUSinkronu()
 void oznaciPlocuKaoSinkroniziranu()
 {
   DateTime now = dohvatiTrenutnoVrijeme();
-  zadnjaAktiviranaMinuta = now.minute();
+  zadnjaAktiviranaMinutaDana = now.hour() * 60 + now.minute();
   
   String log = F("Ploca: oznacena kao sinkronizirana");
   posaljiPCLog(log);
