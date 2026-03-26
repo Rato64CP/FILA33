@@ -8,32 +8,37 @@
 #include <string.h>
 #include <ctype.h>
 
+static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
+  EepromLayout::PostavkeSpremnik zadane = {
+    EepromLayout::POSTAVKE_POTPIS, // potpis: kompatibilnost zapisa
+    EepromLayout::POSTAVKE_VERZIJA,// verzija: aktivni layout
+    6,              // satOd: Otkucavanje od 6h
+    22,             // satDo: Otkucavanje do 22h
+    22,             // tihiSatiOd: Početak tihih sati za satne otkucaje
+    6,              // tihiSatiDo: Kraj tihih sati za satne otkucaje
+    600,            // plocaPocetakMinuta: 10:00
+    1200,           // plocaKrajMinuta: 20:00
+    150,            // trajanjeImpulsaCekicaMs: 150 ms
+    400,            // pauzaIzmeduUdaraca: 400 ms
+    120000UL,       // trajanjeZvonjenjaRadniMs: 2 minute radni dani
+    180000UL,       // trajanjeZvonjenjaNedjeljaMs: 3 minute nedjelja
+    120000UL,       // trajanjeSlavljenjaMs: 2 minute slavljenje
+    2,              // brojZvona: 2 zvona
+    "1234",         // pristupLozinka: default lozinka
+    "WiFi",         // wifiSsid: default SSID
+    "password",     // wifiLozinka: default lozinka
+    true,           // koristiDhcp: DHCP po defaultu
+    false,          // mqttOmogucen: MQTT je po defaultu isključen
+    "192.168.1.100",// statickaIp: fallback static IP
+    "255.255.255.0",// mreznaMaska: standard subnet mask
+    "192.168.1.1",  // zadaniGateway: standard gateway
+    0               // checksum: popunjava se prije spremanja
+  };
+  return zadane;
+}
+
 // Default postavke
-static EepromLayout::PostavkeSpremnik postavke = {
-  EepromLayout::POSTAVKE_POTPIS, // potpis: kompatibilnost zapisa
-  EepromLayout::POSTAVKE_VERZIJA,// verzija: aktivni layout
-  6,              // satOd: Otkucavanje od 6h
-  22,             // satDo: Otkucavanje do 22h
-  22,             // tihiSatiOd: Početak tihih sati za satne otkucaje
-  6,              // tihiSatiDo: Kraj tihih sati za satne otkucaje
-  600,            // plocaPocetakMinuta: 10:00
-  1200,           // plocaKrajMinuta: 20:00
-  150,            // trajanjeImpulsaCekicaMs: 150 ms
-  400,            // pauzaIzmeduUdaraca: 400 ms
-  120000UL,       // trajanjeZvonjenjaRadniMs: 2 minute radni dani
-  180000UL,       // trajanjeZvonjenjaNedjeljaMs: 3 minute nedjelja
-  120000UL,       // trajanjeSlavljenjaMs: 2 minute slavljenje
-  2,              // brojZvona: 2 zvona
-  "1234",         // pristupLozinka: default lozinka
-  "WiFi",         // wifiSsid: default SSID
-  "password",     // wifiLozinka: default lozinka
-  true,           // koristiDhcp: DHCP po defaultu
-  false,          // mqttOmogucen: MQTT je po defaultu isključen
-  "192.168.1.100",// statickaIp: fallback static IP
-  "255.255.255.0",// mreznaMaska: standard subnet mask
-  "192.168.1.1",  // zadaniGateway: standard gateway
-  0               // checksum: popunjava se prije spremanja
-};
+static EepromLayout::PostavkeSpremnik postavke = napraviZadanePostavke();
 
 static bool postavkeLCDBlinkanje = false;
 static char redak1Buffer[17] = "Postavke";
@@ -161,17 +166,7 @@ void ucitajPostavke() {
     posaljiPCLog(F("Postavke: učitane iz EEPROM-a"));
     if (!jeKompatibilanEEPROMZapisPostavki(postavke)) {
       posaljiPCLog(F("Postavke: nekompatibilan/ostarjeli zapis -> reset na default"));
-      postavke = {
-        EepromLayout::POSTAVKE_POTPIS,
-        EepromLayout::POSTAVKE_VERZIJA,
-        6, 22, 22, 6,
-        600, 1200,
-        150, 400,
-        120000UL, 180000UL, 120000UL,
-        2, "1234", "WiFi", "password",
-        true, false, "192.168.1.100", "255.255.255.0", "192.168.1.1",
-        0
-      };
+      postavke = napraviZadanePostavke();
       trebaSpremiti = true;
     }
   }
