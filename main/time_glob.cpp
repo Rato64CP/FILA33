@@ -100,6 +100,7 @@ void inicijalizirajRTC() {
     trenutnoVrijeme = rtc.now();
   }
   ucitajZadnjuSinkronizaciju();
+  oznaciPovratakNaRTC();
 }
 
 DateTime dohvatiTrenutnoVrijeme() {
@@ -112,6 +113,10 @@ DateTime dohvatiTrenutnoVrijeme() {
     if (rtc.begin()) {
       trenutnoVrijeme = rtc.now();
     }
+  }
+
+  if (trenutniIzvor != IZ_RTC && jeSinkronizacijaZastarjela()) {
+    oznaciPovratakNaRTC();
   }
   
   return trenutnoVrijeme;

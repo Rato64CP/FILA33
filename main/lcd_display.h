@@ -11,6 +11,7 @@ void prikaziPostavke();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
 void postaviLCDBlinkanje(bool omoguci);
 void odradiPauzuSaLCD(unsigned long trajanjeMs);
+void postaviWiFiStatus(bool aktivan);
 
 // Signalizacija statusa otkucavanja na LCD-u
 void signalizirajBell1_Ringing();

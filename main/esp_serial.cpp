@@ -10,6 +10,7 @@
 #include "kazaljke_sata.h"
 #include "postavke.h"
 #include "mqtt_handler.h"
+#include "lcd_display.h"
 
 // Always use Serial3 (for Mega 2560 tower clock)
 static HardwareSerial &espSerijskiPort = Serial3;
@@ -18,7 +19,6 @@ static const unsigned long ESP_BRZINA = 9600;
 static const size_t ESP_ULAZNI_BUFFER_MAX = 256;
 
 String ulazniBuffer = "";
-int zadnjiPrihvaceniNtpSatniKljuc = -1;
 
 void inicijalizirajESP() {
   espSerijskiPort.begin(ESP_BRZINA);
@@ -92,13 +92,6 @@ static bool jeStrogiNTPPayload(const String& payload) {
   return parsirajISOVrijeme(payload, ignorirano);
 }
 
-static int izracunajSatniKljuc(const DateTime& vrijeme) {
-  return vrijeme.year() * 1000000L +
-         vrijeme.month() * 10000L +
-         vrijeme.day() * 100L +
-         vrijeme.hour();
-}
-
 void obradiESPSerijskuKomunikaciju() {
   while (espSerijskiPort.available()) {
     char znak = espSerijskiPort.read();
@@ -120,8 +113,16 @@ void obradiESPSerijskuKomunikaciju() {
         continue;
       }
 
+      if (ulazniBuffer == "WIFI:CONNECTED") {
+        postaviWiFiStatus(true);
+        posaljiPCLog(F("ESP WiFi status: spojeno"));
+      }
+      else if (ulazniBuffer == "WIFI:DISCONNECTED") {
+        postaviWiFiStatus(false);
+        posaljiPCLog(F("ESP WiFi status: odspojeno"));
+      }
       // NTP message
-      if (ulazniBuffer.startsWith("NTP:")) {
+      else if (ulazniBuffer.startsWith("NTP:")) {
         String iso = ulazniBuffer.substring(4);
         if (!jeStrogiNTPPayload(iso)) {
           espSerijskiPort.println(F("ERR:NTP"));
@@ -132,24 +133,9 @@ void obradiESPSerijskuKomunikaciju() {
 
         DateTime ntpVrijeme;
         if (parsirajISOVrijeme(iso, ntpVrijeme)) {
-          const int satniKljuc = izracunajSatniKljuc(ntpVrijeme);
-          if (ntpVrijeme.minute() != 0) {
-            espSerijskiPort.println(F("SKIP:NTP"));
-            String log = F("NTP preskocen: minuta nije 00 (");
-            log += iso;
-            log += ')';
-            posaljiPCLog(log);
-          } else if (satniKljuc == zadnjiPrihvaceniNtpSatniKljuc) {
-            espSerijskiPort.println(F("SKIP:NTP"));
-            String log = F("NTP preskocen: vec prihvacen za isti sat (");
-            log += iso;
-            log += ')';
-            posaljiPCLog(log);
-          } else {
-            azurirajVrijemeIzNTP(ntpVrijeme);
-            zadnjiPrihvaceniNtpSatniKljuc = satniKljuc;
-            espSerijskiPort.println(F("ACK:NTP"));
-            posaljiPCLog(String(F("Primljen NTP iz ESP-a (satna sinkronizacija): ")) + iso);
+          azurirajVrijemeIzNTP(ntpVrijeme);
+          espSerijskiPort.println(F("ACK:NTP"));
+          posaljiPCLog(String(F("Primljen NTP iz ESP-a: ")) + iso);
 
             // Check and start dynamic hand correction after new NTP sync
             if (!suKazaljkeUSinkronu()) {
@@ -159,7 +145,6 @@ void obradiESPSerijskuKomunikaciju() {
             } else {
               posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
             }
-          }
         }
       }
       // CMD message

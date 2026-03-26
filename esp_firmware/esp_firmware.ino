@@ -17,7 +17,6 @@ bool primljenaWifiKonfiguracija = false;
 static const char *NTP_POSLUZITELJ       = "pool.ntp.org";
 static const long  NTP_OFFSET_SEKUNDI    = 0;           // UTC
 static const unsigned long NTP_INTERVAL_MS   = 60000;   // osvježavanje NTP-a
-static const unsigned long SLANJE_INTERVAL_MS = 30000;  // slanje Megi
 static const size_t SERIJSKI_BUFFER_MAX = 256;
 
 WiFiUDP ntpUDP;
@@ -25,12 +24,13 @@ NTPClient ntpKlijent(ntpUDP, NTP_POSLUZITELJ, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_M
 
 ESP8266WebServer webPosluzitelj(80);
 
-unsigned long zadnjeSlanjeMillis = 0;
 String zadnjiOdgovorMega = "";
 
 // Statusne zastavice za "faze"
 bool wifiIkadSpojen = false;
 bool ntpIkadPostavljen = false;
+bool ntpPoslanNakonSpajanja = false;
+int zadnjiPoslaniNtpSatniKljuc = -1;
 
 // Upravljanje nenametljivim pokušajima WiFi spajanja
 bool wifiPokusajUToku = false;
@@ -40,6 +40,7 @@ int wifiBrojPokusajaZaredom = 0;
 static const unsigned long WIFI_POKUSAJ_TIMEOUT_MS = 20000;
 static const unsigned long WIFI_ODGODA_POKUSAJA_MS = 5000;
 static const int WIFI_MAX_POKUSAJA_PRIJE_ODGODE = 3;
+wl_status_t zadnjiPrijavljeniWiFiStatus = WL_IDLE_STATUS;
 
 // Popis naredbi koje prihvaća toranjski sat
 const char *DOZVOLJENE_NAREDBE[] = {
@@ -53,11 +54,13 @@ const size_t BROJ_NAREDBI = sizeof(DOZVOLJENE_NAREDBE) / sizeof(DOZVOLJENE_NARED
 void poveziNaWiFi();
 bool postaviStatickuKonfiguraciju();
 void osvjeziNTPSat();
+void posaljiNTPAkoTreba();
 void posaljiNTPPremaMegai();
 void obradiSerijskiUlaz();
 void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout = 3000);
 void konfigurirajWebPosluzitelj();
 void saljiNaredbuMegai(const String &naredba);
+void prijaviPromjenuWiFiStatusa();
 bool jeNaredbaDozvoljena(const String &naredba);
 bool jePrijestupnaGodina(int godina);
 int danUTjednu(int godina, int mjesec, int dan);
@@ -99,14 +102,25 @@ void loop() {
 
   osvjeziNTPSat();      // DEBUG unutar funkcije
   obradiSerijskiUlaz(); // DEBUG unutar funkcije
-
-  unsigned long sada = millis();
-  if (ntpIkadPostavljen && sada - zadnjeSlanjeMillis >= SLANJE_INTERVAL_MS) {
-    posaljiNTPPremaMegai();
-    zadnjeSlanjeMillis = sada;
-  }
+  posaljiNTPAkoTreba();
 
   webPosluzitelj.handleClient();
+}
+
+void prijaviPromjenuWiFiStatusa() {
+  wl_status_t trenutniStatus = WiFi.status();
+  if (trenutniStatus == zadnjiPrijavljeniWiFiStatus) {
+    return;
+  }
+
+  zadnjiPrijavljeniWiFiStatus = trenutniStatus;
+  if (trenutniStatus == WL_CONNECTED) {
+    ntpPoslanNakonSpajanja = false;
+    Serial.println("WIFI:CONNECTED");
+  } else {
+    ntpPoslanNakonSpajanja = false;
+    Serial.println("WIFI:DISCONNECTED");
+  }
 }
 
 void poveziNaWiFi() {
@@ -122,8 +136,11 @@ void poveziNaWiFi() {
     wifiIkadSpojen = true;
     wifiPokusajUToku = false;
     wifiBrojPokusajaZaredom = 0;
+    prijaviPromjenuWiFiStatusa();
     return;
   }
+
+  prijaviPromjenuWiFiStatusa();
 
   // Provjeri treba li započeti novi pokušaj
   if (!wifiPokusajUToku && sada >= wifiSljedeciPokusajDozvoljen) {
@@ -153,6 +170,7 @@ void poveziNaWiFi() {
     Serial.println("WIFI: Timeout pokušaja, odspajam i čekam prije novog pokušaja");
     WiFi.disconnect();
     wifiPokusajUToku = false;
+    prijaviPromjenuWiFiStatusa();
 
     // Nakon nekoliko uzastopnih pokušaja napravi dulju pauzu
     if (wifiBrojPokusajaZaredom >= WIFI_MAX_POKUSAJA_PRIJE_ODGODE) {
@@ -213,6 +231,39 @@ void osvjeziNTPSat() {
   } else if (!ntpKlijent.isTimeSet() && (sada - zadnjiLog > 10000)) {
     Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
     zadnjiLog = sada;
+  }
+}
+
+void posaljiNTPAkoTreba() {
+  if (WiFi.status() != WL_CONNECTED || !ntpKlijent.isTimeSet()) {
+    return;
+  }
+
+  time_t utcEpoch = ntpKlijent.getEpochTime();
+  time_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
+  struct tm lokalniTm;
+  if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
+    Serial.println("NTPLOG: lokalna satnica nije dostupna za slanje");
+    return;
+  }
+
+  int satniKljuc = (lokalniTm.tm_year + 1900) * 1000000L +
+                   (lokalniTm.tm_mon + 1) * 10000L +
+                   lokalniTm.tm_mday * 100L +
+                   lokalniTm.tm_hour;
+
+  if (!ntpPoslanNakonSpajanja) {
+    posaljiNTPPremaMegai();
+    ntpPoslanNakonSpajanja = true;
+    zadnjiPoslaniNtpSatniKljuc = satniKljuc;
+    Serial.println("NTPLOG: prvo slanje nakon WiFi spajanja");
+    return;
+  }
+
+  if (satniKljuc != zadnjiPoslaniNtpSatniKljuc) {
+    posaljiNTPPremaMegai();
+    zadnjiPoslaniNtpSatniKljuc = satniKljuc;
+    Serial.println("NTPLOG: satna obnova vremena poslana Megi");
   }
 }
 
@@ -288,7 +339,8 @@ void obradiSerijskiUlaz() {
               WiFi.disconnect();
               wifiIkadSpojen = false;
               ntpIkadPostavljen = false;
-              zadnjeSlanjeMillis = 0;
+              ntpPoslanNakonSpajanja = false;
+              zadnjiPoslaniNtpSatniKljuc = -1;
               poveziNaWiFi();
               uspjeh = true;
             } else {

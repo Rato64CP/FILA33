@@ -182,16 +182,10 @@ Satno otkucavanje je sada prebačeno na čekiće jer traži precizan impulsni ri
 Sustav kontinuirano čita DS3231 i to je lokalni autoritet vremena tijekom normalnog rada.
 
 ### ESP NTP kao periodička korekcija
-NTP dolazi serijski od ESP-a u strogom ISO formatu (`NTP:YYYY-MM-DDTHH:MM:SS[Z]`). Kad je prihvaćen, vrijeme se upisuje i u RTC.
+NTP dolazi serijski od ESP-a u strogom ISO formatu (`NTP:YYYY-MM-DDTHH:MM:SS[Z]`). ESP pošalje prvi valjani NTP odmah nakon uspostave WiFi veze, a zatim još jednom za svaki novi lokalni sat. Kad je prihvaćen, vrijeme se upisuje i u RTC.
 
-### Pravilo „samo jednom po satu“ (minuta 00)
-NTP se prihvaća samo ako:
-- je minuta `00`,
-- taj sat još nije prihvaćen (satni ključ godina+mjesec+dan+sat).
-
-### `ACK:NTP` vs `SKIP:NTP`
+### `ACK:NTP`
 - **`ACK:NTP`**: NTP je valjan i prihvaćen.
-- **`SKIP:NTP`**: poruka valjana, ali odbijena pravilom (minuta nije 00 ili je taj sat već obrađen).
 
 Nakon `ACK:NTP`, sustav pokreće „budnu“ korekciju kazaljki ako nisu sinkronizirane.
 
