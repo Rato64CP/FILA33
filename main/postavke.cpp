@@ -5,9 +5,13 @@
 #include "wear_leveling.h"
 #include "i2c_eeprom.h"
 #include "pc_serial.h"
+#include <string.h>
+#include <ctype.h>
 
 // Default postavke
 static EepromLayout::PostavkeSpremnik postavke = {
+  EepromLayout::POSTAVKE_POTPIS, // potpis: kompatibilnost zapisa
+  EepromLayout::POSTAVKE_VERZIJA,// verzija: aktivni layout
   6,              // satOd: Otkucavanje od 6h
   22,             // satDo: Otkucavanje do 22h
   22,             // tihiSatiOd: Početak tihih sati za satne otkucaje
@@ -27,12 +31,64 @@ static EepromLayout::PostavkeSpremnik postavke = {
   false,          // mqttOmogucen: MQTT je po defaultu isključen
   "192.168.1.100",// statickaIp: fallback static IP
   "255.255.255.0",// mreznaMaska: standard subnet mask
-  "192.168.1.1"   // zadaniGateway: standard gateway
+  "192.168.1.1",  // zadaniGateway: standard gateway
+  0               // checksum: popunjava se prije spremanja
 };
 
 static bool postavkeLCDBlinkanje = false;
 static char redak1Buffer[17] = "Postavke";
 static char redak2Buffer[17] = "Ucitavanje...";
+
+static uint16_t izracunajChecksumPostavki(const EepromLayout::PostavkeSpremnik& ulaz) {
+  EepromLayout::PostavkeSpremnik kopija = ulaz;
+  kopija.checksum = 0;
+
+  const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
+  uint16_t suma = 0;
+  for (size_t i = 0; i < sizeof(kopija); i++) {
+    suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
+    suma = static_cast<uint16_t>(suma + podaci[i] + 0x3D);
+  }
+  return suma;
+}
+
+static void pripremiIntegritetPostavki(EepromLayout::PostavkeSpremnik& cilj) {
+  cilj.potpis = EepromLayout::POSTAVKE_POTPIS;
+  cilj.verzija = EepromLayout::POSTAVKE_VERZIJA;
+  cilj.checksum = izracunajChecksumPostavki(cilj);
+}
+
+static bool jeValjanMrezniTekst(const char* ulaz, size_t maxDuljina, bool dopustiPrazno) {
+  bool imaZnakova = false;
+  for (size_t i = 0; i < maxDuljina; i++) {
+    const char c = ulaz[i];
+    if (c == '\0') {
+      return dopustiPrazno ? true : imaZnakova;
+    }
+    if (!isprint(static_cast<unsigned char>(c))) {
+      return false;
+    }
+    imaZnakova = true;
+  }
+  return false;  // nema '\0' unutar dozvoljene duljine
+}
+
+static bool jeValjanIPv4Tekst(const char* ulaz, size_t maxDuljina) {
+  bool imaZnamenku = false;
+  for (size_t i = 0; i < maxDuljina; i++) {
+    const char c = ulaz[i];
+    if (c == '\0') {
+      return imaZnamenku;
+    }
+    if (!isdigit(static_cast<unsigned char>(c)) && c != '.') {
+      return false;
+    }
+    if (isdigit(static_cast<unsigned char>(c))) {
+      imaZnamenku = true;
+    }
+  }
+  return false;
+}
 
 static void osigurajNullTerminiraneMreznePostavke() {
   postavke.pristupLozinka[sizeof(postavke.pristupLozinka) - 1] = '\0';
@@ -43,31 +99,122 @@ static void osigurajNullTerminiraneMreznePostavke() {
   postavke.zadaniGateway[sizeof(postavke.zadaniGateway) - 1] = '\0';
 }
 
+static bool sanitizirajMreznaPolja() {
+  bool biloPromjena = false;
+  osigurajNullTerminiraneMreznePostavke();
+
+  if (!jeValjanMrezniTekst(postavke.pristupLozinka, sizeof(postavke.pristupLozinka), true)) {
+    strncpy(postavke.pristupLozinka, "1234", sizeof(postavke.pristupLozinka) - 1);
+    postavke.pristupLozinka[sizeof(postavke.pristupLozinka) - 1] = '\0';
+    biloPromjena = true;
+  }
+  if (!jeValjanMrezniTekst(postavke.wifiSsid, sizeof(postavke.wifiSsid), true)) {
+    strncpy(postavke.wifiSsid, "WiFi", sizeof(postavke.wifiSsid) - 1);
+    postavke.wifiSsid[sizeof(postavke.wifiSsid) - 1] = '\0';
+    biloPromjena = true;
+  }
+  if (!jeValjanMrezniTekst(postavke.wifiLozinka, sizeof(postavke.wifiLozinka), true)) {
+    strncpy(postavke.wifiLozinka, "password", sizeof(postavke.wifiLozinka) - 1);
+    postavke.wifiLozinka[sizeof(postavke.wifiLozinka) - 1] = '\0';
+    biloPromjena = true;
+  }
+  if (!jeValjanIPv4Tekst(postavke.statickaIp, sizeof(postavke.statickaIp))) {
+    strncpy(postavke.statickaIp, "192.168.1.100", sizeof(postavke.statickaIp) - 1);
+    postavke.statickaIp[sizeof(postavke.statickaIp) - 1] = '\0';
+    biloPromjena = true;
+  }
+  if (!jeValjanIPv4Tekst(postavke.mreznaMaska, sizeof(postavke.mreznaMaska))) {
+    strncpy(postavke.mreznaMaska, "255.255.255.0", sizeof(postavke.mreznaMaska) - 1);
+    postavke.mreznaMaska[sizeof(postavke.mreznaMaska) - 1] = '\0';
+    biloPromjena = true;
+  }
+  if (!jeValjanIPv4Tekst(postavke.zadaniGateway, sizeof(postavke.zadaniGateway))) {
+    strncpy(postavke.zadaniGateway, "192.168.1.1", sizeof(postavke.zadaniGateway) - 1);
+    postavke.zadaniGateway[sizeof(postavke.zadaniGateway) - 1] = '\0';
+    biloPromjena = true;
+  }
+
+  return biloPromjena;
+}
+
+static bool jeKompatibilanEEPROMZapisPostavki(const EepromLayout::PostavkeSpremnik& ucitano) {
+  if (ucitano.potpis != EepromLayout::POSTAVKE_POTPIS) {
+    return false;
+  }
+  if (ucitano.verzija != EepromLayout::POSTAVKE_VERZIJA) {
+    return false;
+  }
+  return ucitano.checksum == izracunajChecksumPostavki(ucitano);
+}
+
 // Inicijalizacija postavki iz EEPROM-a
 void ucitajPostavke() {
+  bool trebaSpremiti = false;
+  bool ucitanoIzEeproma = WearLeveling::ucitaj(EepromLayout::BAZA_POSTAVKE,
+                                                EepromLayout::SLOTOVI_POSTAVKE,
+                                                postavke);
   // Pokušaj učitati iz EEPROM-a
-  if (!WearLeveling::ucitaj(EepromLayout::BAZA_POSTAVKE,
-                           EepromLayout::SLOTOVI_POSTAVKE,
-                           postavke)) {
+  if (!ucitanoIzEeproma) {
     posaljiPCLog(F("Postavke: koriste default vrijednosti"));
+    trebaSpremiti = true;
   } else {
     posaljiPCLog(F("Postavke: učitane iz EEPROM-a"));
+    if (!jeKompatibilanEEPROMZapisPostavki(postavke)) {
+      posaljiPCLog(F("Postavke: nekompatibilan/ostarjeli zapis -> reset na default"));
+      postavke = {
+        EepromLayout::POSTAVKE_POTPIS,
+        EepromLayout::POSTAVKE_VERZIJA,
+        6, 22, 22, 6,
+        600, 1200,
+        150, 400,
+        120000UL, 180000UL, 120000UL,
+        2, "1234", "WiFi", "password",
+        true, false, "192.168.1.100", "255.255.255.0", "192.168.1.1",
+        0
+      };
+      trebaSpremiti = true;
+    }
   }
   
   // Validacija učitanih vrijednosti
-  if (postavke.satOd < 0) postavke.satOd = 6;
-  if (postavke.satOd > 23) postavke.satOd = 6;
-  if (postavke.satDo < 0) postavke.satDo = 22;
-  if (postavke.satDo > 23) postavke.satDo = 22;
-  if (postavke.satDo <= postavke.satOd) postavke.satDo = postavke.satOd + 8;
-  if (postavke.satDo > 23) postavke.satDo = 23;
-  if (postavke.tihiSatiOd < 0 || postavke.tihiSatiOd > 23) postavke.tihiSatiOd = 22;
-  if (postavke.tihiSatiDo < 0 || postavke.tihiSatiDo > 23) postavke.tihiSatiDo = 6;
-  if (postavke.mqttOmogucen != false && postavke.mqttOmogucen != true) postavke.mqttOmogucen = false;
-  osigurajNullTerminiraneMreznePostavke();
+  if (postavke.satOd < 0 || postavke.satOd > 23) {
+    postavke.satOd = 6;
+    trebaSpremiti = true;
+  }
+  if (postavke.satDo < 0 || postavke.satDo > 23) {
+    postavke.satDo = 22;
+    trebaSpremiti = true;
+  }
+  if (postavke.satDo <= postavke.satOd) {
+    postavke.satDo = postavke.satOd + 8;
+    trebaSpremiti = true;
+  }
+  if (postavke.satDo > 23) {
+    postavke.satDo = 23;
+    trebaSpremiti = true;
+  }
+  if (postavke.tihiSatiOd < 0 || postavke.tihiSatiOd > 23) {
+    postavke.tihiSatiOd = 22;
+    trebaSpremiti = true;
+  }
+  if (postavke.tihiSatiDo < 0 || postavke.tihiSatiDo > 23) {
+    postavke.tihiSatiDo = 6;
+    trebaSpremiti = true;
+  }
+  if (postavke.trajanjeImpulsaCekicaMs < 50) {
+    postavke.trajanjeImpulsaCekicaMs = 150;
+    trebaSpremiti = true;
+  }
+  if (postavke.pauzaIzmeduUdaraca < 100) {
+    postavke.pauzaIzmeduUdaraca = 400;
+    trebaSpremiti = true;
+  }
+  if (sanitizirajMreznaPolja()) {
+    posaljiPCLog(F("Postavke: detektirano oštećenje string polja, primijenjen fallback"));
+    trebaSpremiti = true;
+  }
   
-  if (postavke.trajanjeImpulsaCekicaMs < 50) postavke.trajanjeImpulsaCekicaMs = 150;
-  if (postavke.pauzaIzmeduUdaraca < 100) postavke.pauzaIzmeduUdaraca = 400;
+  pripremiIntegritetPostavki(postavke);
   
   String log = F("Postavke: sat ");
   log += postavke.satOd;
@@ -80,9 +227,11 @@ void ucitajPostavke() {
   posaljiPCLog(log);
   
   // Spremi ponovno za sigurnost
-  WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
-                      EepromLayout::SLOTOVI_POSTAVKE,
-                      postavke);
+  if (trebaSpremiti) {
+    WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
+                        EepromLayout::SLOTOVI_POSTAVKE,
+                        postavke);
+  }
 }
 
 const char* dohvatiPostavkeRedak1() {
@@ -139,6 +288,7 @@ void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo) {
 
   postavke.tihiSatiOd = satOd;
   postavke.tihiSatiDo = satDo;
+  pripremiIntegritetPostavki(postavke);
 
   WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
                       EepromLayout::SLOTOVI_POSTAVKE,
@@ -218,6 +368,7 @@ void postaviMQTTOmogucen(bool omogucen) {
   }
 
   postavke.mqttOmogucen = omogucen;
+  pripremiIntegritetPostavki(postavke);
   WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
                       EepromLayout::SLOTOVI_POSTAVKE,
                       postavke);
