@@ -67,6 +67,8 @@ struct StanjePloceEEPROM {
 
 // ==================== HELPER FUNCTIONS ====================
 
+static void odradiJedanKorakPloceBlokirajuci();
+
 static int izracunajCiljnuPoziciju(const DateTime& now)
 {
   if (!jePlocaKonfigurirana()) {
