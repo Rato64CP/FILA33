@@ -7,7 +7,6 @@ extern LiquidCrystal_I2C lcd;
 
 void inicijalizirajLCD();
 void prikaziSat();
-void prikaziPostavke();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
 void postaviLCDBlinkanje(bool omoguci);
 void odradiPauzuSaLCD(unsigned long trajanjeMs);

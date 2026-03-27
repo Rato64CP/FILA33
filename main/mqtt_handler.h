@@ -12,9 +12,6 @@ void upravljajMQTT();
 // Publish current system status to Home Assistant
 void objaviStatusMQTT();
 
-// Subscribe to Home Assistant commands
-void pretplaciNaKomandeHA();
-
 // Process received MQTT commands
 void obradiMQTTKomandu(const String& tema, const String& poruka);
 

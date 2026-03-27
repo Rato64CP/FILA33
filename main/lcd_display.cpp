@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "time_glob.h"
-#include "otkucavanje.h"
+#include "zvonjenje.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
 
@@ -57,9 +57,6 @@ static enum {
   ACTIVITY_BELL2,               // Bell 2 ringing
   ACTIVITY_HAMMER1,             // Hammer 1 striking
   ACTIVITY_HAMMER2,             // Hammer 2 striking
-  ACTIVITY_NTP_SYNC,            // NTP synchronization in progress
-  ACTIVITY_HAND_CORRECTION,     // Hand position correction
-  ACTIVITY_PLATE_CORRECTION,    // Plate position correction
   ACTIVITY_ERROR,               // Error condition
   ACTIVITY_CELEBRATION,         // Celebration mode active
   ACTIVITY_FUNERAL              // Funeral mode active
@@ -337,26 +334,6 @@ void signalizirajHammer2_Active() {
   set_activity_message("Hammer 2 active ", 3000, false);
 }
 
-// Signal NTP synchronization
-void signalizirajNTP_Sync() {
-  current_activity = ACTIVITY_NTP_SYNC;
-  set_activity_message("NTP sync...     ", 5000, false);
-}
-
-// Signal hand position correction
-void signalizirajHand_Correction() {
-  current_activity = ACTIVITY_HAND_CORRECTION;
-  set_activity_message("Correcting hands", 4000, false);
-  status_oznaka = 'R';  // Korekcija kazaljki je aktivna
-}
-
-// Signal plate position correction
-void signalizirajPlate_Correction() {
-  current_activity = ACTIVITY_PLATE_CORRECTION;
-  set_activity_message("Correcting plate", 4000, false);
-  status_oznaka = 'R';  // Korekcija okretne ploce je aktivna
-}
-
 // Signal RTC battery error
 void signalizirajError_RTC() {
   current_activity = ACTIVITY_ERROR;
@@ -442,15 +419,6 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
   }
 }
 
-// Show settings (placeholder for menu compatibility)
-void prikaziPostavke() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Postavke");
-  lcd.setCursor(0, 1);
-  lcd.print("[Menu sistem]");
-}
-
 // Set LCD blinking for visual alerts
 void postaviLCDBlinkanje(bool omoguci) {
   activity_is_error = omoguci;
@@ -473,62 +441,6 @@ void odradiPauzuSaLCD(unsigned long duration_ms) {
     
     // Small delay to prevent busy-waiting
     delay(10);
-  }
-}
-
-// ==================== STATE HELPERS ====================
-
-// Vrati oznaku u normalu kada nema korekcije ni greske
-void azurirajOznakuDana_External() {
-  // Kad sat nije u korekciji ili recovery stanju, oznaka je N
-  if (current_activity != ACTIVITY_ERROR && 
-      current_activity != ACTIVITY_HAND_CORRECTION &&
-      current_activity != ACTIVITY_PLATE_CORRECTION) {
-    status_oznaka = 'N';
-  }
-}
-
-// Notify menu that it's active (to prevent LCD conflicts)
-void notifyMenuActive(bool active) {
-  // Menu will handle its own display updates
-  // LCD will pause normal display updates during menu
-}
-
-// Get LCD visibility state (for menu compatibility)
-bool jeLCDVidljiv() {
-  return true;  // LCD is always visible in this implementation
-}
-
-// Manual LCD refresh (for menu forcing updates)
-void forceRefreshLCD() {
-  last_line1_refresh = 0;
-  last_line2_refresh = 0;
-  prikaziSat();
-}
-
-// ==================== CLEARING ACTIVITIES ====================
-
-// Clear all activity messages and return to normal display
-void obrisiSveAktivnosti() {
-  current_activity = ACTIVITY_NONE;
-  activity_timeout_ms = 0;
-  memset(activity_message, ' ', 16);
-  activity_message[16] = '\0';
-  activity_is_error = false;
-  status_oznaka = 'N';
-  blink_visible = true;
-}
-
-// Clear error state
-void obrisiGresku() {
-  if (activity_is_error) {
-    current_activity = ACTIVITY_NONE;
-    activity_timeout_ms = 0;
-    memset(activity_message, ' ', 16);
-    activity_message[16] = '\0';
-    activity_is_error = false;
-    status_oznaka = 'N';
-    blink_visible = true;
   }
 }
 

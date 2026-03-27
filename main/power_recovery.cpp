@@ -35,7 +35,6 @@ static bool power_loss_detected = false;
 static unsigned long boot_time = 0;
 static unsigned long last_state_save_time = 0;
 static uint32_t reset_counter = 0;
-static uint32_t uptime_counter = 0;
 static bool boot_recovery_odraden = false;
 
 struct SystemStateBackup {
@@ -95,10 +94,6 @@ void oznaciWatchdogReset(bool resetiranWatchdog) {
 
 void oznaciGubitakNapajanja(bool izgubljenoNapajanje) {
   power_loss_detected = izgubljenoNapajanje;
-}
-
-void povecajUptimeBrojac() {
-  ++uptime_counter;
 }
 
 void odradiBootRecovery() {
@@ -195,44 +190,6 @@ void spremiKriticalnoStanje() {
     save_slot = (save_slot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS;
     last_state_save_time = sada;
   }
-}
-
-void gracioznoGasenje() {
-  posaljiPCLog(F("Power Recovery: Graceful shutdown initiated"));
-
-  cli();
-
-  digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
-  digitalWrite(PIN_RELEJ_NEPARNE_KAZALJKE, LOW);
-  digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
-  digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
-  digitalWrite(PIN_ZVONO_1, LOW);
-  digitalWrite(PIN_ZVONO_2, LOW);
-  digitalWrite(PIN_CEKIC_MUSKI, LOW);
-  digitalWrite(PIN_CEKIC_ZENSKI, LOW);
-
-  spremiKriticalnoStanje();
-  delay(500);
-
-  while (true) {
-    delay(1000);
-  }
-}
-
-bool jeSistemNakonWatchdogReseta() {
-  return watchdog_reset;
-}
-
-bool jeSistemNakonGubickaNapajanja() {
-  return power_loss_detected;
-}
-
-unsigned long dohvatiVrijemeZadnjegSpremanja() {
-  return last_state_save_time;
-}
-
-unsigned long dohvatiSistUptimeSeconde() {
-  return uptime_counter;
 }
 
 bool provjeriZdravostEEPROM() {

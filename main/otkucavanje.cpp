@@ -38,9 +38,7 @@ const unsigned long DEBOUNCE_BUTTON_MS = 30UL;
 enum VrstaOtkucavanja {
   OTKUCAVANJE_NONE = 0,          // No striking
   OTKUCAVANJE_SATI = 1,          // Hour striking sequence
-  OTKUCAVANJE_POLA = 2,          // Half-hour single strike
-  OTKUCAVANJE_SLAVLJENJE = 3,    // Celebration mode
-  OTKUCAVANJE_MRTVACKO = 4       // Funeral mode
+  OTKUCAVANJE_POLA = 2           // Half-hour single strike
 };
 
 // ==================== STATE VARIABLES ====================
@@ -53,17 +51,13 @@ static struct {
   bool cekic_aktivan;                 // Is hammer currently energized
   int aktivni_pin;                    // Which hammer pin is being used
   unsigned long vrijeme_zadnje_aktivacije; // When hammer was last toggled
-  
-  // Blocking flags
-  bool blokirano;                     // Is striking blocked (e.g., by bell inertia)
 } otkucavanje = {
   OTKUCAVANJE_NONE,
   0,
   0,
   false,
   -1,
-  0,
-  false
+  0
 };
 
 // Stanje slavljenja: beskonačni slijed 1,2,2 dok je način rada aktivan
@@ -499,7 +493,6 @@ void inicijalizirajOtkucavanje() {
   otkucavanje.cekic_aktivan = false;
   otkucavanje.aktivni_pin = -1;
   otkucavanje.vrijeme_zadnje_aktivacije = 0;
-  otkucavanje.blokirano = false;
 
   slavljenje.slavljenje_aktivno = false;
   slavljenje.vrijeme_pocetka_ms = 0;
