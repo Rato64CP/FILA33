@@ -1,52 +1,69 @@
-// wear_leveling.h – EEPROM wear-leveling za dugovječnost
 #pragma once
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
-// Wear-leveling sustav koji rotira učitavanje/spremanje između višestrukih slotova
-// kako bi se izbjeglo prekomjerno pisanje istih lokacija u EEPROM memoriji
 namespace WearLeveling {
 
-// Vraća veličinu slota za danu vrstu podataka
-// Koristi se za izračunavanje raspored u EEPROM memoriji
+// Trajno pamti zadnji zapisani slot za pojedini EEPROM segment.
+// To je važno za recovery toranjskog sata nakon boota, kako bi
+// moduli u main/ dohvatili stvarno najnovije stanje, a ne stariji slot.
+int odrediSlotZaCitanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota);
+int odrediSlotZaPisanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota);
+void zapamtiZadnjiSlot(int baznaAdresa, int brojSlotova, size_t velicinaSlota, uint8_t slot);
+
 template <typename T>
 constexpr size_t velicinaSlota() {
   return sizeof(T);
 }
 
-// Učita vrijednost s rotacijom između slotova
-// 'brojSlotova' je broj dostupnih slotova (npr. 6 za wear-leveling 6x)
 template <typename T>
 bool ucitaj(int baznaAdresa, int brojSlotova, T& cilj) {
   if (brojSlotova <= 0) return false;
-  
-  // Odaberi slot prema простом CRC ili counter mehanizmu
-  // Prvo pokušaj najnoviji slot
+
+  const size_t velicina = velicinaSlota<T>();
+  // Prvo pokušaj od zadnjeg potvrđeno upisanog slota.
+  const int pocetniSlot = odrediSlotZaCitanje(baznaAdresa, brojSlotova, velicina);
+  if (pocetniSlot >= 0) {
+    for (int pomak = 0; pomak < brojSlotova; ++pomak) {
+      const int slot = (pocetniSlot - pomak + brojSlotova) % brojSlotova;
+      const int adresa = baznaAdresa + slot * static_cast<int>(velicina);
+      if (procitajSlot(adresa, &cilj, sizeof(T))) {
+        return true;
+      }
+    }
+  }
+
+  // Fallback za stare zapise koji još nemaju metapodatke.
   for (int slot = brojSlotova - 1; slot >= 0; --slot) {
-    int adresa = baznaAdresa + slot * static_cast<int>(velicinaSlota<T>());
+    const int adresa = baznaAdresa + slot * static_cast<int>(velicina);
     if (procitajSlot(adresa, &cilj, sizeof(T))) {
       return true;
     }
   }
-  
+
   return false;
 }
 
-// Spremi vrijednost s rotacijom između slotova (round-robin)
 template <typename T>
 bool spremi(int baznaAdresa, int brojSlotova, const T& izvor) {
   if (brojSlotova <= 0) return false;
-  
-  // Odaberi slot za pisanje (rotacija zbog wear-levelinga)
-  static uint8_t slotCounter = 0;
-  int slot = (slotCounter++) % brojSlotova;
-  
-  int adresa = baznaAdresa + slot * static_cast<int>(velicinaSlota<T>());
-  return napisiSlot(adresa, &izvor, sizeof(T));
+
+  const size_t velicina = velicinaSlota<T>();
+  const int slot = odrediSlotZaPisanje(baznaAdresa, brojSlotova, velicina);
+  if (slot < 0) {
+    return false;
+  }
+
+  const int adresa = baznaAdresa + slot * static_cast<int>(velicina);
+  const bool uspjeh = napisiSlot(adresa, &izvor, sizeof(T));
+  if (uspjeh) {
+    // Nakon uspješnog zapisa ažuriraj trajni pokazivač najnovijeg slota.
+    zapamtiZadnjiSlot(baznaAdresa, brojSlotova, velicina, static_cast<uint8_t>(slot));
+  }
+  return uspjeh;
 }
 
-// Pomoćne funkcije za čitanje/pisanje sirovih bajtova
 bool procitajSlot(int adresa, void* cilj, size_t duljina);
 bool napisiSlot(int adresa, const void* izvor, size_t duljina);
 

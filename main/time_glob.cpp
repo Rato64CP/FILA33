@@ -4,8 +4,10 @@
 #include "time_glob.h"
 #include "i2c_eeprom.h"
 #include "eeprom_konstante.h"
+#include "podesavanja_piny.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
+#include "lcd_display.h"
 
 // DS3231 RTC modul
 static RTC_DS3231 rtc;
@@ -31,10 +33,18 @@ static char oznakaizvora[4] = "RTC";
 
 // RTC pouzdanost
 static bool rtcBaterijaOk = false;
+static bool rtcSqwAktivan = false;
+static bool rtcSqwGreskaPrijavljena = false;
+static unsigned long rtcSqwZadnjiTickMs = 0;
 
 // Fallback referencija (koristi zadnje poznato vrijeme ako RTC/NTP/DCF nisu dostupni)
 static bool fallbackAktivan = false;
 static DateTime fallbackVrijeme((uint32_t)0);
+volatile uint32_t rtcSekundniBrojac = 0;
+
+void rtcSqwPrekid() {
+  rtcSekundniBrojac++;
+}
 
 // -------------------- POMOĆNE FUNKCIJE --------------------
 
@@ -86,11 +96,13 @@ void inicijalizirajRTC() {
   if (!rtc.begin()) {
     posaljiPCLog(F("RTC: DS3231 nije dostupan"));
     rtcBaterijaOk = false;
+    signalizirajError_RTC();
   } else {
     // Provjera valjanosti RTC baterije
     if (rtc.lostPower()) {
       posaljiPCLog(F("RTC: baterija je prazna, vrijeme nije pouzdano"));
       rtcBaterijaOk = false;
+      signalizirajError_RTC();
       // Postavi minimalnu vrijednost
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     } else {
@@ -98,28 +110,66 @@ void inicijalizirajRTC() {
       posaljiPCLog(F("RTC: baterija OK, vrijeme je pouzdano"));
     }
     trenutnoVrijeme = rtc.now();
+    rtc.writeSqwPinMode(DS3231_SquareWave1Hz);
   }
+  pinMode(PIN_RTC_SQW, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_RTC_SQW), rtcSqwPrekid, FALLING);
+  rtcSqwAktivan = false;
+  rtcSqwGreskaPrijavljena = false;
+  rtcSqwZadnjiTickMs = millis();
   ucitajZadnjuSinkronizaciju();
   oznaciPovratakNaRTC();
 }
 
 DateTime dohvatiTrenutnoVrijeme() {
-  // Osvježi vrijeme svakih 100 ms ako je RTC dostupan
-  static unsigned long zadnjaProvjeraMs = 0;
-  unsigned long sadaMs = millis();
-  
-  if (sadaMs - zadnjaProvjeraMs >= 100 || zadnjaProvjeraMs == 0) {
-    zadnjaProvjeraMs = sadaMs;
+  static uint32_t zadnjiObradeniRtcTick = 0xFFFFFFFFUL;
+  static unsigned long zadnjiFallbackPollMs = 0;
+  uint32_t lokalniRtcTick = 0;
+  const unsigned long sadaMs = millis();
+  noInterrupts();
+  lokalniRtcTick = rtcSekundniBrojac;
+  interrupts();
+
+    if (lokalniRtcTick != zadnjiObradeniRtcTick || zadnjiObradeniRtcTick == 0xFFFFFFFFUL) {
+    zadnjiObradeniRtcTick = lokalniRtcTick;
+    rtcSqwAktivan = true;
+    rtcSqwZadnjiTickMs = sadaMs;
+    if (rtcSqwGreskaPrijavljena) {
+      posaljiPCLog(F("RTC SQW: impulsi na D2 ponovno prisutni"));
+      rtcSqwGreskaPrijavljena = false;
+    }
     if (rtc.begin()) {
       trenutnoVrijeme = rtc.now();
+    } else {
+      signalizirajError_RTC();
+    }
+  } else if ((sadaMs - rtcSqwZadnjiTickMs) > 2500UL) {
+    rtcSqwAktivan = false;
+    if (!rtcSqwGreskaPrijavljena) {
+      posaljiPCLog(F("RTC SQW: nema 1 Hz impulsa na D2, koristim RTC fallback citanje"));
+      rtcSqwGreskaPrijavljena = true;
+    }
+    if ((sadaMs - zadnjiFallbackPollMs) >= 1000UL || zadnjiFallbackPollMs == 0) {
+      zadnjiFallbackPollMs = sadaMs;
+      if (rtc.begin()) {
+        trenutnoVrijeme = rtc.now();
+      }
     }
   }
 
   if (trenutniIzvor != IZ_RTC && jeSinkronizacijaZastarjela()) {
     oznaciPovratakNaRTC();
   }
-  
+
   return trenutnoVrijeme;
+}
+
+uint32_t dohvatiRtcSekundniBrojac() {
+  uint32_t lokalniRtcTick = 0;
+  noInterrupts();
+  lokalniRtcTick = rtcSekundniBrojac;
+  interrupts();
+  return lokalniRtcTick;
 }
 
 void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
@@ -191,6 +241,41 @@ void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
   posaljiPCLog(log);
 }
 
+void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
+  if (rucnoVrijeme.unixtime() == 0 || rucnoVrijeme.year() < 2024) {
+    posaljiPCLog(F("Rucno vrijeme: neispravna vrijednost, odbacujem"));
+    return;
+  }
+
+  if (rtc.begin()) {
+    rtc.adjust(rucnoVrijeme);
+    rtcBaterijaOk = true;
+  } else {
+    signalizirajError_RTC();
+  }
+
+  trenutnoVrijeme = rucnoVrijeme;
+  fallbackVrijeme = rucnoVrijeme;
+  fallbackAktivan = true;
+  oznaciPovratakNaRTC();
+
+  String log = F("Vrijeme rucno postavljeno: ");
+  log += rucnoVrijeme.year();
+  log += F("-");
+  log += rucnoVrijeme.month();
+  log += F("-");
+  log += rucnoVrijeme.day();
+  log += F(" ");
+  log += rucnoVrijeme.hour();
+  log += F(":");
+  if (rucnoVrijeme.minute() < 10) log += F("0");
+  log += rucnoVrijeme.minute();
+  log += F(":");
+  if (rucnoVrijeme.second() < 10) log += F("0");
+  log += rucnoVrijeme.second();
+  posaljiPCLog(log);
+}
+
 String dohvatiIzvorVremena() {
   return String(oznakaizvora);
 }
@@ -210,6 +295,10 @@ void azurirajOznakuDana() {
 
 bool jeRTCPouzdan() {
   return rtcBaterijaOk;
+}
+
+bool jeRtcSqwAktivan() {
+  return rtcSqwAktivan;
 }
 
 bool fallbackImaPouzdanuReferencu() {
@@ -235,3 +324,4 @@ bool jeSinkronizacijaZastarjela() {
   // Zastarjela ako je prošlo više od 1 sata
   return (sadaMs - zadnjaSinkronizacijaMs) > TIMEOUT_SINKRONIZACIJE_MS;
 }
+

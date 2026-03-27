@@ -38,3 +38,4 @@ const char* dohvatiStatickuIP();
 const char* dohvatiMreznuMasku();
 const char* dohvatiZadaniGateway();
 void postaviMQTTOmogucen(bool omogucen);
+void postaviWiFiPodatke(const char* ssid, const char* lozinka);

@@ -40,6 +40,7 @@
 // DCF77 receiver - external synchronization source
 
 #define PIN_DCF_SIGNAL                35  // DCF77 digital signal (LOW = impulse)
+#define PIN_RTC_SQW                   2   // DS3231 SQW 1 Hz takt za precizno okidanje
 
 // ==================== I2C BUS ====================
 // I2C communication for RTC (DS3231) and external EEPROM (24C32)

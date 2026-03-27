@@ -400,7 +400,8 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
 
 // ==================== BUTTON DEBOUNCING (PIN 43 & 42) ====================
 
-// Debounce celebration button (PIN 43) with 30ms window
+// Debounce tipke slavljenja (PIN 43) s razinom upravljanja:
+// dok je tipka spojena na GND slavljenje traje, a otpuštanje ga zaustavlja.
 static void provjeriDugmeSlavljenja(unsigned long sadaMs) {
   bool trenutnoStanje = (digitalRead(PIN_KEY_CELEBRATION) == LOW);  // LOW = pressed
   
@@ -426,15 +427,15 @@ static void provjeriDugmeSlavljenja(unsigned long sadaMs) {
     dugmad.prethodno_stanje_slavljenja = trenutnoStanje;
     dugmad.debounce_u_tijeku_slavljenja = false;
     
-    // Execute action on button press (transition from HIGH to LOW)
+    // Slavljenje prati stvarno stanje ulaza tipke toranjskog sata.
     if (trenutnoStanje) {
-      if (slavljenje.slavljenje_aktivno) {
-        zaustaviSlavljenje();
-        posaljiPCLog(F("Dugme: slavljenje zaustavljeno"));
-      } else {
+      if (!slavljenje.slavljenje_aktivno) {
         zapocniSlavljenje();
         posaljiPCLog(F("Dugme: slavljenje pokrenuto"));
       }
+    } else if (slavljenje.slavljenje_aktivno) {
+      zaustaviSlavljenje();
+      posaljiPCLog(F("Dugme: slavljenje zaustavljeno"));
     }
   }
 }

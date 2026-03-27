@@ -20,3 +20,6 @@ void signalizirajHammer1_Active();
 void signalizirajHammer2_Active();
 void signalizirajCelebration_Mode();
 void signalizirajFuneral_Mode();
+void signalizirajError_RTC();
+void signalizirajError_EEPROM();
+void signalizirajError_I2C();

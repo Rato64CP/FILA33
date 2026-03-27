@@ -355,3 +355,24 @@ void postaviMQTTOmogucen(bool omogucen) {
 
   posaljiPCLog(omogucen ? F("Postavke: MQTT uključen") : F("Postavke: MQTT isključen"));
 }
+
+void postaviWiFiPodatke(const char* ssid, const char* lozinka) {
+  if (ssid == nullptr || lozinka == nullptr) {
+    return;
+  }
+
+  strncpy(postavke.wifiSsid, ssid, sizeof(postavke.wifiSsid) - 1);
+  postavke.wifiSsid[sizeof(postavke.wifiSsid) - 1] = '\0';
+  strncpy(postavke.wifiLozinka, lozinka, sizeof(postavke.wifiLozinka) - 1);
+  postavke.wifiLozinka[sizeof(postavke.wifiLozinka) - 1] = '\0';
+
+  sanitizirajMreznaPolja();
+  pripremiIntegritetPostavki(postavke);
+  WearLeveling::spremi(EepromLayout::BAZA_POSTAVKE,
+                      EepromLayout::SLOTOVI_POSTAVKE,
+                      postavke);
+
+  String log = F("Postavke: WiFi spremljen SSID=");
+  log += postavke.wifiSsid;
+  posaljiPCLog(log);
+}

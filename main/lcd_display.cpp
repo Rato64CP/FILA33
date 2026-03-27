@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "time_glob.h"
+#include "otkucavanje.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
 
@@ -224,6 +225,24 @@ static void build_date_string() {
 
 // Build Line 2 based on current activity or date
 static void build_line2() {
+  // Dinamicka poruka za slavljenje mora pratiti stvarno stanje čekića toranjskog sata.
+  if (current_activity == ACTIVITY_CELEBRATION && !jeSlavljenjeUTijeku()) {
+    current_activity = ACTIVITY_NONE;
+    activity_timeout_ms = 0;
+    memset(activity_message, ' ', 16);
+    activity_message[16] = '\0';
+    activity_is_error = false;
+  }
+
+  // Dinamicka poruka za mrtvačko zvono mora nestati čim se način rada ugasi.
+  if (current_activity == ACTIVITY_FUNERAL && !jeMrtvackoUTijeku()) {
+    current_activity = ACTIVITY_NONE;
+    activity_timeout_ms = 0;
+    memset(activity_message, ' ', 16);
+    activity_message[16] = '\0';
+    activity_is_error = false;
+  }
+
   // Check if activity message has timed out
   if (current_activity != ACTIVITY_NONE && activity_timeout_ms > 0) {
     unsigned long elapsed = millis() - activity_start_time;
@@ -362,13 +381,13 @@ void signalizirajError_I2C() {
 // Signal celebration mode active
 void signalizirajCelebration_Mode() {
   current_activity = ACTIVITY_CELEBRATION;
-  set_activity_message("CELEBRATION!    ", 6000, false);
+  set_activity_message("SLAVLJENJE      ", 0, false);
 }
 
 // Signal funeral mode active
 void signalizirajFuneral_Mode() {
   current_activity = ACTIVITY_FUNERAL;
-  set_activity_message("Funeral mode    ", 6000, false);
+  set_activity_message("MRTVACKO ZVONO  ", 0, false);
 }
 
 // ==================== MAIN DISPLAY UPDATE ====================

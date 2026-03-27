@@ -76,12 +76,25 @@ static int privremeniSat = 0;
 static int privremenaMinuta = 0;
 static int privremenaSekuned = 0;
 static int faza_vremena = 0; // 0 = hours, 1 = minutes, 2 = seconds, 3 = confirm
+static bool potvrdiVrijeme = true;
 
 // ==================== QUIET HOURS ADJUSTMENT ====================
 
 static int tihiSatOd = 22;
 static int tihiSatDo = 6;
 static int faza_tihih_sati = 0; // 0 = OD, 1 = DO
+
+static int infoStrana = 0;
+static const int BROJ_INFO_STRANA = 3;
+static int wifiStrana = 0;
+static const int BROJ_WIFI_STRANA = 3;
+static bool wifiUredjivanjeAktivno = false;
+static int wifiPolje = 0; // 0 = SSID, 1 = lozinka
+static int wifiKursor = 0;
+static char wifiSsidUredjivanje[33] = "";
+static char wifiLozinkaUredjivanje[33] = "";
+static const char WIFI_SKUP_ZNAKOVA[] =
+  " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.,!@#";
 
 // ==================== I2C ADDRESS DETECTION ====================
 
@@ -115,6 +128,37 @@ static void otkrijI2CAdrese() {
   String logSummary = F("Pronadjeno I2C uredjaja: ");
   logSummary += dostupnihAdresi;
   posaljiPCLog(logSummary);
+}
+
+static char* dohvatiWiFiBufferZaUredjivanje() {
+  return (wifiPolje == 0) ? wifiSsidUredjivanje : wifiLozinkaUredjivanje;
+}
+
+static int dohvatiWiFiMaxDuljinu() {
+  return (wifiPolje == 0) ? 32 : 32;
+}
+
+static int pronadiIndeksZnaka(char znak) {
+  const int brojZnakova = static_cast<int>(strlen(WIFI_SKUP_ZNAKOVA));
+  for (int i = 0; i < brojZnakova; ++i) {
+    if (WIFI_SKUP_ZNAKOVA[i] == znak) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+static void ucitajWiFiUredjivanjeIzPostavki() {
+  strncpy(wifiSsidUredjivanje, dohvatiWifiSsid(), sizeof(wifiSsidUredjivanje) - 1);
+  wifiSsidUredjivanje[sizeof(wifiSsidUredjivanje) - 1] = '\0';
+  strncpy(wifiLozinkaUredjivanje, dohvatiWifiLozinku(), sizeof(wifiLozinkaUredjivanje) - 1);
+  wifiLozinkaUredjivanje[sizeof(wifiLozinkaUredjivanje) - 1] = '\0';
+}
+
+static void pokreniWiFiUredjivanje(int polje) {
+  wifiPolje = polje;
+  wifiKursor = 0;
+  wifiUredjivanjeAktivno = true;
 }
 
 // ==================== MENU DISPLAY FUNCTIONS ====================
@@ -180,8 +224,12 @@ static void prikaziPrilagodbanjeVremena() {
     snprintf(redak1, sizeof(redak1), "Sekunda: %d", privremenaSekuned);
     strncpy(redak2, "[UP/DOWN][SEL]", sizeof(redak2) - 1);
   } else {
-    strncpy(redak1, "Potvrdi vrijeme", sizeof(redak1) - 1);
-    strncpy(redak2, "DA/NE", sizeof(redak2) - 1);
+    strncpy(redak1, "Spremi vrijeme?", sizeof(redak1) - 1);
+    if (potvrdiVrijeme) {
+      strncpy(redak2, ">DA        NE", sizeof(redak2) - 1);
+    } else {
+      strncpy(redak2, " DA       >NE", sizeof(redak2) - 1);
+    }
   }
   redak1[sizeof(redak1) - 1] = '\0';
   redak2[sizeof(redak2) - 1] = '\0';
@@ -204,23 +252,70 @@ static void prikaziPodesavanjeTihihSati() {
 }
 
 static void prikaziWiFiConfig() {
-  // Fixed: Use prikaziPoruku instead of directly accessing lcd
-  char redak1[17] = "WiFi Setup";
+  char redak1[17];
   char redak2[17];
-  strncpy(redak2, dohvatiWifiSsid(), sizeof(redak2) - 1);
+
+  if (wifiUredjivanjeAktivno) {
+    const char* oznakaPolja = (wifiPolje == 0) ? "SSID" : "PASS";
+    const char* izvor = dohvatiWiFiBufferZaUredjivanje();
+    const int maxDuljina = dohvatiWiFiMaxDuljinu();
+    if (wifiKursor < 0) wifiKursor = 0;
+    if (wifiKursor >= maxDuljina) wifiKursor = maxDuljina - 1;
+
+    int pocetak = wifiKursor - 5;
+    if (pocetak < 0) pocetak = 0;
+    if (pocetak > maxDuljina - 10) pocetak = maxDuljina - 10;
+    if (pocetak < 0) pocetak = 0;
+
+    char pregled[11];
+    for (int i = 0; i < 10; ++i) {
+      const int indeks = pocetak + i;
+      char znak = izvor[indeks];
+      if (znak == '\0') {
+        znak = '_';
+      } else if (wifiPolje == 1) {
+        znak = '*';
+      }
+      pregled[i] = znak;
+    }
+    pregled[10] = '\0';
+
+    snprintf(redak1, sizeof(redak1), "%s:%-10s", oznakaPolja, pregled);
+    const char aktivniZnak = izvor[wifiKursor] == '\0' ? '_' : izvor[wifiKursor];
+    snprintf(redak2, sizeof(redak2), "P%02d %c L/R U/D", wifiKursor + 1, aktivniZnak);
+  } else if (wifiStrana == 0) {
+    strncpy(redak1, "WiFi SSID", sizeof(redak1) - 1);
+    snprintf(redak2, sizeof(redak2), "%.16s", wifiSsidUredjivanje);
+  } else if (wifiStrana == 1) {
+    strncpy(redak1, "WiFi Lozinka", sizeof(redak1) - 1);
+    const size_t duljina = strlen(wifiLozinkaUredjivanje);
+    int maska = static_cast<int>(duljina);
+    if (maska > 16) maska = 16;
+    for (int i = 0; i < maska; ++i) {
+      redak2[i] = '*';
+    }
+    for (int i = maska; i < 16; ++i) {
+      redak2[i] = ' ';
+    }
+    redak2[16] = '\0';
+  } else {
+    strncpy(redak1, "WiFi spremanje", sizeof(redak1) - 1);
+    strncpy(redak2, "SEL=Spremi ESP", sizeof(redak2) - 1);
+  }
+
+  redak1[sizeof(redak1) - 1] = '\0';
   redak2[sizeof(redak2) - 1] = '\0';
   prikaziPoruku(redak1, redak2);
 }
 
 static void prikaziInfoDisplay() {
-  // Fixed: Use prikaziPoruku instead of directly accessing lcd
   char redak1[17];
   char redak2[17];
-  
-  static int infoStrana = 0;
-  
+
   if (infoStrana == 0) {
-    snprintf(redak1, sizeof(redak1), "RTC:%s", jeRTCPouzdan() ? "OK" : "FAIL");
+    snprintf(redak1, sizeof(redak1), "RTC:%s SQW:%c",
+             jeRTCPouzdan() ? "OK" : "FAIL",
+             jeRtcSqwAktivan() ? 'O' : 'F');
     snprintf(redak2, sizeof(redak2), "Izvor:%s", dohvatiIzvorVremena().c_str());
   } else if (infoStrana == 1) {
     int memorKazMin = dohvatiMemoriraneKazaljkeMinuta();
@@ -300,10 +395,13 @@ static void obradiKlucGlavniMeni(KeyEvent event) {
         posaljiPCLog(F("Ulazak u postavke"));
       } else if (odabraniIndex == 2) {
         trenutnoStanje = MENU_STATE_INFO_DISPLAY;
-        odabraniIndex = 0;
+        infoStrana = 0;
         posaljiPCLog(F("Ulazak u informacije"));
       } else if (odabraniIndex == 3) {
         trenutnoStanje = MENU_STATE_WIFI_CONFIG;
+        wifiStrana = 0;
+        wifiUredjivanjeAktivno = false;
+        ucitajWiFiUredjivanjeIzPostavki();
         posaljiPCLog(F("Ulazak u WiFi"));
       } else if (odabraniIndex == 4) {
         povratakNaGlavniPrikaz();
@@ -333,6 +431,7 @@ static void obradiKlucPostavke(KeyEvent event) {
         privremenaMinuta = sada.minute();
         privremenaSekuned = sada.second();
         faza_vremena = 0;
+        potvrdiVrijeme = true;
         trenutnoStanje = MENU_STATE_TIME_ADJUST;
         posaljiPCLog(F("Ulazak u prilagodbu vremena"));
       } else if (odabraniIndex == 1) {
@@ -452,6 +551,8 @@ static void obradiKlucPrilagodbanjeVremena(KeyEvent event) {
         privremenaMinuta = (privremenaMinuta + 1) % 60;
       } else if (faza_vremena == 2) {
         privremenaSekuned = (privremenaSekuned + 1) % 60;
+      } else {
+        potvrdiVrijeme = true;
       }
       break;
     case KEY_DOWN:
@@ -461,18 +562,43 @@ static void obradiKlucPrilagodbanjeVremena(KeyEvent event) {
         privremenaMinuta = (privremenaMinuta - 1 + 60) % 60;
       } else if (faza_vremena == 2) {
         privremenaSekuned = (privremenaSekuned - 1 + 60) % 60;
+      } else {
+        potvrdiVrijeme = false;
+      }
+      break;
+    case KEY_LEFT:
+      if (faza_vremena == 3) {
+        potvrdiVrijeme = true;
+      }
+      break;
+    case KEY_RIGHT:
+      if (faza_vremena == 3) {
+        potvrdiVrijeme = false;
       }
       break;
     case KEY_SELECT:
       if (faza_vremena < 2) {
         faza_vremena++;
-      } else {
-        // Confirmation
+      } else if (faza_vremena == 2) {
         faza_vremena = 3;
+        potvrdiVrijeme = true;
+      } else if (potvrdiVrijeme) {
+        const DateTime sada = dohvatiTrenutnoVrijeme();
+        azurirajVrijemeRucno(DateTime(
+          sada.year(), sada.month(), sada.day(),
+          privremeniSat, privremenaMinuta, privremenaSekuned));
+        povratakNaGlavniPrikaz();
+      } else {
+        povratakNaGlavniPrikaz();
       }
       break;
     case KEY_BACK:
-      povratakNaGlavniPrikaz();
+      if (faza_vremena == 3) {
+        faza_vremena = 2;
+        potvrdiVrijeme = true;
+      } else {
+        povratakNaGlavniPrikaz();
+      }
       break;
     default:
       break;
@@ -512,12 +638,13 @@ static void obradiKlucModeSelect(KeyEvent event) {
 static void obradiKlucInfo(KeyEvent event) {
   switch (event) {
     case KEY_LEFT:
-      // Cycle back through info screens (not implemented here but available)
+      infoStrana = (infoStrana - 1 + BROJ_INFO_STRANA) % BROJ_INFO_STRANA;
       break;
     case KEY_RIGHT:
-      // Cycle forward through info screens (not implemented here but available)
+      infoStrana = (infoStrana + 1) % BROJ_INFO_STRANA;
       break;
     case KEY_BACK:
+      infoStrana = 0;
       odabraniIndex = 2;
       trenutnoStanje = MENU_STATE_MAIN_MENU;
       break;
@@ -612,6 +739,13 @@ void inicijalizirajMenuSistem() {
   pozicija_lozinke = 0;
   u_korekciji_ruku = false;
   u_modu_lozinke = false;
+  infoStrana = 0;
+  wifiStrana = 0;
+  wifiUredjivanjeAktivno = false;
+  wifiPolje = 0;
+  wifiKursor = 0;
+  ucitajWiFiUredjivanjeIzPostavki();
+  potvrdiVrijeme = true;
   
   otkrijI2CAdrese();
   
@@ -682,7 +816,65 @@ void obradiKluc(KeyEvent event) {
       break;
     
     case MENU_STATE_WIFI_CONFIG:
-      if (event == KEY_BACK) {
+      if (wifiUredjivanjeAktivno) {
+        char* buffer = dohvatiWiFiBufferZaUredjivanje();
+        const int brojZnakova = static_cast<int>(strlen(WIFI_SKUP_ZNAKOVA));
+        const int maxDuljina = dohvatiWiFiMaxDuljinu();
+
+        if (event == KEY_LEFT || event == KEY_RIGHT) {
+          const int trenutniIndeks = pronadiIndeksZnaka(buffer[wifiKursor]);
+          int noviIndeks = trenutniIndeks;
+          if (event == KEY_LEFT) {
+            noviIndeks = (trenutniIndeks - 1 + brojZnakova) % brojZnakova;
+          } else {
+            noviIndeks = (trenutniIndeks + 1) % brojZnakova;
+          }
+          buffer[wifiKursor] = WIFI_SKUP_ZNAKOVA[noviIndeks];
+          if (wifiKursor + 1 < maxDuljina && buffer[wifiKursor + 1] == '\0') {
+            buffer[wifiKursor + 1] = '\0';
+          }
+        } else if (event == KEY_UP) {
+          if (wifiKursor > 0) {
+            wifiKursor--;
+          }
+        } else if (event == KEY_DOWN) {
+          if (wifiKursor < (maxDuljina - 1)) {
+            wifiKursor++;
+            if (buffer[wifiKursor] == '\0') {
+              buffer[wifiKursor] = ' ';
+              buffer[wifiKursor + 1] = '\0';
+            }
+          }
+        } else if (event == KEY_SELECT) {
+          while (strlen(buffer) > 0 && buffer[strlen(buffer) - 1] == ' ') {
+            buffer[strlen(buffer) - 1] = '\0';
+          }
+          wifiUredjivanjeAktivno = false;
+        } else if (event == KEY_BACK) {
+          buffer[wifiKursor] = '\0';
+          while (wifiKursor > 0 && buffer[wifiKursor - 1] == '\0') {
+            wifiKursor--;
+          }
+          wifiUredjivanjeAktivno = false;
+        }
+      } else if (event == KEY_LEFT) {
+        wifiStrana = (wifiStrana - 1 + BROJ_WIFI_STRANA) % BROJ_WIFI_STRANA;
+      } else if (event == KEY_RIGHT) {
+        wifiStrana = (wifiStrana + 1) % BROJ_WIFI_STRANA;
+      } else if (event == KEY_SELECT) {
+        if (wifiStrana == 0) {
+          pokreniWiFiUredjivanje(0);
+        } else if (wifiStrana == 1) {
+          pokreniWiFiUredjivanje(1);
+        } else {
+          postaviWiFiPodatke(wifiSsidUredjivanje, wifiLozinkaUredjivanje);
+          posaljiWifiPostavkeESP();
+          posaljiPCLog(F("WiFi: spremljene postavke i poslano ESP-u"));
+          povratakNaGlavniPrikaz();
+        }
+      } else if (event == KEY_BACK) {
+        wifiStrana = 0;
+        wifiUredjivanjeAktivno = false;
         odabraniIndex = 3;
         trenutnoStanje = MENU_STATE_MAIN_MENU;
       }
@@ -702,6 +894,13 @@ void povratakNaGlavniPrikaz() {
   odabraniIndex = 0;
   u_korekciji_ruku = false;
   u_modu_lozinke = false;
+  faza_vremena = 0;
+  potvrdiVrijeme = true;
+  infoStrana = 0;
+  wifiStrana = 0;
+  wifiUredjivanjeAktivno = false;
+  wifiPolje = 0;
+  wifiKursor = 0;
   memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
   zadnjaAktivnost = millis();
   posaljiPCLog(F("Povratak na prikaz sata"));

@@ -24,7 +24,8 @@ constexpr uint8_t FAZA_DRUGI_RELEJ = 2;
 
 unsigned long pocetakFazeMs = 0;
 unsigned long zadnjaProvjeraMs = 0;
-bool poravnanjeTaktaNaCekanju = true;
+uint32_t zadnjiObradeniRtcTick = 0;
+uint32_t pocetakFazeTick = 0;
 
 int offsetMinuta = 14;
 int zadnjiSlotUlaza = -1;
@@ -63,26 +64,6 @@ int izracunajCiljnuPoziciju(const DateTime& now) {
   return pozicija;
 }
 
-bool poravnajTaktPloceAkoTreba(unsigned long sadaMs,
-                               const EepromLayout::UnifiedMotionState& stanje) {
-  if (!poravnanjeTaktaNaCekanju) {
-    return true;
-  }
-  if (stanje.plate_phase != FAZA_STABILNO) {
-    return false;
-  }
-
-  const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
-  if ((rtcVrijeme.second() % 6) != 0) {
-    return false;
-  }
-
-  zadnjaProvjeraMs = sadaMs - TRAJANJE_FAZE_MS;
-  poravnanjeTaktaNaCekanju = false;
-  posaljiPCLog(F("Ploca: takt poravnat na RTC 6s granicu"));
-  return true;
-}
-
 void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   if (stanje.plate_phase == FAZA_STABILNO) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
@@ -97,9 +78,12 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
 }
 
 void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
-  if (stanje.plate_phase == FAZA_PRVI_RELEJ && (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS) {
+  const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  if (stanje.plate_phase == FAZA_PRVI_RELEJ &&
+      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL)) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
+    pocetakFazeTick = rtcTick;
     aktivirajRelejePoFazi(stanje);
     UnifiedMotionStateStore::spremiAkoPromjena(stanje);
     posaljiPCLog(F("Ploca: faza 2"));
@@ -107,7 +91,8 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
     return;
   }
 
-  if (stanje.plate_phase == FAZA_DRUGI_RELEJ && (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS) {
+  if (stanje.plate_phase == FAZA_DRUGI_RELEJ &&
+      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL)) {
     stanje.plate_position = static_cast<uint8_t>((stanje.plate_position + 1) % BROJ_POZICIJA);
     stanje.plate_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
@@ -118,18 +103,25 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
 }
 
 void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
-  if (stanje.plate_phase != FAZA_STABILNO || (sadaMs - zadnjaProvjeraMs) < TRAJANJE_FAZE_MS) {
+  const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  if (stanje.plate_phase != FAZA_STABILNO || rtcTick == zadnjiObradeniRtcTick) {
+    return;
+  }
+  zadnjiObradeniRtcTick = rtcTick;
+  const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if ((rtcVrijeme.second() % 6) != 0) {
     return;
   }
   zadnjaProvjeraMs = sadaMs;
 
-  const int cilj = izracunajCiljnuPoziciju(dohvatiTrenutnoVrijeme());
+  const int cilj = izracunajCiljnuPoziciju(rtcVrijeme);
   if (stanje.plate_position == cilj) {
     return;
   }
 
   stanje.plate_phase = FAZA_PRVI_RELEJ;
   pocetakFazeMs = sadaMs;
+  pocetakFazeTick = rtcTick;
   aktivirajRelejePoFazi(stanje);
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
   posaljiPCLog(F("Ploca: start"));
@@ -231,7 +223,8 @@ void inicijalizirajPlocu() {
 
   pocetakFazeMs = millis();
   zadnjaProvjeraMs = millis();
-  poravnanjeTaktaNaCekanju = true;
+  zadnjiObradeniRtcTick = 0;
+  pocetakFazeTick = 0;
   zadnjiSlotUlaza = -1;
   UnifiedMotionStateStore::logirajStanje(stanje);
   posaljiPCLog(F("Ploca: inicijalizirana kroz jedinstveni model stanja"));
@@ -255,9 +248,6 @@ void upravljajPlocom() {
 
   if (stanje.plate_phase != FAZA_STABILNO) {
     obradiKorak(stanje, sadaMs);
-    return;
-  }
-  if (!poravnajTaktPloceAkoTreba(sadaMs, stanje)) {
     return;
   }
 
@@ -288,6 +278,7 @@ int dohvatiOffsetMinuta() {
 
 void kompenzirajPlocu(bool) {
   zadnjaProvjeraMs = 0;
+  zadnjiObradeniRtcTick = 0;
 }
 
 bool jePlocaUSinkronu() {
@@ -298,8 +289,9 @@ bool jePlocaUSinkronu() {
 
 void oznaciPlocuKaoSinkroniziranu() {
   zadnjaProvjeraMs = 0;
+  zadnjiObradeniRtcTick = 0;
 }
 
 void zatraziPoravnanjeTaktaPloce() {
-  poravnanjeTaktaNaCekanju = true;
+  zadnjiObradeniRtcTick = 0;
 }

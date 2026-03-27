@@ -15,12 +15,17 @@
 #include "okretna_ploca.h"
 #include "pc_serial.h"
 #include "watchdog.h"
+#include "lcd_display.h"
+#include "unified_motion_state.h"
 
 // ==================== POWER RECOVERY EEPROM LAYOUT ====================
 
 namespace PowerRecoveryLayout {
-constexpr int BAZA_BOOT_FLAGS = 500;
-constexpr int SLOTOVI_HAND_POSITION = 6;
+constexpr int BAZA_BOOT_FLAGS = EepromLayout::BAZA_BOOT_FLAGS;
+constexpr int SLOTOVI_BOOT_FLAGS = EepromLayout::SLOTOVI_BOOT_FLAGS;
+constexpr uint8_t HAND_NEAKTIVNO = 0;
+constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
+constexpr uint16_t BROJ_MINUTA_CIKLUS = 720;
 }
 
 // ==================== STATE VARIABLES ====================
@@ -58,6 +63,32 @@ static bool jeStanjeValidno(const SystemStateBackup& stanje) {
   return stanje.checksum == izracunajChecksum(stanje);
 }
 
+bool ucitajNajnovijiBackup(SystemStateBackup& backup, int* slotNajnoviji = nullptr) {
+  bool pronadeno = false;
+  uint32_t najnovijiTimestamp = 0;
+  int najboljiSlot = -1;
+
+  for (int slot = 0; slot < PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS; ++slot) {
+    SystemStateBackup kandidat{};
+    const int adresa = PowerRecoveryLayout::BAZA_BOOT_FLAGS + slot * static_cast<int>(sizeof(SystemStateBackup));
+    if (!VanjskiEEPROM::procitaj(adresa, &kandidat, sizeof(SystemStateBackup)) || !jeStanjeValidno(kandidat)) {
+      continue;
+    }
+
+    if (!pronadeno || kandidat.rtc_timestamp >= najnovijiTimestamp) {
+      backup = kandidat;
+      najnovijiTimestamp = kandidat.rtc_timestamp;
+      najboljiSlot = slot;
+      pronadeno = true;
+    }
+  }
+
+  if (pronadeno && slotNajnoviji != nullptr) {
+    *slotNajnoviji = najboljiSlot;
+  }
+  return pronadeno;
+}
+
 void oznaciWatchdogReset(bool resetiranWatchdog) {
   watchdog_reset = resetiranWatchdog;
 }
@@ -86,18 +117,15 @@ void odradiBootRecovery() {
 
   reset_counter++;
 
-  SystemStateBackup backup;
-  bool stanjeUcitano = false;
-
-  for (int slot = PowerRecoveryLayout::SLOTOVI_HAND_POSITION - 1; slot >= 0; --slot) {
-    int adresa = PowerRecoveryLayout::BAZA_BOOT_FLAGS + slot * static_cast<int>(sizeof(SystemStateBackup));
-    if (VanjskiEEPROM::procitaj(adresa, &backup, sizeof(SystemStateBackup)) && jeStanjeValidno(backup)) {
-      stanjeUcitano = true;
-      String log = F("Power Recovery: Valid state loaded from slot ");
-      log += slot;
-      posaljiPCLog(log);
-      break;
-    }
+  SystemStateBackup backup{};
+  int ucitaniSlot = -1;
+  const bool stanjeUcitano = ucitajNajnovijiBackup(backup, &ucitaniSlot);
+  if (stanjeUcitano) {
+    String log = F("Power Recovery: Valid state loaded from slot ");
+    log += ucitaniSlot;
+    log += F(" ts=");
+    log += backup.rtc_timestamp;
+    posaljiPCLog(log);
   }
 
   if (!stanjeUcitano) {
@@ -105,14 +133,29 @@ void odradiBootRecovery() {
     return;
   }
 
-  if (backup.hand_position_k_minuta < 720UL) {
-    postaviTrenutniPolozajKazaljki(static_cast<int>(backup.hand_position_k_minuta));
-  }
-  if (backup.plate_position <= 63UL) {
-    postaviTrenutniPolozajPloce(static_cast<int>(backup.plate_position));
-  }
-  if (backup.offset_minuta <= 14UL) {
-    postaviOffsetMinuta(static_cast<int>(backup.offset_minuta));
+  EepromLayout::UnifiedMotionState jedinstvenoStanje{};
+  if (UnifiedMotionStateStore::ucitaj(jedinstvenoStanje)) {
+    if (jedinstvenoStanje.hand_active != PowerRecoveryLayout::HAND_NEAKTIVNO) {
+      jedinstvenoStanje.hand_position =
+        static_cast<uint16_t>((jedinstvenoStanje.hand_position + 1) % PowerRecoveryLayout::BROJ_MINUTA_CIKLUS);
+      jedinstvenoStanje.hand_active = PowerRecoveryLayout::HAND_NEAKTIVNO;
+      jedinstvenoStanje.hand_relay = PowerRecoveryLayout::HAND_RELEJ_NIJEDAN;
+      jedinstvenoStanje.hand_start_ms = 0;
+      UnifiedMotionStateStore::spremiAkoPromjena(jedinstvenoStanje);
+      posaljiPCLog(F("Power Recovery: Dovrsen prekinuti impuls kazaljki kao jedan korak"));
+    }
+    posaljiPCLog(F("Power Recovery: Zadrzavam novije jedinstveno stanje kretanja"));
+  } else {
+    if (backup.hand_position_k_minuta < 720UL) {
+      postaviTrenutniPolozajKazaljki(static_cast<int>(backup.hand_position_k_minuta));
+    }
+    if (backup.plate_position <= 63UL) {
+      postaviTrenutniPolozajPloce(static_cast<int>(backup.plate_position));
+    }
+    if (backup.offset_minuta <= 14UL) {
+      postaviOffsetMinuta(static_cast<int>(backup.offset_minuta));
+    }
+    posaljiPCLog(F("Power Recovery: Vraceno stanje iz periodickog backupa"));
   }
 
   posaljiPCLog(F("Power Recovery: Boot recovery completed"));
@@ -120,8 +163,19 @@ void odradiBootRecovery() {
 
 void spremiKriticalnoStanje() {
   static unsigned long last_save = 0;
+  static bool inicijaliziranSaveSlot = false;
+  static uint8_t save_slot = 0;
   const unsigned long sada = millis();
   static const unsigned long SAVE_INTERVAL = 60000UL;
+
+  if (!inicijaliziranSaveSlot) {
+    SystemStateBackup zadnjiBackup{};
+    int zadnjiSlot = -1;
+    if (ucitajNajnovijiBackup(zadnjiBackup, &zadnjiSlot) && zadnjiSlot >= 0) {
+      save_slot = static_cast<uint8_t>((zadnjiSlot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS);
+    }
+    inicijaliziranSaveSlot = true;
+  }
 
   if ((sada - last_save) < SAVE_INTERVAL) {
     return;
@@ -135,11 +189,10 @@ void spremiKriticalnoStanje() {
   backup.rtc_timestamp = dohvatiTrenutnoVrijeme().unixtime();
   backup.checksum = izracunajChecksum(backup);
 
-  static uint8_t save_slot = 0;
   const int adresa = PowerRecoveryLayout::BAZA_BOOT_FLAGS + save_slot * static_cast<int>(sizeof(SystemStateBackup));
 
   if (VanjskiEEPROM::zapisi(adresa, &backup, sizeof(SystemStateBackup))) {
-    save_slot = (save_slot + 1) % PowerRecoveryLayout::SLOTOVI_HAND_POSITION;
+    save_slot = (save_slot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS;
     last_state_save_time = sada;
   }
 }
@@ -213,6 +266,7 @@ void inicijalizirajPowerRecovery() {
 
   if (!provjeriZdravostEEPROM()) {
     posaljiPCLog(F("Power Recovery: WARNING - EEPROM health issues detected"));
+    signalizirajError_EEPROM();
   }
 
   spremiKriticalnoStanje();
