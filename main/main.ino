@@ -14,6 +14,7 @@
 #include "menu_system.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
+#include "mrtvacko_thumbwheel.h"
 #include "dcf_sync.h"
 #include "watchdog.h"
 #include "mqtt_handler.h"
@@ -39,6 +40,7 @@ void setup() {
 
   inicijalizirajZvona();
   inicijalizirajOtkucavanje();
+  inicijalizirajMrtvackoThumbwheel();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
   if (jeDCFOmogucen()) {
@@ -62,6 +64,7 @@ void loop() {
   provjeriTipke();
 
   upravljajZvonom();
+  osvjeziMrtvackoThumbwheel();
   upravljajOtkucavanjem();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();

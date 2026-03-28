@@ -57,11 +57,44 @@ static bool jeZvonoOmogucenoPoPostavkama(int zvono) {
   return zvono >= 1 && zvono <= dohvatiBrojZvona();
 }
 
+static void prekiniPosebneNacineZbogZvona(int indeks) {
+  bool prekinutoSlavljenje = false;
+  bool prekinutoMrtvacko = false;
+
+  if (jeSlavljenjeUTijeku()) {
+    zaustaviSlavljenje();
+    prekinutoSlavljenje = true;
+  }
+
+  if (jeMrtvackoUTijeku()) {
+    zaustaviMrtvacko();
+    prekinutoMrtvacko = true;
+  }
+
+  if (!prekinutoSlavljenje && !prekinutoMrtvacko) {
+    return;
+  }
+
+  String log = F("Bell");
+  log += (indeks + 1);
+  log += F(": ima prioritet i prekida ");
+  if (prekinutoSlavljenje && prekinutoMrtvacko) {
+    log += F("slavljenje i mrtvacko");
+  } else if (prekinutoSlavljenje) {
+    log += F("slavljenje");
+  } else {
+    log += F("mrtvacko");
+  }
+  posaljiPCLog(log);
+}
+
 static void aktivirajBell_Relej(int indeks) {
   if (!jeValjanIndeksZvona(indeks)) {
     return;
   }
 
+  // BELL zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
+  prekiniPosebneNacineZbogZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
   inercija.inercija_aktivna = true;
   inercija.vrijeme_pocetka = millis();

@@ -12,6 +12,7 @@
 #include "lcd_display.h"
 #include "pc_serial.h"
 #include "debouncing.h"
+#include "mrtvacko_thumbwheel.h"
 
 // ==================== HAMMER TIMING CONSTANTS ====================
 
@@ -82,10 +83,16 @@ static struct {
   unsigned long vrijeme_pocetka_ms;
   bool cekici_aktivni;
   unsigned long vrijeme_faze_ms;
+  bool auto_stop_ukljucen;
+  unsigned long auto_stop_nakon_ms;
+  uint8_t zadano_trajanje_min;
 } mrtvacko = {
   false,
   0,
   false,
+  0,
+  false,
+  0,
   0
 };
 
@@ -319,6 +326,7 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
 // Pokretanje mrtvackog: oba cekica 150 ms, zatim 10 s pauza
 void zapocniMrtvacko() {
   unsigned long sadaMs = millis();
+  const uint8_t trajanjeMin = dohvatiMrtvackoThumbwheelVrijednost();
 
   if (!jeOperacijaDozvoljena()) {
     posaljiPCLog(F("Mrtvacko: ne moze se pokrenuti (inercija ili blok)"));
@@ -334,10 +342,23 @@ void zapocniMrtvacko() {
   mrtvacko.vrijeme_pocetka_ms = sadaMs;
   mrtvacko.cekici_aktivni = true;
   mrtvacko.vrijeme_faze_ms = sadaMs;
+  mrtvacko.zadano_trajanje_min = trajanjeMin;
+  mrtvacko.auto_stop_ukljucen = (trajanjeMin > 0);
+  mrtvacko.auto_stop_nakon_ms = mrtvacko.auto_stop_ukljucen
+      ? static_cast<unsigned long>(trajanjeMin) * 60000UL
+      : 0UL;
   aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
   aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
 
-  posaljiPCLog(F("Mrtvacko: pokrenuto (oba cekica 150ms / pauza 10s)"));
+  String log = F("Mrtvacko: pokrenuto (oba cekica 150ms / pauza 10s");
+  if (mrtvacko.auto_stop_ukljucen) {
+    log += F(", auto-stop nakon ");
+    log += String(trajanjeMin);
+    log += F(" min)");
+  } else {
+    log += F(", radi stalno do rucnog gasenja)");
+  }
+  posaljiPCLog(log);
   signalizirajFuneral_Mode();
 }
 
@@ -346,6 +367,9 @@ void zaustaviMrtvacko() {
     mrtvacko.mrtvacko_aktivno = false;
     deaktivirajObaCekica_Internal();
     mrtvacko.cekici_aktivni = false;
+    mrtvacko.auto_stop_ukljucen = false;
+    mrtvacko.auto_stop_nakon_ms = 0;
+    mrtvacko.zadano_trajanje_min = 0;
     posaljiPCLog(F("Mrtvacko: zaustavljeno"));
   }
 }
@@ -358,6 +382,18 @@ bool jeMrtvackoUTijeku() {
 static void azurirajMrtvacko(unsigned long sadaMs) {
   if (!mrtvacko.mrtvacko_aktivno) {
     return;
+  }
+
+  if (mrtvacko.auto_stop_ukljucen) {
+    const unsigned long protekloOdPocetka = sadaMs - mrtvacko.vrijeme_pocetka_ms;
+    if (protekloOdPocetka >= mrtvacko.auto_stop_nakon_ms) {
+      String log = F("Mrtvacko: auto-stop nakon ");
+      log += String(mrtvacko.zadano_trajanje_min);
+      log += F(" min");
+      posaljiPCLog(log);
+      zaustaviMrtvacko();
+      return;
+    }
   }
 
   const unsigned long proteklo = sadaMs - mrtvacko.vrijeme_faze_ms;
@@ -449,6 +485,9 @@ void inicijalizirajOtkucavanje() {
   mrtvacko.vrijeme_pocetka_ms = 0;
   mrtvacko.cekici_aktivni = false;
   mrtvacko.vrijeme_faze_ms = 0;
+  mrtvacko.auto_stop_ukljucen = false;
+  mrtvacko.auto_stop_nakon_ms = 0;
+  mrtvacko.zadano_trajanje_min = 0;
 
   zadnje_izmjereno_vrijeme = dohvatiTrenutnoVrijeme();
   blokada_otkucavanja = false;

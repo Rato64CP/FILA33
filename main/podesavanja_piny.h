@@ -79,6 +79,19 @@
 #define PIN_BELL1_SWITCH              44  // Rucna sklopka za BELL 1 (LOW=ON)
 #define PIN_BELL2_SWITCH              45  // Rucna sklopka za BELL 2 (LOW=ON)
 
+// ==================== MRTVACKO ZVONO - THUMBWHEEL TIMER ====================
+// Dvije BCD znamenke za trajanje mrtvackog zvona.
+// Pretpostavka: thumbwheel zatvara prema GND pa koristimo INPUT_PULLUP.
+
+#define PIN_MRTVACKO_TIMER_DESETICE_BIT0  A1  // BCD 1
+#define PIN_MRTVACKO_TIMER_DESETICE_BIT1  A2  // BCD 2
+#define PIN_MRTVACKO_TIMER_DESETICE_BIT2  A3  // BCD 4
+#define PIN_MRTVACKO_TIMER_DESETICE_BIT3  A4  // BCD 8
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT0  A5  // BCD 1
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT1  A6  // BCD 2
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT2  A7  // BCD 4
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT3  A8  // BCD 8
+
 // ==================== SERIAL COMMUNICATION ====================
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
