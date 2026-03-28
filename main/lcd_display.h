@@ -1,6 +1,7 @@
 // lcd_display.h
 #pragma once
 
+#include <stdint.h>
 #include <LiquidCrystal_I2C.h>
 
 extern LiquidCrystal_I2C lcd;
@@ -8,13 +9,11 @@ extern LiquidCrystal_I2C lcd;
 void inicijalizirajLCD();
 void prikaziSat();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
-void postaviLCDBlinkanje(bool omoguci);
-void odradiPauzuSaLCD(unsigned long trajanjeMs);
 void postaviWiFiStatus(bool aktivan);
+void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci);
 
 // Signalizacija statusa otkucavanja na LCD-u
-void signalizirajBell1_Ringing();
-void signalizirajBell2_Ringing();
+void signalizirajZvono_Ringing(uint8_t zvono);
 void signalizirajHammer1_Active();
 void signalizirajHammer2_Active();
 void signalizirajCelebration_Mode();

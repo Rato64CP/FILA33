@@ -10,8 +10,11 @@ typedef enum {
   MENU_STATE_HAND_CORRECTION,     // Hand correction mode
   MENU_STATE_TIME_ADJUST,         // Manual time adjustment
   MENU_STATE_QUIET_HOURS,         // Podešavanje tihih sati satnih otkucaja
+  MENU_STATE_NAIL_SETTINGS,       // Postavke cavala okretne ploce
   MENU_STATE_MODE_SELECT,         // Operation mode selection
   MENU_STATE_WIFI_CONFIG,         // WiFi configuration
+  MENU_STATE_MQTT_CONFIG,         // MQTT configuration
+  MENU_STATE_SYNC_CONFIG,         // NTP i DCF sinkronizacija
   MENU_STATE_INFO_DISPLAY,        // System information display
   MENU_STATE_CONFIRMATION,        // Confirmation dialog
   MENU_STATE_PASSWORD_ENTRY       // Password entry for admin functions

@@ -1,7 +1,7 @@
-// otkucavanje.h – Upravljanje mehaničkim otkucavanjem sata
+// otkucavanje.h - Upravljanje mehanickim otkucavanjem sata
 #pragma once
 
-// Inicijalizacija PIN-ova za čekiće
+// Inicijalizacija PIN-ova za cekice
 void inicijalizirajOtkucavanje();
 
 // Upravljanje otkucavanjem u loop-u

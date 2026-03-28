@@ -26,6 +26,7 @@ void setup() {
   VanjskiEEPROM::inicijaliziraj();
   inicijalizirajRTC();
   ucitajPostavke();
+  primijeniLCDPozadinskoOsvjetljenje(jeLCDPozadinskoOsvjetljenjeUkljuceno());
 
   inicijalizirajTipke();
   inicijalizirajESP();
@@ -40,7 +41,11 @@ void setup() {
   inicijalizirajOtkucavanje();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
-  inicijalizirajDCF();
+  if (jeDCFOmogucen()) {
+    inicijalizirajDCF();
+  } else {
+    posaljiPCLog(F("DCF77: onemogucen u postavkama, inicijalizacija preskocena"));
+  }
 
   inicijalizirajWatchdog();
   oznaciWatchdogReset(jeWatchdogResetDetektiran());
@@ -64,7 +69,9 @@ void loop() {
   if (jeMQTTOmogucen()) {
     upravljajMQTT();
   }
-  osvjeziDCFSinkronizaciju();
+  if (jeDCFOmogucen()) {
+    osvjeziDCFSinkronizaciju();
+  }
   spremiKriticalnoStanje();
 
   osvjeziWatchdog();

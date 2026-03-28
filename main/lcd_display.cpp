@@ -1,15 +1,10 @@
-// lcd_display.cpp – Complete 2-line dynamic display system
+// lcd_display.cpp - Complete 2-line dynamic display system
 // Line 1: Time (HH:MM:SS) + Time Source (RTC/NTP/DCF) + R/N Day Indicator + WiFi W Status
-//         Refreshes every 1 second. Format: HH:MM:SS SRC R/N W (exactly 16 chars)
-// Line 2: Normal Mode = Date (DAY DD.MM.YYYY), updates once per minute
-//         Activity Mode = Activity messages (bells, hammers, NTP sync, corrections)
-//         Auto-timeout back to date after 3-5 seconds
-// Error Display: Line 2 shows error with blinking (200ms on/off) until resolved
-//
-// All buffers properly sized (16 chars), null-terminated, no overflow
+// Line 2: Date or activity message for the tower clock subsystems.
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <avr/pgmspace.h>
 #include <LiquidCrystal_I2C.h>
 #include <RTClib.h>
 #include <string.h>
@@ -20,58 +15,75 @@
 #include "unified_motion_state.h"
 #include "watchdog.h"
 
-// ==================== LCD HARDWARE CONFIGURATION ====================
-
-// Global LCD object for I2C interface (0x27 standard address)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// ==================== LINE 1 STATE (Time + Source + R/N + W) ====================
-
-// Buffer for Line 1 display - exactly 16 chars + null terminator
 static char line1_buffer[17];
-
-// Timestamp of last Line 1 refresh (1-second interval)
 static unsigned long last_line1_refresh = 0;
 
-// Oznaka stanja na prvom retku LCD-a:
-// N = normalan rad toranjskog sata
-// R = aktivna korekcija kazaljki ili okretne ploce
-// E = greska / recovery stanje
+// N = normalan rad, R = korekcija, E = greska/recovery
 static char status_oznaka = 'N';
-
-// WiFi status flag (W=WiFi active, space=inactive)
 static char wifi_status = ' ';
 
-// ==================== LINE 2 STATE (Dynamic: Date or Activity) ====================
-
-// Buffer for Line 2 display - exactly 16 chars + null terminator
 static char line2_buffer[17];
-
-// Timestamp of last Line 2 refresh (0.5-second interval for smooth transitions)
 static unsigned long last_line2_refresh = 0;
 
-// Activity message state
 static enum {
   ACTIVITY_NONE = 0,
-  ACTIVITY_BELL1,               // Bell 1 ringing
-  ACTIVITY_BELL2,               // Bell 2 ringing
-  ACTIVITY_HAMMER1,             // Hammer 1 striking
-  ACTIVITY_HAMMER2,             // Hammer 2 striking
-  ACTIVITY_ERROR,               // Error condition
-  ACTIVITY_CELEBRATION,         // Celebration mode active
-  ACTIVITY_FUNERAL              // Funeral mode active
+  ACTIVITY_BELL1,
+  ACTIVITY_BELL2,
+  ACTIVITY_BELL3,
+  ACTIVITY_BELL4,
+  ACTIVITY_HAMMER1,
+  ACTIVITY_HAMMER2,
+  ACTIVITY_ERROR,
+  ACTIVITY_CELEBRATION,
+  ACTIVITY_FUNERAL
 } current_activity = ACTIVITY_NONE;
 
-// Activity message timing and content
 static unsigned long activity_start_time = 0;
-static unsigned long activity_timeout_ms = 0;  // 0 = no timeout, message stays until cleared
-static char activity_message[17];  // Buffer for activity message
+static unsigned long activity_timeout_ms = 0;
+static char activity_message[17];
 
-// Activity blinking control (for errors)
 static bool activity_is_error = false;
 static bool blink_visible = true;
 static unsigned long last_blink_toggle = 0;
-static const unsigned long BLINK_INTERVAL_MS = 200;  // 200ms on/off
+static const unsigned long BLINK_INTERVAL_MS = 200;
+static const char LCD_DAN_NED[] PROGMEM = "NED";
+static const char LCD_DAN_PON[] PROGMEM = "PON";
+static const char LCD_DAN_UTO[] PROGMEM = "UTO";
+static const char LCD_DAN_SRI[] PROGMEM = "SRI";
+static const char LCD_DAN_CET[] PROGMEM = "CET";
+static const char LCD_DAN_PET[] PROGMEM = "PET";
+static const char LCD_DAN_SUB[] PROGMEM = "SUB";
+static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
+  LCD_DAN_NED,
+  LCD_DAN_PON,
+  LCD_DAN_UTO,
+  LCD_DAN_SRI,
+  LCD_DAN_CET,
+  LCD_DAN_PET,
+  LCD_DAN_SUB
+};
+static const char LCD_PORUKA_BELL1[] PROGMEM = "Bell 1 ringing  ";
+static const char LCD_PORUKA_BELL2[] PROGMEM = "Bell 2 ringing  ";
+static const char LCD_PORUKA_BELL3[] PROGMEM = "Bell 3 ringing  ";
+static const char LCD_PORUKA_BELL4[] PROGMEM = "Bell 4 ringing  ";
+static const char LCD_PORUKA_CEKIC1[] PROGMEM = "Hammer 1 active ";
+static const char LCD_PORUKA_CEKIC2[] PROGMEM = "Hammer 2 active ";
+static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERROR: RTC batt ";
+static const char LCD_PORUKA_ERR_EEPROM[] PROGMEM = "ERROR: EEPROM   ";
+static const char LCD_PORUKA_ERR_I2C[] PROGMEM = "ERROR: I2C comm ";
+static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
+static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
+
+static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
+  strncpy_P(odrediste, izvor, velicina - 1);
+  odrediste[velicina - 1] = '\0';
+}
+
+static PGM_P dohvatiNazivDanaIzFlash(uint8_t danUTjednu) {
+  return reinterpret_cast<PGM_P>(pgm_read_ptr(&LCD_NAZIVI_DANA[danUTjednu]));
+}
 
 static char izracunajOznakuStanjaLCD() {
   if (current_activity == ACTIVITY_ERROR || activity_is_error) {
@@ -86,143 +98,90 @@ static char izracunajOznakuStanjaLCD() {
   return 'N';
 }
 
-// ==================== DATE TRACKING ====================
-
-// Last minute value when date was updated (to avoid redundant updates)
 static int last_date_minute = -1;
 
-// Day name abbreviations in Croatian
-static const char* day_names[7] = {
-  "NED",  // Sunday
-  "PON",  // Monday
-  "UTO",  // Tuesday
-  "SRI",  // Wednesday
-  "CET",  // Thursday
-  "PET",  // Friday
-  "SUB"   // Saturday
-};
-
-// ==================== INITIALIZATION ====================
-
 void inicijalizirajLCD() {
-  // Initialize I2C communication
   Wire.begin();
   delay(50);
-  
-  // Initialize LCD module
+
   lcd.init();
   delay(50);
-  
-  // Enable backlight
+
   lcd.backlight();
   delay(50);
-  
-  // Clear display
+
   lcd.clear();
   delay(50);
-  
-  // Turn on display
+
   lcd.display();
-  
-  // Initialize buffers with spaces
+
   memset(line1_buffer, ' ', sizeof(line1_buffer) - 1);
   line1_buffer[16] = '\0';
-  
+
   memset(line2_buffer, ' ', sizeof(line2_buffer) - 1);
   line2_buffer[16] = '\0';
-  
+
   memset(activity_message, ' ', sizeof(activity_message) - 1);
   activity_message[16] = '\0';
-  
-  // Boot message
+
   lcd.setCursor(0, 0);
-  lcd.print("Toranj Sat v1.0");
+  lcd.print(F("Toranj Sat v1.0"));
   lcd.setCursor(0, 1);
-  lcd.print("Inicijalizacija");
-  
+  lcd.print(F("Inicijalizacija"));
+
   delay(2000);
-  
-  // Clear for normal operation
   lcd.clear();
-  
-  // Initialize timestamps
+
   last_line1_refresh = 0;
   last_line2_refresh = 0;
   last_blink_toggle = 0;
   current_activity = ACTIVITY_NONE;
 }
 
-// ==================== LINE 1 GENERATION (Time + Source + R/N + W) ====================
-
-// Build Line 1 content: "HH:MM:SS SRC R/N W"
-// Example: "14:35:42 NTP R   W" (16 chars exactly)
 static void build_line1() {
   DateTime now = dohvatiTrenutnoVrijeme();
-  
-  // Get time source (RTC, NTP, or DCF)
-  String source_str = dohvatiIzvorVremena();
-  if (source_str.length() > 3) {
-    source_str = source_str.substring(0, 3);  // Truncate to 3 chars
-  }
-  
-  // Pad source to 3 chars if needed
-  while (source_str.length() < 3) {
-    source_str += " ";
-  }
-  
-  // Oznaka stanja toranjskog sata racuna se iz stvarnog stanja kazaljki i ploce
+  char source_str[4];
+  strncpy(source_str, dohvatiOznakuIzvoraVremena(), sizeof(source_str) - 1);
+  source_str[sizeof(source_str) - 1] = '\0';
+
   status_oznaka = izracunajOznakuStanjaLCD();
   char oznaka_stanja = status_oznaka;
-  
-  // Get WiFi status (W=active, space=inactive)
-  // TODO: Set wifi_status based on actual ESP connection
-  
-  // Format staje tocno u 16 znakova:
-  // 8 (vrijeme) + 1 + 3 (izvor) + 1 + 1 (status) + 1 + 1 (WiFi)
+
   snprintf(line1_buffer, sizeof(line1_buffer),
            "%02d:%02d:%02d %s %c %c",
            now.hour(), now.minute(), now.second(),
-           source_str.c_str(),
+           source_str,
            oznaka_stanja,
            wifi_status);
-  
-  // Ensure exactly 16 chars with null terminator
   line1_buffer[16] = '\0';
 }
 
-// ==================== LINE 2 GENERATION (Dynamic: Date or Activity) ====================
-
-// Build date string for normal mode: "DAY DD.MM.YYYY" (14 chars + padding)
 static void build_date_string() {
   DateTime now = dohvatiTrenutnoVrijeme();
-  
-  // Get day name
   uint8_t day_of_week = now.dayOfTheWeek();
   if (day_of_week > 6) day_of_week = 0;
-  
-  const char* day_name = day_names[day_of_week];
-  
-  // Format: "DAY DD.MM.YYYY"
+
+  char day_name[4];
+  kopirajTekstIzFlash(day_name, sizeof(day_name), dohvatiNazivDanaIzFlash(day_of_week));
+
   snprintf(line2_buffer, sizeof(line2_buffer),
            "%s %02d.%02d.%04d",
            day_name,
            now.day(),
            now.month(),
            now.year());
-  
-  // Pad to 16 chars with spaces
+
   int len = strlen(line2_buffer);
   for (int i = len; i < 16; i++) {
     line2_buffer[i] = ' ';
   }
   line2_buffer[16] = '\0';
-  
+
   last_date_minute = now.minute();
 }
 
-// Build Line 2 based on current activity or date
 static void build_line2() {
-  // Dinamicka poruka za slavljenje mora pratiti stvarno stanje čekića toranjskog sata.
+  // Dinamicka poruka za slavljenje mora pratiti stvarno stanje cekica.
   if (current_activity == ACTIVITY_CELEBRATION && !jeSlavljenjeUTijeku()) {
     current_activity = ACTIVITY_NONE;
     activity_timeout_ms = 0;
@@ -231,7 +190,7 @@ static void build_line2() {
     activity_is_error = false;
   }
 
-  // Dinamicka poruka za mrtvačko zvono mora nestati čim se način rada ugasi.
+  // Dinamicka poruka za mrtvacko zvono mora nestati cim se nacin rada ugasi.
   if (current_activity == ACTIVITY_FUNERAL && !jeMrtvackoUTijeku()) {
     current_activity = ACTIVITY_NONE;
     activity_timeout_ms = 0;
@@ -240,29 +199,24 @@ static void build_line2() {
     activity_is_error = false;
   }
 
-  // Check if activity message has timed out
   if (current_activity != ACTIVITY_NONE && activity_timeout_ms > 0) {
     unsigned long elapsed = millis() - activity_start_time;
     if (elapsed >= activity_timeout_ms) {
-      // Activity timeout - return to date display
       current_activity = ACTIVITY_NONE;
       memset(activity_message, ' ', 16);
       activity_message[16] = '\0';
       activity_is_error = false;
     }
   }
-  
-  // Display activity or date
+
   if (current_activity != ACTIVITY_NONE) {
-    // Activity message mode
     if (activity_is_error) {
-      // Error display with blinking
       unsigned long now = millis();
       if (now - last_blink_toggle >= BLINK_INTERVAL_MS) {
         last_blink_toggle = now;
         blink_visible = !blink_visible;
       }
-      
+
       if (blink_visible) {
         strncpy(line2_buffer, activity_message, 16);
         line2_buffer[16] = '\0';
@@ -271,38 +225,26 @@ static void build_line2() {
         line2_buffer[16] = '\0';
       }
     } else {
-      // Non-error activity message
       strncpy(line2_buffer, activity_message, 16);
       line2_buffer[16] = '\0';
     }
   } else {
-    // Normal mode - show date
     DateTime now = dohvatiTrenutnoVrijeme();
     if (now.minute() != last_date_minute) {
       build_date_string();
-    } else {
-      // Keep existing date string (already in line2_buffer)
-      // Only rebuild when minute changes
     }
   }
 }
 
-// ==================== ACTIVITY MESSAGE FUNCTIONS ====================
+static void set_activity_message(PGM_P message, unsigned long timeout_ms, bool is_error) {
+  kopirajTekstIzFlash(activity_message, sizeof(activity_message), message);
 
-// Set activity message with specified timeout
-// timeout_ms: milliseconds before returning to date (0 = no timeout)
-static void set_activity_message(const char* message, unsigned long timeout_ms, bool is_error) {
-  // Ensure message fits in 16-char buffer
-  strncpy(activity_message, message, 15);
-  activity_message[15] = '\0';
-  
-  // Pad with spaces to 16 chars
   int len = strlen(activity_message);
   for (int i = len; i < 16; i++) {
     activity_message[i] = ' ';
   }
   activity_message[16] = '\0';
-  
+
   activity_start_time = millis();
   activity_timeout_ms = timeout_ms;
   activity_is_error = is_error;
@@ -310,143 +252,110 @@ static void set_activity_message(const char* message, unsigned long timeout_ms, 
   last_blink_toggle = millis();
 }
 
-// Signal Bell 1 ringing
-void signalizirajBell1_Ringing() {
-  current_activity = ACTIVITY_BELL1;
-  set_activity_message("Bell 1 ringing  ", 4000, false);
+void signalizirajZvono_Ringing(uint8_t zvono) {
+  switch (zvono) {
+    case 1:
+      current_activity = ACTIVITY_BELL1;
+      set_activity_message(LCD_PORUKA_BELL1, 4000, false);
+      break;
+    case 2:
+      current_activity = ACTIVITY_BELL2;
+      set_activity_message(LCD_PORUKA_BELL2, 4000, false);
+      break;
+    case 3:
+      current_activity = ACTIVITY_BELL3;
+      set_activity_message(LCD_PORUKA_BELL3, 4000, false);
+      break;
+    case 4:
+      current_activity = ACTIVITY_BELL4;
+      set_activity_message(LCD_PORUKA_BELL4, 4000, false);
+      break;
+    default:
+      break;
+  }
 }
 
-// Signal Bell 2 ringing
-void signalizirajBell2_Ringing() {
-  current_activity = ACTIVITY_BELL2;
-  set_activity_message("Bell 2 ringing  ", 4000, false);
-}
-
-// Signal Hammer 1 active
 void signalizirajHammer1_Active() {
   current_activity = ACTIVITY_HAMMER1;
-  set_activity_message("Hammer 1 active ", 3000, false);
+  set_activity_message(LCD_PORUKA_CEKIC1, 3000, false);
 }
 
-// Signal Hammer 2 active
 void signalizirajHammer2_Active() {
   current_activity = ACTIVITY_HAMMER2;
-  set_activity_message("Hammer 2 active ", 3000, false);
+  set_activity_message(LCD_PORUKA_CEKIC2, 3000, false);
 }
 
-// Signal RTC battery error
 void signalizirajError_RTC() {
   current_activity = ACTIVITY_ERROR;
-  set_activity_message("ERROR: RTC batt ", 0, true);  // No timeout for errors
-  status_oznaka = 'E';  // Greska je vidljiva i na prvom retku
+  set_activity_message(LCD_PORUKA_ERR_RTC, 0, true);
+  status_oznaka = 'E';
 }
 
-// Signal EEPROM error
 void signalizirajError_EEPROM() {
   current_activity = ACTIVITY_ERROR;
-  set_activity_message("ERROR: EEPROM   ", 0, true);
+  set_activity_message(LCD_PORUKA_ERR_EEPROM, 0, true);
   status_oznaka = 'E';
 }
 
-// Signal I2C communication error
 void signalizirajError_I2C() {
   current_activity = ACTIVITY_ERROR;
-  set_activity_message("ERROR: I2C comm ", 0, true);
+  set_activity_message(LCD_PORUKA_ERR_I2C, 0, true);
   status_oznaka = 'E';
 }
 
-// Signal celebration mode active
 void signalizirajCelebration_Mode() {
   current_activity = ACTIVITY_CELEBRATION;
-  set_activity_message("SLAVLJENJE      ", 0, false);
+  set_activity_message(LCD_PORUKA_SLAVLJENJE, 0, false);
 }
 
-// Signal funeral mode active
 void signalizirajFuneral_Mode() {
   current_activity = ACTIVITY_FUNERAL;
-  set_activity_message("MRTVACKO ZVONO  ", 0, false);
+  set_activity_message(LCD_PORUKA_MRTVACKO, 0, false);
 }
 
-// ==================== MAIN DISPLAY UPDATE ====================
-
 void prikaziSat() {
-  // Update Line 1 every 1 second
   unsigned long now_ms = millis();
   if (now_ms - last_line1_refresh >= 1000UL) {
     last_line1_refresh = now_ms;
-    
-    // Rebuild Line 1
     build_line1();
-    
-    // Update LCD Line 1
     lcd.setCursor(0, 0);
     lcd.print(line1_buffer);
-    
     osvjeziWatchdog();
   }
-  
-  // Update Line 2 every 500ms (for smooth transitions)
+
   if (now_ms - last_line2_refresh >= 500UL) {
     last_line2_refresh = now_ms;
-    
-    // Check and handle activity timeout
     build_line2();
-    
-    // Update LCD Line 2
     lcd.setCursor(0, 1);
     lcd.print(line2_buffer);
-    
     osvjeziWatchdog();
   }
 }
 
-// ==================== MENU INTEGRATION ====================
-
-// Display custom message (used by menu system)
 void prikaziPoruku(const char* redak1, const char* redak2) {
   if (redak1) {
     lcd.setCursor(0, 0);
-    lcd.print("                ");  // Clear
+    lcd.print(F("                "));
     lcd.setCursor(0, 0);
     lcd.print(redak1);
   }
-  
+
   if (redak2) {
     lcd.setCursor(0, 1);
-    lcd.print("                ");  // Clear
+    lcd.print(F("                "));
     lcd.setCursor(0, 1);
     lcd.print(redak2);
   }
 }
 
-// Set LCD blinking for visual alerts
-void postaviLCDBlinkanje(bool omoguci) {
-  activity_is_error = omoguci;
-  if (omoguci) {
-    blink_visible = true;
-    last_blink_toggle = millis();
-  }
-}
-
-// Pause with LCD updates (used for blocking operations)
-void odradiPauzuSaLCD(unsigned long duration_ms) {
-  unsigned long start = millis();
-  
-  while ((millis() - start) < duration_ms) {
-    // Update display during pause
-    prikaziSat();
-    
-    // Refresh watchdog
-    osvjeziWatchdog();
-    
-    // Small delay to prevent busy-waiting
-    delay(10);
-  }
-}
-
-// Update WiFi status indicator
 void postaviWiFiStatus(bool aktivan) {
   wifi_status = aktivan ? 'W' : ' ';
 }
 
-// Complete implementation - no placeholders or missing code
+void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci) {
+  if (ukljuci) {
+    lcd.backlight();
+  } else {
+    lcd.noBacklight();
+  }
+}

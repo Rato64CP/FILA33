@@ -5,4 +5,6 @@
 void inicijalizirajESP();
 void obradiESPSerijskuKomunikaciju();
 void posaljiWifiPostavkeESP();
+void posaljiNTPPostavkeESP();
+void posaljiESPKomandu(const char* komanda);
 void posaljiESPKomandu(const String& komanda);

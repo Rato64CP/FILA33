@@ -10,6 +10,7 @@
 namespace {
 constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
 constexpr int BROJ_MINUTA_CIKLUS = 720;
+constexpr int MAKS_CEKANJE_AKO_SU_KAZALJKE_NAPRIJED = 60;
 constexpr uint8_t HAND_NEAKTIVNO = 0;
 constexpr uint8_t HAND_AKTIVNO = 1;
 constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
@@ -26,6 +27,15 @@ bool jeBootRecoveryAktivan() {
 
 int izracunajDvanaestSatneMinute(const DateTime& vrijeme) {
   return (vrijeme.hour() % 12) * 60 + vrijeme.minute();
+}
+
+int izracunajMinuteNaprijedOdTrenutnogVremena(int polozajKazaljki, int ciljVrijeme) {
+  return (polozajKazaljki - ciljVrijeme + BROJ_MINUTA_CIKLUS) % BROJ_MINUTA_CIKLUS;
+}
+
+bool trebajuKazaljkeSamoCekati(int polozajKazaljki, int ciljVrijeme) {
+  const int minuteNaprijed = izracunajMinuteNaprijedOdTrenutnogVremena(polozajKazaljki, ciljVrijeme);
+  return minuteNaprijed > 0 && minuteNaprijed <= MAKS_CEKANJE_AKO_SU_KAZALJKE_NAPRIJED;
 }
 
 uint8_t odrediRelejKazaljki(const EepromLayout::UnifiedMotionState& stanje) {
@@ -85,6 +95,12 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
 
   const int cilj = izracunajDvanaestSatneMinute(rtcVrijeme);
   if (stanje.hand_position == cilj) {
+    return;
+  }
+
+  // Ako su kazaljke toranjskog sata malo naprijed, ne forsiramo puni krug
+  // nego pustimo da ih stvarno vrijeme sustigne.
+  if (trebajuKazaljkeSamoCekati(stanje.hand_position, cilj)) {
     return;
   }
 
@@ -178,10 +194,6 @@ void pomakniKazaljkeZa(int brojMinuta) {
   stanje.hand_relay = HAND_RELEJ_NIJEDAN;
   stanje.hand_start_ms = 0;
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-}
-
-void kompenzirajKazaljke(bool) {
-  pokreniBudnoKorekciju();
 }
 
 bool suKazaljkeUSinkronu() {

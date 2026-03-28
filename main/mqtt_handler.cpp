@@ -1,4 +1,4 @@
-// mqtt_handler.cpp – Home Assistant MQTT integration with 9 entities + 8 services
+// mqtt_handler.cpp – Home Assistant MQTT integration with 9 entities + vise servisa
 // MQTT entities exposed to Home Assistant:
 // 1. clock_time (sensor) – Current clock time
 // 2. time_source (sensor) – RTC/NTP/DCF source
@@ -10,15 +10,19 @@
 // 8. operation_mode (sensor) – Normal/Celebration/Funeral/Waiting
 // 9. silent_mode (binary_sensor) – Silent mode status
 //
-// MQTT services exposed to Home Assistant:
-// 1. ring_bell – Ring bell 1 or 2 manually
-// 2. set_mode – Set operation mode (normal/celebration/funeral)
-// 3. hand_correction – Correct hand position
-// 4. strikes_enable – Enable/disable automated hourly strikes
-// 5. silent_toggle – Toggle silent mode on/off
-// 6. rapid_correction – Force rapid hand synchronization
-// 7. ntp_sync – Trigger immediate NTP synchronization
-// 8. system_reset – System reset with state preservation
+// MQTT servisi za toranjski sat:
+// 1. ring_bell – genericko zvono 1 ili 2
+// 2. bell1 – izravno ukljuci/iskljuci zvono 1
+// 3. bell2 – izravno ukljuci/iskljuci zvono 2
+// 4. set_mode – postavi normal/celebration/funeral
+// 5. slavljenje – izravno ukljuci/iskljuci slavljenje
+// 6. mrtvacko – izravno ukljuci/iskljuci mrtvacko zvonjenje
+// 7. hand_correction – korekcija kazaljki
+// 8. strikes_enable – ukljuci/iskljuci satne otkucaje
+// 9. silent_toggle – lokalna MQTT zastavica za tihi mod
+// 10. rapid_correction – prisilna budna korekcija
+// 11. ntp_sync – trenutna NTP sinkronizacija
+// 12. system_reset – restart sustava
 
 #include <Arduino.h>
 #include "mqtt_handler.h"
@@ -30,13 +34,6 @@
 #include "esp_serial.h"
 #include "pc_serial.h"
 #include "postavke.h"
-
-// ==================== MQTT CONFIGURATION ====================
-
-#define MQTT_BROKER_ADDRESS "192.168.1.100"  // Update with your MQTT broker IP
-#define MQTT_PORT 1883
-#define MQTT_USERNAME "toranj"
-#define MQTT_PASSWORD "toranj2024"
 
 // Home Assistant discovery prefix
 #define HA_DISCOVERY_PREFIX "homeassistant"
@@ -59,11 +56,48 @@ static const unsigned long MQTT_RECONNECT_INTERVAL = 10000;  // 10 seconds
 // Entity states
 static bool bell1_active = false;
 static bool bell2_active = false;
+static bool bell3_active = false;
+static bool bell4_active = false;
 static bool hammer1_active = false;
 static bool hammer2_active = false;
 static bool silent_mode_active = false;
-static String current_mode = "normal";
+static const char* current_mode = "normal";
 static unsigned long last_entity_update = 0;
+
+static bool jePayloadUkljucen(const String& poruka) {
+  return poruka == "on" || poruka == "true" || poruka == "1" || poruka == "start";
+}
+
+static bool jePayloadIskljucen(const String& poruka) {
+  return poruka == "off" || poruka == "false" || poruka == "0" || poruka == "stop";
+}
+
+static void sastaviTemu(char* odrediste, size_t velicina, const char* sufiks) {
+  snprintf(odrediste, velicina, "%s/%s", BASE_TOPIC, sufiks);
+}
+
+static void objaviStanjeNaTemu(const char* sufiks, const char* vrijednost) {
+  char tema[96];
+  sastaviTemu(tema, sizeof(tema), sufiks);
+  objavi(tema, vrijednost);
+}
+
+static void objaviDiscoveryKonfiguraciju(const char* komponenta,
+                                         const char* objektId,
+                                         const char* naziv,
+                                         const char* uniqueId,
+                                         const char* stateSufiks,
+                                         const char* dodatniJson) {
+  char tema[160];
+  char payload[320];
+  snprintf(tema, sizeof(tema), "%s/%s/%s/%s/config",
+           HA_DISCOVERY_PREFIX, komponenta, DEVICE_ID, objektId);
+  snprintf(payload, sizeof(payload),
+           "{\"name\":\"%s\",\"unique_id\":\"%s\",\"state_topic\":\"%s/%s\","
+           "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\"},%s}",
+           naziv, uniqueId, BASE_TOPIC, stateSufiks, DEVICE_ID, DEVICE_NAME, dodatniJson);
+  objavi(tema, payload);
+}
 
 // ==================== HOMEASSISTANT MQTT DISCOVERY ====================
 
@@ -74,138 +108,69 @@ void publishHADiscovery() {
     return;
   }
 
-  // Discovery base topic: homeassistant/<component>/<device>/<entity>/config
-  String discovery_base = String(HA_DISCOVERY_PREFIX) + "/sensor/" + String(DEVICE_ID);
-  String binary_discovery_base = String(HA_DISCOVERY_PREFIX) + "/binary_sensor/" + String(DEVICE_ID);
+  objaviDiscoveryKonfiguraciju("sensor", "clock_time", "Clock Time",
+                               "toranj_clock_time", "time",
+                               "\"icon\":\"mdi:clock\"");
+  objaviDiscoveryKonfiguraciju("sensor", "time_source", "Time Source",
+                               "toranj_time_source", "time_source",
+                               "\"icon\":\"mdi:network\"");
+  objaviDiscoveryKonfiguraciju("sensor", "last_sync", "Last Synchronization",
+                               "toranj_last_sync", "last_sync",
+                               "\"icon\":\"mdi:sync\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "bell1_state", "Bell 1 (Hourly)",
+                               "toranj_bell1_state", "bell1/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:bell-outline\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "bell2_state", "Bell 2 (Half-hourly)",
+                               "toranj_bell2_state", "bell2/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:bell-outline\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "bell3_state", "Bell 3",
+                               "toranj_bell3_state", "bell3/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:bell-outline\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "bell4_state", "Bell 4",
+                               "toranj_bell4_state", "bell4/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:bell-outline\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "hammer1_state", "Hammer 1 (Male)",
+                               "toranj_hammer1_state", "hammer1/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:hammer\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "hammer2_state", "Hammer 2 (Female)",
+                               "toranj_hammer2_state", "hammer2/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:hammer\"");
+  objaviDiscoveryKonfiguraciju("sensor", "operation_mode", "Operation Mode",
+                               "toranj_operation_mode", "mode",
+                               "\"icon\":\"mdi:cog\"");
+  objaviDiscoveryKonfiguraciju("binary_sensor", "silent_mode", "Silent Mode",
+                               "toranj_silent_mode", "silent/state",
+                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
+                               "\"icon\":\"mdi:volume-mute\"");
 
-  // ==================== ENTITY 1: CLOCK TIME ====================
-  String topic1 = discovery_base + "/clock_time/config";
-  String payload1 = "{\"name\":\"Clock Time\",";
-  payload1 += "\"unique_id\":\"toranj_clock_time\",";
-  payload1 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/time\",";
-  payload1 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload1 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload1 += "\"icon\":\"mdi:clock\"}";
-  objavi(topic1, payload1);
+  static const char* MQTT_SERVISI[] = {
+    BASE_TOPIC "/service/ring_bell",
+    BASE_TOPIC "/service/set_mode",
+    BASE_TOPIC "/service/bell1",
+    BASE_TOPIC "/service/bell2",
+    BASE_TOPIC "/service/bell3",
+    BASE_TOPIC "/service/bell4",
+    BASE_TOPIC "/service/slavljenje",
+    BASE_TOPIC "/service/mrtvacko",
+    BASE_TOPIC "/service/hand_correction",
+    BASE_TOPIC "/service/strikes_enable",
+    BASE_TOPIC "/service/silent_toggle",
+    BASE_TOPIC "/service/rapid_correction",
+    BASE_TOPIC "/service/ntp_sync",
+    BASE_TOPIC "/service/system_reset"
+  };
 
-  // ==================== ENTITY 2: TIME SOURCE ====================
-  String topic2 = discovery_base + "/time_source/config";
-  String payload2 = "{\"name\":\"Time Source\",";
-  payload2 += "\"unique_id\":\"toranj_time_source\",";
-  payload2 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/time_source\",";
-  payload2 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload2 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload2 += "\"icon\":\"mdi:network\"}";
-  objavi(topic2, payload2);
+  for (uint8_t i = 0; i < (sizeof(MQTT_SERVISI) / sizeof(MQTT_SERVISI[0])); ++i) {
+    pretplati(MQTT_SERVISI[i]);
+  }
 
-  // ==================== ENTITY 3: LAST SYNC ====================
-  String topic3 = discovery_base + "/last_sync/config";
-  String payload3 = "{\"name\":\"Last Synchronization\",";
-  payload3 += "\"unique_id\":\"toranj_last_sync\",";
-  payload3 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/last_sync\",";
-  payload3 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload3 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload3 += "\"icon\":\"mdi:sync\"}";
-  objavi(topic3, payload3);
-
-  // ==================== ENTITY 4: BELL 1 STATE ====================
-  String topic4 = binary_discovery_base + "/bell1_state/config";
-  String payload4 = "{\"name\":\"Bell 1 (Hourly)\",";
-  payload4 += "\"unique_id\":\"toranj_bell1_state\",";
-  payload4 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/bell1/state\",";
-  payload4 += "\"payload_on\":\"on\",\"payload_off\":\"off\",";
-  payload4 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload4 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload4 += "\"icon\":\"mdi:bell-outline\"}";
-  objavi(topic4, payload4);
-
-  // ==================== ENTITY 5: BELL 2 STATE ====================
-  String topic5 = binary_discovery_base + "/bell2_state/config";
-  String payload5 = "{\"name\":\"Bell 2 (Half-hourly)\",";
-  payload5 += "\"unique_id\":\"toranj_bell2_state\",";
-  payload5 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/bell2/state\",";
-  payload5 += "\"payload_on\":\"on\",\"payload_off\":\"off\",";
-  payload5 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload5 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload5 += "\"icon\":\"mdi:bell-outline\"}";
-  objavi(topic5, payload5);
-
-  // ==================== ENTITY 6: HAMMER 1 STATE ====================
-  String topic6 = binary_discovery_base + "/hammer1_state/config";
-  String payload6 = "{\"name\":\"Hammer 1 (Male)\",";
-  payload6 += "\"unique_id\":\"toranj_hammer1_state\",";
-  payload6 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/hammer1/state\",";
-  payload6 += "\"payload_on\":\"on\",\"payload_off\":\"off\",";
-  payload6 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload6 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload6 += "\"icon\":\"mdi:hammer\"}";
-  objavi(topic6, payload6);
-
-  // ==================== ENTITY 7: HAMMER 2 STATE ====================
-  String topic7 = binary_discovery_base + "/hammer2_state/config";
-  String payload7 = "{\"name\":\"Hammer 2 (Female)\",";
-  payload7 += "\"unique_id\":\"toranj_hammer2_state\",";
-  payload7 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/hammer2/state\",";
-  payload7 += "\"payload_on\":\"on\",\"payload_off\":\"off\",";
-  payload7 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload7 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload7 += "\"icon\":\"mdi:hammer\"}";
-  objavi(topic7, payload7);
-
-  // ==================== ENTITY 8: OPERATION MODE ====================
-  String topic8 = discovery_base + "/operation_mode/config";
-  String payload8 = "{\"name\":\"Operation Mode\",";
-  payload8 += "\"unique_id\":\"toranj_operation_mode\",";
-  payload8 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/mode\",";
-  payload8 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload8 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload8 += "\"icon\":\"mdi:cog\"}";
-  objavi(topic8, payload8);
-
-  // ==================== ENTITY 9: SILENT MODE ====================
-  String topic9 = binary_discovery_base + "/silent_mode/config";
-  String payload9 = "{\"name\":\"Silent Mode\",";
-  payload9 += "\"unique_id\":\"toranj_silent_mode\",";
-  payload9 += "\"state_topic\":\"" + String(BASE_TOPIC) + "/silent/state\",";
-  payload9 += "\"payload_on\":\"on\",\"payload_off\":\"off\",";
-  payload9 += "\"device\":{\"identifiers\":[\"" + String(DEVICE_ID) + "\"],";
-  payload9 += "\"name\":\"" + String(DEVICE_NAME) + "\"},";
-  payload9 += "\"icon\":\"mdi:volume-mute\"}";
-  objavi(topic9, payload9);
-
-  // ==================== SERVICE 1: RING BELL ====================
-  String service1_topic = String(BASE_TOPIC) + "/service/ring_bell";
-  pretplati(service1_topic);
-
-  // ==================== SERVICE 2: SET MODE ====================
-  String service2_topic = String(BASE_TOPIC) + "/service/set_mode";
-  pretplati(service2_topic);
-
-  // ==================== SERVICE 3: HAND CORRECTION ====================
-  String service3_topic = String(BASE_TOPIC) + "/service/hand_correction";
-  pretplati(service3_topic);
-
-  // ==================== SERVICE 4: STRIKES ENABLE ====================
-  String service4_topic = String(BASE_TOPIC) + "/service/strikes_enable";
-  pretplati(service4_topic);
-
-  // ==================== SERVICE 5: SILENT TOGGLE ====================
-  String service5_topic = String(BASE_TOPIC) + "/service/silent_toggle";
-  pretplati(service5_topic);
-
-  // ==================== SERVICE 6: RAPID CORRECTION ====================
-  String service6_topic = String(BASE_TOPIC) + "/service/rapid_correction";
-  pretplati(service6_topic);
-
-  // ==================== SERVICE 7: NTP SYNC ====================
-  String service7_topic = String(BASE_TOPIC) + "/service/ntp_sync";
-  pretplati(service7_topic);
-
-  // ==================== SERVICE 8: SYSTEM RESET ====================
-  String service8_topic = String(BASE_TOPIC) + "/service/system_reset";
-  pretplati(service8_topic);
-
-  posaljiPCLog(F("MQTT: Home Assistant discovery published, 9 entities + 8 services"));
+  posaljiPCLog(F("MQTT: discovery objavljen, ukljucene teme za zvona, slavljenje i mrtvacko"));
 }
 
 // ==================== STATUS PUBLISHING ====================
@@ -230,10 +195,10 @@ void objaviStatusMQTT() {
   char timeStr[20];
   snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d",
     vrijeme.hour(), vrijeme.minute(), vrijeme.second());
-  objavi(String(BASE_TOPIC) + "/time", String(timeStr));
+  objaviStanjeNaTemu("time", timeStr);
 
   // Entity 2: Time source
-  objavi(String(BASE_TOPIC) + "/time_source", dohvatiIzvorVremena());
+  objaviStanjeNaTemu("time_source", dohvatiOznakuIzvoraVremena());
 
   // Entity 3: Last sync
   DateTime zadnjaSink = getZadnjeSinkroniziranoVrijeme();
@@ -241,25 +206,33 @@ void objaviStatusMQTT() {
   snprintf(syncStr, sizeof(syncStr), "%04d-%02d-%02d %02d:%02d:%02d",
     zadnjaSink.year(), zadnjaSink.month(), zadnjaSink.day(),
     zadnjaSink.hour(), zadnjaSink.minute(), zadnjaSink.second());
-  objavi(String(BASE_TOPIC) + "/last_sync", String(syncStr));
+  objaviStanjeNaTemu("last_sync", syncStr);
 
   // Entity 4: Bell 1 state
-  bell1_active = jeZvonoUTijeku();  // Simplified check
-  objavi(String(BASE_TOPIC) + "/bell1/state", bell1_active ? "on" : "off");
+  bell1_active = jeZvonoAktivno(1);
+  objaviStanjeNaTemu("bell1/state", bell1_active ? "on" : "off");
 
   // Entity 5: Bell 2 state
-  bell2_active = jeZvonoUTijeku();  // Simplified check
-  objavi(String(BASE_TOPIC) + "/bell2/state", bell2_active ? "on" : "off");
+  bell2_active = jeZvonoAktivno(2);
+  objaviStanjeNaTemu("bell2/state", bell2_active ? "on" : "off");
 
-  // Entity 6: Hammer 1 state
+  // Entity 6: Bell 3 state
+  bell3_active = jeZvonoAktivno(3);
+  objaviStanjeNaTemu("bell3/state", bell3_active ? "on" : "off");
+
+  // Entity 7: Bell 4 state
+  bell4_active = jeZvonoAktivno(4);
+  objaviStanjeNaTemu("bell4/state", bell4_active ? "on" : "off");
+
+  // Entity 8: Hammer 1 state
   hammer1_active = jeZvonoUTijeku();  // Would need actual hammer tracking
-  objavi(String(BASE_TOPIC) + "/hammer1/state", hammer1_active ? "on" : "off");
+  objaviStanjeNaTemu("hammer1/state", hammer1_active ? "on" : "off");
 
-  // Entity 7: Hammer 2 state
+  // Entity 9: Hammer 2 state
   hammer2_active = jeZvonoUTijeku();  // Would need actual hammer tracking
-  objavi(String(BASE_TOPIC) + "/hammer2/state", hammer2_active ? "on" : "off");
+  objaviStanjeNaTemu("hammer2/state", hammer2_active ? "on" : "off");
 
-  // Entity 8: Operation mode
+  // Entity 10: Operation mode
   if (jeSlavljenjeUTijeku()) {
     current_mode = "celebration";
   } else if (jeMrtvackoUTijeku()) {
@@ -267,10 +240,10 @@ void objaviStatusMQTT() {
   } else {
     current_mode = "normal";
   }
-  objavi(String(BASE_TOPIC) + "/mode", current_mode);
+  objaviStanjeNaTemu("mode", current_mode);
 
-  // Entity 9: Silent mode
-  objavi(String(BASE_TOPIC) + "/silent/state", silent_mode_active ? "on" : "off");
+  // Entity 11: Silent mode
+  objaviStanjeNaTemu("silent/state", silent_mode_active ? "on" : "off");
 }
 
 // ==================== COMMAND HANDLING ====================
@@ -281,11 +254,55 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
   // Service 1: Ring bell
   if (tema.endsWith("/service/ring_bell")) {
     int bell = poruka.toInt();
-    if (bell == 1 || bell == 2) {
+    if (bell >= 1 && bell <= 4) {
       ukljuciZvono(bell);
       String log = F("MQTT: Ring Bell ");
       log += bell;
       posaljiPCLog(log);
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/bell1")) {
+    if (jePayloadUkljucen(poruka)) {
+      ukljuciZvono(1);
+      posaljiPCLog(F("MQTT: Bell1 ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      iskljuciZvono(1);
+      posaljiPCLog(F("MQTT: Bell1 OFF"));
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/bell2")) {
+    if (jePayloadUkljucen(poruka)) {
+      ukljuciZvono(2);
+      posaljiPCLog(F("MQTT: Bell2 ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      iskljuciZvono(2);
+      posaljiPCLog(F("MQTT: Bell2 OFF"));
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/bell3")) {
+    if (jePayloadUkljucen(poruka)) {
+      ukljuciZvono(3);
+      posaljiPCLog(F("MQTT: Bell3 ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      iskljuciZvono(3);
+      posaljiPCLog(F("MQTT: Bell3 OFF"));
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/bell4")) {
+    if (jePayloadUkljucen(poruka)) {
+      ukljuciZvono(4);
+      posaljiPCLog(F("MQTT: Bell4 ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      iskljuciZvono(4);
+      posaljiPCLog(F("MQTT: Bell4 OFF"));
     }
     return;
   }
@@ -300,7 +317,30 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
       posaljiPCLog(F("MQTT: Mode set to Funeral"));
     } else if (poruka == "normal") {
       zaustaviSlavljenje();
+      zaustaviMrtvacko();
       posaljiPCLog(F("MQTT: Mode set to Normal"));
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/slavljenje")) {
+    if (jePayloadUkljucen(poruka)) {
+      zapocniSlavljenje();
+      posaljiPCLog(F("MQTT: Slavljenje ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      zaustaviSlavljenje();
+      posaljiPCLog(F("MQTT: Slavljenje OFF"));
+    }
+    return;
+  }
+
+  if (tema.endsWith("/service/mrtvacko")) {
+    if (jePayloadUkljucen(poruka)) {
+      zapocniMrtvacko();
+      posaljiPCLog(F("MQTT: Mrtvacko ON"));
+    } else if (jePayloadIskljucen(poruka)) {
+      zaustaviMrtvacko();
+      posaljiPCLog(F("MQTT: Mrtvacko OFF"));
     }
     return;
   }
@@ -351,7 +391,7 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
   // Service 7: NTP sync (request from ESP8266)
   if (tema.endsWith("/service/ntp_sync")) {
     posaljiPCLog(F("MQTT: NTP sync requested (via ESP8266)"));
-    // Send command to ESP8266 to trigger NTP
+    posaljiNTPPostavkeESP();
     posaljiWifiPostavkeESP();
     return;
   }
@@ -364,33 +404,39 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
     asm volatile ("jmp 0");  // Software reset for Arduino Mega
     return;
   }
+
+  if (tema.indexOf("/service/") >= 0) {
+    posaljiPCLog(String(F("MQTT: servis jos nije implementiran za toranjski sat: ")) + tema);
+  }
 }
 
 // ==================== BASIC MQTT OPERATIONS ====================
 
 // Placeholder implementations – would use PubSubClient library in production
-void objavi(const String& tema, const String& vrijednost) {
+void objavi(const char* tema, const char* vrijednost) {
   // In production, use PubSubClient:
   // client.publish(tema.c_str(), vrijednost.c_str());
-  
-  // For now, send via ESP8266 serial
-  String komanda = "MQTT:PUB|";
-  komanda += tema;
-  komanda += "|";
-  komanda += vrijednost;
-  
-  posaljiESPKomandu(komanda);  // Send to ESP8266
+
+  char komanda[384];
+  snprintf(komanda, sizeof(komanda), "MQTT:PUB|%s|%s", tema, vrijednost);
+  posaljiESPKomandu(komanda);
+}
+
+void objavi(const String& tema, const String& vrijednost) {
+  objavi(tema.c_str(), vrijednost.c_str());
+}
+
+void pretplati(const char* tema) {
+  // In production, use PubSubClient:
+  // client.subscribe(tema.c_str());
+
+  char komanda[192];
+  snprintf(komanda, sizeof(komanda), "MQTT:SUB|%s", tema);
+  posaljiESPKomandu(komanda);
 }
 
 void pretplati(const String& tema) {
-  // In production, use PubSubClient:
-  // client.subscribe(tema.c_str());
-  
-  // For now, send via ESP8266 serial
-  String komanda = "MQTT:SUB|";
-  komanda += tema;
-  
-  posaljiESPKomandu(komanda);  // Send to ESP8266
+  pretplati(tema.c_str());
 }
 
 bool jeMQTTPovezan() {
@@ -412,15 +458,16 @@ void reconnectMQTT() {
   }
   last_mqtt_reconnect = sada;
   
-  // Send reconnect command to ESP8266
-  String komanda = "MQTT:CONNECT|";
-  komanda += MQTT_BROKER_ADDRESS;
-  komanda += "|";
-  komanda += String(MQTT_PORT);
-  
+  char komanda[192];
+  snprintf(komanda, sizeof(komanda), "MQTT:CONNECT|%s|%u|%s|%s",
+           dohvatiMQTTBroker(), dohvatiMQTTPort(),
+           dohvatiMQTTKorisnika(), dohvatiMQTTLozinku());
   posaljiESPKomandu(komanda);
-  
-  posaljiPCLog(F("MQTT: Reconnect attempt sent to ESP8266"));
+
+  char log[128];
+  snprintf(log, sizeof(log), "MQTT: reconnect pokusaj poslan ESP-u za broker %s:%u",
+           dohvatiMQTTBroker(), dohvatiMQTTPort());
+  posaljiPCLog(log);
 }
 
 // ==================== INITIALIZATION & MAIN LOOP ====================
@@ -436,8 +483,11 @@ void inicijalizirajMQTT() {
   last_mqtt_reconnect = 0;
   silent_mode_active = false;
   current_mode = "normal";
-  
-  posaljiPCLog(F("MQTT Handler initialized"));
+
+  char log[128];
+  snprintf(log, sizeof(log), "MQTT handler inicijaliziran, broker=%s:%u",
+           dohvatiMQTTBroker(), dohvatiMQTTPort());
+  posaljiPCLog(log);
   
   // Attempt initial connection
   reconnectMQTT();

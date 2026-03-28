@@ -46,6 +46,7 @@ DCF77 – dodatni fallback
 Sinkronizacija kazaljki
 K-minuta sustav (0–719)
 Pohrana u EEPROM (wear leveling)
+Automatski DST (CET/CEST) iz RTC kalendara, i bez ESP/NTP veze
 Automatska korekcija:
 Normalna (<10 min razlike)
 Agresivna (≥10 min)

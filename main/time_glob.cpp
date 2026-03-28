@@ -8,6 +8,8 @@
 #include "wear_leveling.h"
 #include "pc_serial.h"
 #include "lcd_display.h"
+#include "kazaljke_sata.h"
+#include "okretna_ploca.h"
 
 // DS3231 RTC modul
 static RTC_DS3231 rtc;
@@ -36,6 +38,8 @@ static bool rtcBaterijaOk = false;
 static bool rtcSqwAktivan = false;
 static bool rtcSqwGreskaPrijavljena = false;
 static unsigned long rtcSqwZadnjiTickMs = 0;
+static bool dstAktivan = false;
+static bool dstStatusUcitan = false;
 
 // Fallback referencija (koristi zadnje poznato vrijeme ako RTC/NTP/DCF nisu dostupni)
 static bool fallbackAktivan = false;
@@ -74,6 +78,124 @@ static void spremiZadnjuSinkronizaciju() {
                        EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
                        zs);
   zadnjaSinkronizacijaMs = millis();
+}
+
+static uint16_t izracunajDSTChecksum(const EepromLayout::DSTStatus& stanje) {
+  uint16_t checksum = 0;
+  checksum += stanje.potpis;
+  checksum += stanje.dstAktivan;
+  checksum += stanje.reserved;
+  return checksum;
+}
+
+static bool jeDSTStatusValjan(const EepromLayout::DSTStatus& stanje) {
+  return stanje.potpis == EepromLayout::DST_STATUS_POTPIS &&
+         stanje.checksum == izracunajDSTChecksum(stanje) &&
+         stanje.dstAktivan <= 1;
+}
+
+static uint8_t zadnjaNedjeljaUMjesecu(int godina, uint8_t mjesec) {
+  DateTime zadnjiDan(godina, mjesec + 1, 1, 0, 0, 0);
+  zadnjiDan = DateTime(zadnjiDan.unixtime() - 86400UL);
+  while (zadnjiDan.dayOfTheWeek() != 0) {
+    zadnjiDan = DateTime(zadnjiDan.unixtime() - 86400UL);
+  }
+  return zadnjiDan.day();
+}
+
+static bool izracunajDSTIzKalendara(const DateTime& vrijeme) {
+  const uint8_t mjesec = vrijeme.month();
+  if (mjesec < 3 || mjesec > 10) return false;
+  if (mjesec > 3 && mjesec < 10) return true;
+
+  const uint8_t zadnjaNedjelja = zadnjaNedjeljaUMjesecu(vrijeme.year(), mjesec);
+  if (mjesec == 3) {
+    if (vrijeme.day() < zadnjaNedjelja) return false;
+    if (vrijeme.day() > zadnjaNedjelja) return true;
+    return vrijeme.hour() >= 3;
+  }
+
+  if (vrijeme.day() < zadnjaNedjelja) return true;
+  if (vrijeme.day() > zadnjaNedjelja) return false;
+  return vrijeme.hour() < 3;
+}
+
+static void spremiDSTStatus() {
+  EepromLayout::DSTStatus stanje{};
+  stanje.potpis = EepromLayout::DST_STATUS_POTPIS;
+  stanje.dstAktivan = dstAktivan ? 1 : 0;
+  stanje.reserved = 0;
+  stanje.checksum = izracunajDSTChecksum(stanje);
+  WearLeveling::spremi(EepromLayout::BAZA_DST_STATUS,
+                       EepromLayout::SLOTOVI_DST_STATUS,
+                       stanje);
+  dstStatusUcitan = true;
+}
+
+static void ucitajDSTStatus() {
+  EepromLayout::DSTStatus stanje{};
+  if (WearLeveling::ucitaj(EepromLayout::BAZA_DST_STATUS,
+                           EepromLayout::SLOTOVI_DST_STATUS,
+                           stanje) &&
+      jeDSTStatusValjan(stanje)) {
+    dstAktivan = stanje.dstAktivan != 0;
+    dstStatusUcitan = true;
+    return;
+  }
+
+  dstAktivan = izracunajDSTIzKalendara(trenutnoVrijeme);
+  dstStatusUcitan = true;
+  spremiDSTStatus();
+}
+
+static bool trebaProljetniPomak(const DateTime& vrijeme) {
+  return !dstAktivan &&
+         vrijeme.month() == 3 &&
+         vrijeme.day() == zadnjaNedjeljaUMjesecu(vrijeme.year(), 3) &&
+         vrijeme.hour() == 2;
+}
+
+static bool trebaJesenskiPomak(const DateTime& vrijeme) {
+  return dstAktivan &&
+         vrijeme.month() == 10 &&
+         vrijeme.day() == zadnjaNedjeljaUMjesecu(vrijeme.year(), 10) &&
+         vrijeme.hour() == 3;
+}
+
+static void primijeniDSTPomak(int pomakSekundi, bool noviDSTAktivan, const __FlashStringHelper* opis) {
+  DateTime novoVrijeme(trenutnoVrijeme.unixtime() + pomakSekundi);
+  if (rtc.begin()) {
+    rtc.adjust(novoVrijeme);
+    rtcBaterijaOk = true;
+  } else {
+    signalizirajError_RTC();
+  }
+
+  trenutnoVrijeme = novoVrijeme;
+  fallbackVrijeme = novoVrijeme;
+  fallbackAktivan = true;
+  dstAktivan = noviDSTAktivan;
+  spremiDSTStatus();
+
+  posaljiPCLog(opis);
+  obavijestiKazaljkeDSTPromjena(pomakSekundi / 60);
+  zatraziPoravnanjeTaktaKazaljki();
+  zatraziPoravnanjeTaktaPloce();
+}
+
+static void obradiAutomatskiDST() {
+  if (!dstStatusUcitan) {
+    ucitajDSTStatus();
+  }
+
+  if (trebaProljetniPomak(trenutnoVrijeme)) {
+    primijeniDSTPomak(3600, true, F("DST: automatski prijelaz na CEST (+60 min)"));
+    return;
+  }
+
+  if (trebaJesenskiPomak(trenutnoVrijeme)) {
+    primijeniDSTPomak(-3600, false, F("DST: automatski prijelaz na CET (-60 min)"));
+  }
 }
 
 static void ucitajZadnjuSinkronizaciju() {
@@ -117,6 +239,7 @@ void inicijalizirajRTC() {
   rtcSqwAktivan = false;
   rtcSqwGreskaPrijavljena = false;
   rtcSqwZadnjiTickMs = millis();
+  ucitajDSTStatus();
   ucitajZadnjuSinkronizaciju();
   oznaciPovratakNaRTC();
 }
@@ -161,6 +284,8 @@ DateTime dohvatiTrenutnoVrijeme() {
     oznaciPovratakNaRTC();
   }
 
+  obradiAutomatskiDST();
+
   return trenutnoVrijeme;
 }
 
@@ -186,6 +311,8 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
   }
   
   trenutnoVrijeme = ntpVrijeme;
+  dstAktivan = izracunajDSTIzKalendara(ntpVrijeme);
+  spremiDSTStatus();
   zadnjaSinkronizacija = ntpVrijeme;
   trenutniIzvor = IZ_NTP;
   azurirajOznakuIzvora();
@@ -223,6 +350,8 @@ void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
   }
   
   trenutnoVrijeme = dcfVrijeme;
+  dstAktivan = izracunajDSTIzKalendara(dcfVrijeme);
+  spremiDSTStatus();
   zadnjaSinkronizacija = dcfVrijeme;
   trenutniIzvor = IZ_DCF;
   azurirajOznakuIzvora();
@@ -257,6 +386,8 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   trenutnoVrijeme = rucnoVrijeme;
   fallbackVrijeme = rucnoVrijeme;
   fallbackAktivan = true;
+  dstAktivan = izracunajDSTIzKalendara(rucnoVrijeme);
+  spremiDSTStatus();
   oznaciPovratakNaRTC();
 
   String log = F("Vrijeme rucno postavljeno: ");
@@ -277,7 +408,11 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
 }
 
 String dohvatiIzvorVremena() {
-  return String(oznakaizvora);
+  return String(dohvatiOznakuIzvoraVremena());
+}
+
+const char* dohvatiOznakuIzvoraVremena() {
+  return oznakaizvora;
 }
 
 char dohvatiOznakuDana() {

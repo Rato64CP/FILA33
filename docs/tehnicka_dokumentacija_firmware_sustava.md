@@ -125,6 +125,19 @@ Jedan korak ploče nije trenutan, nego ide kroz dvije faze:
 - svaka iduća pozicija predstavlja +15 min,
 - `63` je zadnja/noćna referenca.
 
+### Čavli okretne ploče i raspored zvona
+- Sustav sada podržava **5-10 čavala** i do **4 zvona** toranjskog sata.
+- U postavkama se posebno sprema:
+  broj mjesta za čavle,
+  broj aktivnih zvona,
+  raspored čavala za radne dane (`RD`) za zvona 1-4,
+  raspored čavala za nedjelje (`NED`) za zvona 1-4,
+  poseban čavao za `SLAVLJENJE`,
+  poseban čavao za `MRTVAČKO`.
+- Vrijednost `0` znači da određeno zvono ili poseban način rada nema dodijeljen čavao.
+- Trajanja `BELL1`-`BELL4` i `SLAVLJENJA` podešavaju se u postavkama toranjskog sata u rasponu **1-4 minute**.
+- Postavka `SLAVLJENJE prije/poslije` određuje ide li slavljenje prije zvona ili nakon završetka zvona.
+
 ### Sinkronizacija ploče nakon nestanka napajanja
 Kod boota sustav učitava zadnje poznato stanje iz EEPROM-a (pozicija + faza). Nakon toga u runtime-u:
 - ako je ploča već na cilju, nema pokreta,

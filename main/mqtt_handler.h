@@ -16,9 +16,11 @@ void objaviStatusMQTT();
 void obradiMQTTKomandu(const String& tema, const String& poruka);
 
 // Publish entity state to Home Assistant
+void objavi(const char* tema, const char* vrijednost);
 void objavi(const String& tema, const String& vrijednost);
 
 // Subscribe to MQTT topic
+void pretplati(const char* tema);
 void pretplati(const String& tema);
 
 // Check MQTT connection status

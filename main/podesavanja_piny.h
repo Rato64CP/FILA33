@@ -1,6 +1,6 @@
-// podesavanja_piny.h – CONSOLIDATED PIN DEFINITIONS WITH HEADER GUARDS
-// SINGLE SOURCE OF TRUTH for all hardware pin assignments
-// Arduino Mega 2560 pinout for tower clock system
+// podesavanja_piny.h - objedinjene definicije pinova toranjskog sata
+// Jedino mjesto istine za raspored svih hardverskih pinova.
+// Pinout je prilagoden za Arduino Mega 2560.
 
 #ifndef PODESAVANJA_PINY_H
 #define PODESAVANJA_PINY_H
@@ -16,25 +16,33 @@
 #define PIN_RELEJ_PARNE_PLOCE         24  // Even relay for plate (first phase)
 #define PIN_RELEJ_NEPARNE_PLOCE       25  // Odd relay for plate (second phase)
 
-// ==================== BELL AND HAMMER PINS ====================
-// Bell control for hourly (Bell 1) and half-hourly (Bell 2) strikes
+// ==================== PINOVI ZVONA I CEKICA ====================
+// Releji zvona prosireni su do 4 izlaza.
 
-#define PIN_ZVONO_1                   26  // Bell 1 - hourly strikes
-#define PIN_ZVONO_2                   27  // Bell 2 - half-hourly strikes
+#define PIN_ZVONO_1                   26  // Zvono 1
+#define PIN_ZVONO_2                   27  // Zvono 2
+#define PIN_ZVONO_3                   46  // Zvono 3
+#define PIN_ZVONO_4                   47  // Zvono 4
 
-// Hammer pins - blocked during bell movement with inertia delays
-#define PIN_CEKIC_MUSKI               28  // Hammer 1 - male (hourly)
-#define PIN_CEKIC_ZENSKI              29  // Hammer 2 - female (half-hourly)
+// Cekici 3 i 4 su pripremljeni za drugu fazu prosirenja.
+#define PIN_CEKIC_MUSKI               28  // Cekic 1 - muski
+#define PIN_CEKIC_ZENSKI              29  // Cekic 2 - zenski
+#define PIN_CEKIC_3                   48  // Cekic 3
+#define PIN_CEKIC_4                   49  // Cekic 4
 
-// ==================== ROTATING PLATE MECHANICAL INPUTS ====================
-// 5 mechanical cam sensors for plate position triggering
-// Used to detect position and trigger bells/celebrations
+// ==================== ULAZI OKRETNE PLOCE ====================
+// Mehanicki ulazi ploce prosireni su do 10 cavala.
 
-#define PIN_ULAZA_PLOCE_1             30  // Input 1 - bell 1 (weekdays)
-#define PIN_ULAZA_PLOCE_2             31  // Input 2 - bell 2 (weekdays)
-#define PIN_ULAZA_PLOCE_3             32  // Input 3 - bell 1 (Sundays)
-#define PIN_ULAZA_PLOCE_4             33  // Input 4 - bell 2 (Sundays)
-#define PIN_ULAZA_PLOCE_5             34  // Input 5 - celebration trigger
+#define PIN_ULAZA_PLOCE_1             30  // Cavao 1
+#define PIN_ULAZA_PLOCE_2             31  // Cavao 2
+#define PIN_ULAZA_PLOCE_3             32  // Cavao 3
+#define PIN_ULAZA_PLOCE_4             33  // Cavao 4
+#define PIN_ULAZA_PLOCE_5             34  // Cavao 5
+#define PIN_ULAZA_PLOCE_6             50  // Cavao 6
+#define PIN_ULAZA_PLOCE_7             51  // Cavao 7
+#define PIN_ULAZA_PLOCE_8             52  // Cavao 8
+#define PIN_ULAZA_PLOCE_9             53  // Cavao 9
+#define PIN_ULAZA_PLOCE_10            A0  // Cavao 10
 
 // ==================== TIME SYNCHRONIZATION INPUTS ====================
 // DCF77 receiver - external synchronization source
@@ -66,10 +74,10 @@
 #define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
 
 // ==================== MANUAL BELL TOGGLE INPUTS ====================
-// Fizičke sklopke na GND za ručno upravljanje zvonima toranjskog sata
+// Fizicke sklopke na GND za rucno upravljanje zvonima toranjskog sata
 
-#define PIN_BELL1_SWITCH              44  // Ručna sklopka za BELL 1 (LOW=ON)
-#define PIN_BELL2_SWITCH              45  // Ručna sklopka za BELL 2 (LOW=ON)
+#define PIN_BELL1_SWITCH              44  // Rucna sklopka za BELL 1 (LOW=ON)
+#define PIN_BELL2_SWITCH              45  // Rucna sklopka za BELL 2 (LOW=ON)
 
 // ==================== SERIAL COMMUNICATION ====================
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)

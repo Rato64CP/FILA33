@@ -1,33 +1,43 @@
-# 🌐 ESP8266 firmware za toranjski sat
+# ESP8266 firmware za toranjski sat
 
-Ova podmapa sadrži firmware za ESP8266 modul koji se serijski povezuje s Arduino Megom 2560 i modulom `src/esp_serial.cpp`.
+Ova podmapa sadrzi firmware za ESP8266 modul koji se serijski povezuje s Arduino Megom 2560 i modulom `main/esp_serial.cpp`.
 
-## 🔄 Uloge modula
+## Uloge modula
 
-- ⏱️ **NTP klijent** koristi `NTPClient` (UTC) i prije slanja radi pretvorbu u lokalno CET/CEST vrijeme, pa periodički šalje poruke `NTP:YYYY-MM-DDTHH:MM:SS` prema Megi (bez `Z` sufiksa), čime se sinkronizira vrijeme u `obradiESPSerijskuKomunikaciju()`.
-- 🌐 **WiFi STA način** spaja modul na kućnu mrežu kako bi mogao dohvatiti NTP i prihvatiti udaljene zahtjeve.
-- 🛰️ **Web poslužitelj** pruža rutu `/cmd?value=<NAREDBA>` koja formira `CMD:` poruke kompatibilne s funkcijama zvona i otkucaja (`aktivirajZvonjenje()`, `postaviBlokaduOtkucavanja()`, `zapocniSlavljenje()` i dr.).
+- NTP klijent koristi `NTPClient` u UTC modu, a prije slanja prema Megi pretvara vrijeme u lokalni CET/CEST format.
+- WiFi STA nacin spaja komunikacijski modul toranjskog sata na lokalnu mrezu radi sinkronizacije vremena i udaljenog nadzora.
+- Web posluzitelj pruza `/status` i `/cmd?value=<NAREDBA>` za osnovni servisni pristup zvonima, cekicima i sinkronizaciji.
+- MQTT transport prima naredbe iz `main/mqtt_handler.cpp`, spaja se na broker, objavljuje stanja toranjskog sata i vraca pretplacene poruke prema Megi.
 
-## 🛠️ Prilagodba prije uploada
+## Prilagodba prije uploada
 
-- U `esp_firmware.ino` postavi `WIFI_SSID` i `WIFI_LOZINKA` na podatke lokalne mreže toranjskog ormara.
-- Po potrebi promijeni `NTP_POSLUZITELJ` ili `NTP_OFFSET_SEKUNDI` ako toranjski sat mora raditi u drugoj vremenskoj zoni.
-- Poželjno je dodati zaštitu (npr. API ključ) na HTTP rute prije spajanja na internet.
+- Provjeri pocetne WiFi vrijednosti u `esp_firmware.ino` ako Mega jos nije poslala postavke za toranjski sat.
+- Provjeri pocetne MQTT fallback vrijednosti u `esp_firmware.ino`, ali racunaj da ih Mega pri radu toranjskog sata moze prepisati spremljenim postavkama.
+- Po potrebi promijeni `NTP_POSLUZITELJ` ako lokalna mreza tornjskog sata koristi vlastiti NTP izvor.
+- U Arduino IDE-u ili PlatformIO okruzenju instaliraj biblioteku `PubSubClient`, jer je potrebna za MQTT dio.
+- Ako se ESP iz toranjskog ormara iznosi na siru mrezu, zastiti HTTP rute dodatnom autentikacijom ili ih ograniciti na internu mrezu.
 
-## 🚀 Upload na ESP8266
+## Serijski protokol prema Megi
 
-1. Otvori `esp_firmware.ino` u Arduino IDE-u s instaliranim ESP8266 paketom.
-2. Odaberi pločicu (npr. *NodeMCU 1.0 (ESP-12E Module)*) i postavi serijski port.
-3. Prenesi skicu i spoji UART (TX/RX) na Serial1 Arduina Mega 2560 uz prevod na 3.3 V kako je opisano u glavnom README-u.
+- `WIFI:<ssid>|<lozinka>|<dhcp>|<ip>|<maska>|<gateway>` prima mrezne postavke i pokrece novo WiFi spajanje.
+- `NTP:YYYY-MM-DDTHH:MM:SS` salje lokalno vrijeme prema `main/esp_serial.cpp`, gdje se poziva `azurirajVrijemeIzNTP()`.
+- `CMD:<naredba>` prenosi osnovne naredbe za zvona i modove rada toranjskog sata.
+- `MQTT:CONNECT|<broker>|<port>|<korisnik>|<lozinka>`, `MQTT:DISCONNECT`, `MQTT:STATUS`, `MQTT:SUB|<tema>` i `MQTT:PUB|<tema>|<poruka>` cine MQTT transport izmedu ESP-a i Mege.
+- `MQTT:MSG|<tema>|<poruka>`, `MQTT:CONNECTED` i `MQTT:DISCONNECTED` vracaju stanje MQTT veze prema `main/mqtt_handler.cpp`.
 
-## ✅ Provjera komunikacije
+## Upload na ESP8266
 
-- Serijski monitor ESP-a trebao bi prikazati odgovore `ACK:NTP` ili `ACK:CMD_OK` koje prima iz `src/esp_serial.cpp`.
-- Otvorom `http://<IP-ESP>/status` dobiva se JSON s SSID-om, IP adresom i zadnjim odgovorom Arduina.
-- Slanjem `http://<IP-ESP>/cmd?value=ZVONO1_ON` aktivira se muško zvono putem `aktivirajZvonjenje(1)` u kodu toranjskog sata.
+1. Otvori `esp_firmware.ino` u Arduino IDE-u s instaliranim ESP8266 paketom i bibliotekom `PubSubClient`.
+2. Odaberi odgovarajucu plocicu, npr. `NodeMCU 1.0 (ESP-12E Module)`, te ispravan serijski port.
+3. Prenesi skicu i spoji UART prema opisu iz glavnog README-a, uz ispravno 3.3 V prilagodavanje.
 
-## 📂 Datoteke
+## Provjera komunikacije
 
-- `esp_firmware.ino` – glavna skica s WiFi povezivanjem, NTP sinkronizacijom i web poslužiteljem.
+- Serijski monitor ESP-a treba pokazati `WIFI:CONNECTED`, `MQTT:CONNECTED` i `NTP:` logove kada je toranjski sat online.
+- Otvaranjem `http://<ip-esp>/status` dobiva se JSON sa SSID-om, IP adresom, MQTT stanjem i zadnjom linijom prema Megi.
+- Slanjem `http://<ip-esp>/cmd?value=ZVONO1_ON` toranjski sat treba proslijediti `CMD:ZVONO1_ON` prema `main/esp_serial.cpp`.
+- Ako Mega ukljuci MQTT u izborniku postavki, `main/mqtt_handler.cpp` treba nakon spajanja dobiti povratne linije `MQTT:CONNECTED` i `MQTT:MSG|...`.
 
-Svi komentari i dokumentacija ostaju na hrvatskom jeziku u skladu s pravilima repozitorija.
+## Datoteke
+
+- `esp_firmware.ino` - glavna skica za WiFi, NTP, MQTT i web pristup komunikacijskom modulu toranjskog sata.

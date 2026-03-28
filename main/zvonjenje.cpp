@@ -10,201 +10,157 @@
 
 // ==================== CONSTANTS ====================
 
-// Inertia blocking duration: 90 seconds (mechanical settling time after bell movement)
-// Prevents hammer strikes during bell solenoid operation
+// Trajanje inercije: 90 sekundi nakon rada zvona.
 const unsigned long TRAJANJE_INERCIJE_MS = 90000UL;
+static const uint8_t BROJ_ZVONA_MAX = 4;
+static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
+
+static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
+  PIN_ZVONO_1,
+  PIN_ZVONO_2,
+  PIN_ZVONO_3,
+  PIN_ZVONO_4
+};
+
+static const uint8_t PINOVI_RUCNIH_SKLOPKI[BROJ_RUCNIH_SKLOPKI_ZVONA] = {
+  PIN_BELL1_SWITCH,
+  PIN_BELL2_SWITCH
+};
 
 // ==================== STATE TRACKING ====================
 
-// Bell state (BELL1 and BELL2 only)
 static struct {
-  bool bell1_aktivan;
-  bool bell2_aktivan;
-  unsigned long bell1_start_ms;
-  unsigned long bell2_start_ms;
-  unsigned long bell1_duration_ms;
-  unsigned long bell2_duration_ms;
-} zvona = {false, false, 0, 0, 0, 0};
+  bool aktivan[BROJ_ZVONA_MAX];
+  unsigned long start_ms[BROJ_ZVONA_MAX];
+  unsigned long duration_ms[BROJ_ZVONA_MAX];
+} zvona = {{false, false, false, false}, {0, 0, 0, 0}, {0, 0, 0, 0}};
 
-// Inertia blocking (90-second period after bell activation)
+// Inercija nakon aktivacije zvona.
 static struct {
   bool inercija_aktivna;
   unsigned long vrijeme_pocetka;
   unsigned long trajanje_ms;
 } inercija = {false, 0, TRAJANJE_INERCIJE_MS};
 
-// Ručno upravljanje fizičkim sklopkama (override nad automatikom)
+// Rucno upravljanje fizickim sklopkama ima prioritet nad automatikom.
 static struct {
-  bool bell1_override_aktivan;
-  bool bell2_override_aktivan;
-} manualnoUpravljanje = {false, false};
+  bool override_aktivan[BROJ_RUCNIH_SKLOPKI_ZVONA];
+} manualnoUpravljanje = {{false, false}};
 
 // ==================== RELAY CONTROL ====================
 
-// Enable Bell 1 relay
-static void aktivirajBell1_Relej() {
-  digitalWrite(PIN_ZVONO_1, HIGH);
+static bool jeValjanIndeksZvona(int indeks) {
+  return indeks >= 0 && indeks < BROJ_ZVONA_MAX;
+}
+
+static bool jeZvonoOmogucenoPoPostavkama(int zvono) {
+  return zvono >= 1 && zvono <= dohvatiBrojZvona();
+}
+
+static void aktivirajBell_Relej(int indeks) {
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
+  }
+
+  digitalWrite(PINOVI_ZVONA[indeks], HIGH);
   inercija.inercija_aktivna = true;
   inercija.vrijeme_pocetka = millis();
-  
-  String log = F("Bell1: aktivirana, inercija (90s) početa");
+
+  String log = F("Bell");
+  log += (indeks + 1);
+  log += F(": aktivirana, inercija (90s) poceta");
   posaljiPCLog(log);
-  signalizirajBell1_Ringing();
+  signalizirajZvono_Ringing(indeks + 1);
 }
 
-// Disable Bell 1 relay
-static void deaktivirajBell1_Relej() {
-  digitalWrite(PIN_ZVONO_1, LOW);
-  String log = F("Bell1: deaktivirana");
-  posaljiPCLog(log);
-}
-
-// Enable Bell 2 relay
-static void aktivirajBell2_Relej() {
-  digitalWrite(PIN_ZVONO_2, HIGH);
-  inercija.inercija_aktivna = true;
-  inercija.vrijeme_pocetka = millis();
-  
-  String log = F("Bell2: aktivirana, inercija (90s) početa");
-  posaljiPCLog(log);
-  signalizirajBell2_Ringing();
-}
-
-// Disable Bell 2 relay
-static void deaktivirajBell2_Relej() {
-  digitalWrite(PIN_ZVONO_2, LOW);
-  String log = F("Bell2: deaktivirana");
-  posaljiPCLog(log);
-}
-
-// ==================== MECHANICAL INPUT PROCESSING ====================
-
-// Process plate mechanical cam inputs (5 sensors)
-// Called at minute boundary after plate N-phase completes
-void obradiCavleNaPloci() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  unsigned long sadaMs = millis();
-  
-  // Determine day of week (0=Sunday, 1=Monday, ... 6=Saturday)
-  uint8_t dan_u_tjednu = sada.dayOfTheWeek();
-  bool je_nedjelja = (dan_u_tjednu == 0);
-  
-  // Read mechanical input sensors
-  bool ulaz_1 = (digitalRead(PIN_ULAZA_PLOCE_1) == LOW);  // Bell1 weekday
-  bool ulaz_2 = (digitalRead(PIN_ULAZA_PLOCE_2) == LOW);  // Bell2 weekday
-  bool ulaz_3 = (digitalRead(PIN_ULAZA_PLOCE_3) == LOW);  // Bell1 Sunday
-  bool ulaz_4 = (digitalRead(PIN_ULAZA_PLOCE_4) == LOW);  // Bell2 Sunday
-  
-  // Log raw sensor state
-  String ulazi_log = F("Čavli (raw): 1=");
-  ulazi_log += ulaz_1 ? "ON" : "OFF";
-  ulazi_log += F(" 2=");
-  ulazi_log += ulaz_2 ? "ON" : "OFF";
-  ulazi_log += F(" 3=");
-  ulazi_log += ulaz_3 ? "ON" : "OFF";
-  ulazi_log += F(" 4=");
-  ulazi_log += ulaz_4 ? "ON" : "OFF";
-  posaljiPCLog(ulazi_log);
-  
-  // Determine which bells should ring
-  bool treba_bell1 = je_nedjelja ? ulaz_3 : ulaz_1;
-  bool treba_bell2 = je_nedjelja ? ulaz_4 : ulaz_2;
-  
-  // Get bell duration from settings
-  unsigned long trajanje_bell = je_nedjelja ? 
-    dohvatiTrajanjeZvonjenjaNedjeljaMs() : 
-    dohvatiTrajanjeZvonjenjaRadniMs();
-  
-  if (trajanje_bell == 0) {
-    trajanje_bell = je_nedjelja ? 180000UL : 120000UL;
+static void deaktivirajBell_Relej(int indeks) {
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
   }
-  
-  // Activate bells
-  if (treba_bell1 && !zvona.bell1_aktivan) {
-    ukljuciZvono(1);
-    zvona.bell1_start_ms = sadaMs;
-    zvona.bell1_duration_ms = trajanje_bell;
-    
-    String log = F("Čavli: Bell1 aktiviran");
-    posaljiPCLog(log);
-  }
-  
-  if (treba_bell2 && !zvona.bell2_aktivan) {
-    ukljuciZvono(2);
-    zvona.bell2_start_ms = sadaMs;
-    zvona.bell2_duration_ms = trajanje_bell;
-    
-    String log = F("Čavli: Bell2 aktiviran");
-    posaljiPCLog(log);
-  }
+
+  digitalWrite(PINOVI_ZVONA[indeks], LOW);
+  String log = F("Bell");
+  log += (indeks + 1);
+  log += F(": deaktivirana");
+  posaljiPCLog(log);
 }
 
 // ==================== PUBLIC API ====================
 
-// Enable Bell N (1=Bell1, 2=Bell2)
 void ukljuciZvono(int zvono) {
-  if (zvono == 1) {
-    if (!zvona.bell1_aktivan) {
-      aktivirajBell1_Relej();
-      zvona.bell1_aktivan = true;
-    }
-  } else if (zvono == 2) {
-    if (!zvona.bell2_aktivan) {
-      aktivirajBell2_Relej();
-      zvona.bell2_aktivan = true;
-    }
+  const int indeks = zvono - 1;
+  if (!jeValjanIndeksZvona(indeks) || !jeZvonoOmogucenoPoPostavkama(zvono)) {
+    return;
+  }
+
+  if (!zvona.aktivan[indeks]) {
+    aktivirajBell_Relej(indeks);
+    zvona.aktivan[indeks] = true;
   }
 }
 
-// Disable Bell N
 void iskljuciZvono(int zvono) {
-  if (zvono == 1) {
-    if (zvona.bell1_aktivan) {
-      deaktivirajBell1_Relej();
-      zvona.bell1_aktivan = false;
-    }
-    inercija.inercija_aktivna = true;
-    inercija.vrijeme_pocetka = millis();
-  } else if (zvono == 2) {
-    if (zvona.bell2_aktivan) {
-      deaktivirajBell2_Relej();
-      zvona.bell2_aktivan = false;
-    }
+  const int indeks = zvono - 1;
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
+  }
+
+  if (zvona.aktivan[indeks]) {
+    deaktivirajBell_Relej(indeks);
+    zvona.aktivan[indeks] = false;
     inercija.inercija_aktivna = true;
     inercija.vrijeme_pocetka = millis();
   }
 }
 
-// Check if inertia is active
 bool jeLiInerciaAktivna() {
   if (!inercija.inercija_aktivna) {
     return false;
   }
-  
+
   unsigned long sadaMs = millis();
   unsigned long proteklo = sadaMs - inercija.vrijeme_pocetka;
-  
+
   if (proteklo >= inercija.trajanje_ms) {
     inercija.inercija_aktivna = false;
-    String log = F("Inercija: završena nakon 90s");
-    posaljiPCLog(log);
+    posaljiPCLog(F("Inercija: zavrsena nakon 90s"));
     return false;
   }
-  
+
   return true;
 }
 
-// Check if either bell is ringing
 bool jeZvonoUTijeku() {
-  return zvona.bell1_aktivan || zvona.bell2_aktivan;
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
+    if (zvona.aktivan[i]) {
+      return true;
+    }
+  }
+  return false;
 }
 
-// Activate bell with specific duration (for MQTT and mechanical inputs)
+bool jeZvonoAktivno(int zvono) {
+  const int indeks = zvono - 1;
+  if (!jeValjanIndeksZvona(indeks)) {
+    return false;
+  }
+  return zvona.aktivan[indeks];
+}
+
 void aktivirajZvonjenje(int zvono) {
   ukljuciZvono(zvono);
 }
 
-// Deactivate bell (for MQTT)
+void aktivirajZvonjenjeNaTrajanje(int zvono, unsigned long trajanjeMs) {
+  const unsigned long sadaMs = millis();
+  aktivirajZvonjenje(zvono);
+  const int indeks = zvono - 1;
+  if (jeValjanIndeksZvona(indeks)) {
+    zvona.start_ms[indeks] = sadaMs;
+    zvona.duration_ms[indeks] = trajanjeMs;
+  }
+}
+
 void deaktivirajZvonjenje(int zvono) {
   iskljuciZvono(zvono);
 }
@@ -212,30 +168,32 @@ void deaktivirajZvonjenje(int zvono) {
 // ==================== INITIALIZATION ====================
 
 void inicijalizirajZvona() {
-  // Configure bell relay pins
-  pinMode(PIN_ZVONO_1, OUTPUT);
-  pinMode(PIN_ZVONO_2, OUTPUT);
-  digitalWrite(PIN_ZVONO_1, LOW);
-  digitalWrite(PIN_ZVONO_2, LOW);
-  
-  // Configure mechanical input pins
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
+    pinMode(PINOVI_ZVONA[i], OUTPUT);
+    digitalWrite(PINOVI_ZVONA[i], LOW);
+    zvona.aktivan[i] = false;
+    zvona.start_ms[i] = 0;
+    zvona.duration_ms[i] = 0;
+  }
+
   pinMode(PIN_ULAZA_PLOCE_1, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_2, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_3, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_4, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_5, INPUT_PULLUP);
-  
-  // Configure manual bell toggle inputs (GND switches)
-  pinMode(PIN_BELL1_SWITCH, INPUT_PULLUP);
-  pinMode(PIN_BELL2_SWITCH, INPUT_PULLUP);
-  
-  // Initialize state
-  zvona.bell1_aktivan = false;
-  zvona.bell2_aktivan = false;
+  pinMode(PIN_ULAZA_PLOCE_6, INPUT_PULLUP);
+  pinMode(PIN_ULAZA_PLOCE_7, INPUT_PULLUP);
+  pinMode(PIN_ULAZA_PLOCE_8, INPUT_PULLUP);
+  pinMode(PIN_ULAZA_PLOCE_9, INPUT_PULLUP);
+  pinMode(PIN_ULAZA_PLOCE_10, INPUT_PULLUP);
+
+  for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
+    pinMode(PINOVI_RUCNIH_SKLOPKI[i], INPUT_PULLUP);
+    manualnoUpravljanje.override_aktivan[i] = false;
+  }
+
   inercija.inercija_aktivna = false;
-  manualnoUpravljanje.bell1_override_aktivan = false;
-  manualnoUpravljanje.bell2_override_aktivan = false;
-  posaljiPCLog(F("Zvona: inicijalizirana - BELL CONTROL ONLY"));
+  posaljiPCLog(F("Zvona: inicijalizirana za do 4 zvona toranjskog sata"));
 }
 
 // ==================== MAIN LOOP MANAGEMENT ====================
@@ -243,69 +201,50 @@ void inicijalizirajZvona() {
 void upravljajZvonom() {
   unsigned long sadaMs = millis();
   SwitchState novoStanje = SWITCH_RELEASED;
-  
-  // Manual inputs with debouncing and edge detection (20-50ms)
-  if (obradiDebouncedInput(PIN_BELL1_SWITCH, 30, &novoStanje)) {
-    if (novoStanje == SWITCH_PRESSED) {
-      manualnoUpravljanje.bell1_override_aktivan = true;
-      ukljuciZvono(1);
-      posaljiPCLog(F("Manual BELL1 ON"));
-    } else {
-      manualnoUpravljanje.bell1_override_aktivan = false;
-      iskljuciZvono(1);
-      posaljiPCLog(F("Manual BELL1 OFF"));
+
+  for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
+    if (obradiDebouncedInput(PINOVI_RUCNIH_SKLOPKI[i], 30, &novoStanje)) {
+      String log = F("Manual BELL");
+      log += (i + 1);
+      log += (novoStanje == SWITCH_PRESSED) ? F(" ON") : F(" OFF");
+
+      if (novoStanje == SWITCH_PRESSED) {
+        if (jeZvonoOmogucenoPoPostavkama(i + 1)) {
+          manualnoUpravljanje.override_aktivan[i] = true;
+          ukljuciZvono(i + 1);
+        } else {
+          manualnoUpravljanje.override_aktivan[i] = false;
+          log += F(" (preskoceno)");
+        }
+      } else {
+        manualnoUpravljanje.override_aktivan[i] = false;
+        iskljuciZvono(i + 1);
+      }
+      posaljiPCLog(log);
     }
   }
-  
-  if (obradiDebouncedInput(PIN_BELL2_SWITCH, 30, &novoStanje)) {
-    if (novoStanje == SWITCH_PRESSED) {
-      manualnoUpravljanje.bell2_override_aktivan = true;
-      ukljuciZvono(2);
-      posaljiPCLog(F("Manual BELL2 ON"));
-    } else {
-      manualnoUpravljanje.bell2_override_aktivan = false;
-      iskljuciZvono(2);
-      posaljiPCLog(F("Manual BELL2 OFF"));
+
+  // Ako je rucni override aktivan, ima prioritet nad MQTT/web automatikom.
+  for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
+    if (manualnoUpravljanje.override_aktivan[i] && !zvona.aktivan[i]) {
+      ukljuciZvono(i + 1);
     }
   }
-  
-  // Ako je ručni override aktivan, ručno stanje ima prioritet nad MQTT/web automatikom.
-  if (manualnoUpravljanje.bell1_override_aktivan && !zvona.bell1_aktivan) {
-    ukljuciZvono(1);
-  }
-  if (manualnoUpravljanje.bell2_override_aktivan && !zvona.bell2_aktivan) {
-    ukljuciZvono(2);
-  }
-  
-  // Update inertia
+
   jeLiInerciaAktivna();
-  
-  // Manage Bell 1 duration
-  if (zvona.bell1_aktivan && !manualnoUpravljanje.bell1_override_aktivan) {
-    unsigned long proteklo = sadaMs - zvona.bell1_start_ms;
-    if (proteklo >= zvona.bell1_duration_ms) {
-      iskljuciZvono(1);
-      String log = F("Bell1: trajanje isteklo");
-      posaljiPCLog(log);
+
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
+    const bool rucniOverride =
+        (i < BROJ_RUCNIH_SKLOPKI_ZVONA) ? manualnoUpravljanje.override_aktivan[i] : false;
+    if (zvona.aktivan[i] && !rucniOverride) {
+      const unsigned long proteklo = sadaMs - zvona.start_ms[i];
+      if (proteklo >= zvona.duration_ms[i]) {
+        iskljuciZvono(i + 1);
+        String log = F("Bell");
+        log += (i + 1);
+        log += F(": trajanje isteklo");
+        posaljiPCLog(log);
+      }
     }
   }
-  
-  // Manage Bell 2 duration
-  if (zvona.bell2_aktivan && !manualnoUpravljanje.bell2_override_aktivan) {
-    unsigned long proteklo = sadaMs - zvona.bell2_start_ms;
-    if (proteklo >= zvona.bell2_duration_ms) {
-      iskljuciZvono(2);
-      String log = F("Bell2: trajanje isteklo");
-      posaljiPCLog(log);
-    }
-  }
-  
-  // Check mechanical inputs
-  static int zadnja_minuta_mehanike = -1;
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  if (sada.minute() != zadnja_minuta_mehanike) {
-    zadnja_minuta_mehanike = sada.minute();
-    obradiCavleNaPloci();
-  }
-  
 }

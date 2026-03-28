@@ -1,37 +1,36 @@
-// zvonjenje.h – Bell control (hourly and half-hourly strikes)
+// zvonjenje.h - upravljanje zvonima toranjskog sata
 #pragma once
 
-// Initialize bell system
+// Inicijalizacija sustava zvona
 void inicijalizirajZvona();
 
-// Manage bells in loop
+// Obrada zvona u glavnoj petlji
 void upravljajZvonom();
 
-// Enable Bell 1 or 2
+// Rucno ili automatsko ukljucivanje pojedinog zvona 1-4
 void ukljuciZvono(int zvono);
 
-// Disable Bell 1 or 2
+// Iskljucivanje pojedinog zvona 1-4
 void iskljuciZvono(int zvono);
 
-// Check if any bell is ringing
+// Upiti o stanju zvona
 bool jeZvonoUTijeku();
+bool jeZvonoAktivno(int zvono);
 
-// Process mechanical plate inputs
-void obradiCavleNaPloci();
-
-// Activate/deactivate bell with duration
+// Aktivacija/deaktivacija s trajanjem
 void aktivirajZvonjenje(int zvono);
+void aktivirajZvonjenjeNaTrajanje(int zvono, unsigned long trajanjeMs);
 void deaktivirajZvonjenje(int zvono);
 
-// Check if inertia blocking is active
+// Provjera inercijske blokade
 bool jeLiInerciaAktivna();
 
-// Celebration mode (implemented in otkucavanje.cpp)
+// Slavljenje (implementacija u otkucavanje.cpp)
 void zapocniSlavljenje();
 void zaustaviSlavljenje();
 bool jeSlavljenjeUTijeku();
 
-// Funeral mode (implemented in otkucavanje.cpp)
+// Mrtvacko zvono (implementacija u otkucavanje.cpp)
 void zapocniMrtvacko();
 void zaustaviMrtvacko();
 bool jeMrtvackoUTijeku();

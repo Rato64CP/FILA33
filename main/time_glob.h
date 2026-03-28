@@ -12,6 +12,7 @@ void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme);
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 
 String dohvatiIzvorVremena();
+const char* dohvatiOznakuIzvoraVremena();
 char dohvatiOznakuDana();
 void azurirajOznakuDana();
 

@@ -12,6 +12,11 @@ void inicijalizirajPCSerijsku() {
   Serial.println(F("============================================"));
 }
 
+void posaljiPCLog(const __FlashStringHelper* poruka) {
+  Serial.print(F("[LOG] "));
+  Serial.println(poruka);
+}
+
 void posaljiPCLog(const String& poruka) {
   Serial.print(F("[LOG] "));
   Serial.println(poruka);

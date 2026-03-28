@@ -11,6 +11,7 @@
 #include "pc_serial.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
+#include "postavke.h"
 
 // ==================== DCF77 CONFIGURATION ====================
 
@@ -138,6 +139,13 @@ static DateTime dekodiraiDCFVrijeme() {
 // Initialize DCF77 receiver module
 // Called during system startup to configure interrupt-based decoding
 void inicijalizirajDCF() {
+  if (!jeDCFOmogucen()) {
+    dcfPokrenut = false;
+    dcfBrojBita = 0;
+    posaljiPCLog(F("DCF77: onemogucen u postavkama toranjskog sata"));
+    return;
+  }
+
   // Configure physical pin for DCF signal (open collector input)
   pinMode(PIN_DCF_SIGNAL, INPUT);
   
@@ -161,6 +169,19 @@ void inicijalizirajDCF() {
 // Call from main loop() once per second to check for time updates
 // Only attempts sync during night hours (22:00-06:00) when signal is stronger
 void osvjeziDCFSinkronizaciju() {
+  if (!jeDCFOmogucen()) {
+    dcfPokrenut = false;
+    dcfBrojBita = 0;
+    return;
+  }
+
+  if (!dcfPokrenut) {
+    inicijalizirajDCF();
+    if (!dcfPokrenut) {
+      return;
+    }
+  }
+
   // Module not initialized
   if (!dcfPokrenut) {
     return;
@@ -258,15 +279,3 @@ void osvjeziDCFSinkronizaciju() {
   }
 }
 
-// ==================== DIAGNOSTIC FUNCTIONS ====================
-
-// Get last successful DCF77 time reading
-// Returns DateTime object from last sync, or DateTime(0) if never synced
-DateTime dohvatiZadnjeDCFVrijeme() {
-  return zadnjeDCF;
-}
-
-// Check if DCF77 receiver has ever synced successfully
-bool jeKadDCFSinkroniziran() {
-  return zadnjeDCF.unixtime() > 0;
-}

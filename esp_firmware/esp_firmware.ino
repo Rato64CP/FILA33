@@ -2,52 +2,79 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <ESP8266WebServer.h>
+#include <PubSubClient.h>
 #include <time.h>
 
-// Konfiguracija WiFi mreže
-String wifiSsid    = "SVETI PETAR";
+// Konfiguracija WiFi mreze za toranjski sat.
+// Mega moze ove vrijednosti prepisati preko serijske veze naredbom WIFI:...
+String wifiSsid = "SVETI PETAR";
 String wifiLozinka = "cista2906";
-bool koristiDhcp   = true;
-String statickaIp  = "192.168.1.200";
+bool koristiDhcp = true;
+String statickaIp = "192.168.1.200";
 String mreznaMaska = "255.255.255.0";
 String zadaniGateway = "192.168.1.1";
 bool primljenaWifiKonfiguracija = false;
 
-// Parametri NTP klijenta
-static const char *NTP_POSLUZITELJ       = "pool.ntp.org";
-static const long  NTP_OFFSET_SEKUNDI    = 0;           // UTC
-static const unsigned long NTP_INTERVAL_MS   = 60000;   // osvježavanje NTP-a
+// Parametri NTP klijenta za sinkronizaciju toranjskog sata.
+char ntpPosluzitelj[40] = "pool.ntp.org";
+static const long NTP_OFFSET_SEKUNDI = 0;
+static const unsigned long NTP_INTERVAL_MS = 60000;
 static const size_t SERIJSKI_BUFFER_MAX = 256;
 
+// MQTT zadane vjerodajnice.
+// Mega ih po potrebi moze prepisati kroz MQTT:CONNECT naredbu.
+static const uint16_t MQTT_ZADANI_PORT = 1883;
+static const size_t MQTT_BROKER_MAX = 64;
+static const size_t MQTT_TOPIC_MAX = 96;
+static const size_t MQTT_PAYLOAD_MAX = 192;
+static const size_t MQTT_MAX_PRETPLATA = 16;
+static const size_t MQTT_KORISNIK_MAX = 33;
+static const size_t MQTT_LOZINKA_MAX = 33;
+static const unsigned long MQTT_POKUSAJ_INTERVAL_MS = 5000;
+
 WiFiUDP ntpUDP;
-NTPClient ntpKlijent(ntpUDP, NTP_POSLUZITELJ, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
+NTPClient ntpKlijent(ntpUDP, ntpPosluzitelj, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
 
 ESP8266WebServer webPosluzitelj(80);
+WiFiClient mqttMrezniKlijent;
+PubSubClient mqttKlijent(mqttMrezniKlijent);
 
 String zadnjiOdgovorMega = "";
 
-// Statusne zastavice za "faze"
+// Statusne zastavice za faze rada.
 bool wifiIkadSpojen = false;
 bool ntpIkadPostavljen = false;
 bool ntpPoslanNakonSpajanja = false;
-int zadnjiPoslaniNtpSatniKljuc = -1;
+long zadnjiPoslaniNtpSatniKljuc = -1;
 
-// Upravljanje nenametljivim pokušajima WiFi spajanja
+// Upravljanje nenametljivim pokusajima WiFi spajanja.
 bool wifiPokusajUToku = false;
 unsigned long wifiPokusajPocetak = 0;
 unsigned long wifiSljedeciPokusajDozvoljen = 0;
 int wifiBrojPokusajaZaredom = 0;
 static const unsigned long WIFI_POKUSAJ_TIMEOUT_MS = 20000;
-static const unsigned long WIFI_ODGODA_POKUSAJA_MS = 5000;
-static const int WIFI_MAX_POKUSAJA_PRIJE_ODGODE = 3;
+static const unsigned long WIFI_ODGODA_NAKON_PRVOG_MS = 10000;
+static const unsigned long WIFI_ODGODA_NAKON_DRUGOG_MS = 30000;
+static const unsigned long WIFI_ODGODA_NAKON_TRECEG_MS = 60000;
 wl_status_t zadnjiPrijavljeniWiFiStatus = WL_IDLE_STATUS;
 
-// Popis naredbi koje prihvaća toranjski sat
+// MQTT stanje i konfiguracija.
+bool mqttKonfiguriran = false;
+bool mqttStatusPrijavljenKaoSpojen = false;
+unsigned long mqttZadnjiPokusajSpajanja = 0;
+char mqttBrokerAdresa[MQTT_BROKER_MAX] = "";
+uint16_t mqttBrokerPort = MQTT_ZADANI_PORT;
+char mqttKorisnik[MQTT_KORISNIK_MAX] = "toranj";
+char mqttLozinka[MQTT_LOZINKA_MAX] = "toranj2024";
+char mqttPretplate[MQTT_MAX_PRETPLATA][MQTT_TOPIC_MAX];
+size_t mqttBrojPretplata = 0;
+
+// Popis naredbi koje prihvaca toranjski sat.
 const char *DOZVOLJENE_NAREDBE[] = {
-  "ZVONO1_ON",  "ZVONO1_OFF",  "ZVONO2_ON",  "ZVONO2_OFF",
+  "ZVONO1_ON", "ZVONO1_OFF", "ZVONO2_ON", "ZVONO2_OFF",
   "OTKUCAVANJE_ON", "OTKUCAVANJE_OFF",
-  "SLAVLJENJE_ON",  "SLAVLJENJE_OFF",
-  "MRTVACKO_ON",    "MRTVACKO_OFF"
+  "SLAVLJENJE_ON", "SLAVLJENJE_OFF",
+  "MRTVACKO_ON", "MRTVACKO_OFF"
 };
 const size_t BROJ_NAREDBI = sizeof(DOZVOLJENE_NAREDBE) / sizeof(DOZVOLJENE_NAREDBE[0]);
 
@@ -61,18 +88,32 @@ void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout = 3000);
 void konfigurirajWebPosluzitelj();
 void saljiNaredbuMegai(const String &naredba);
 void prijaviPromjenuWiFiStatusa();
+unsigned long dohvatiWiFiOdgoduNovogPokusaja();
 bool jeNaredbaDozvoljena(const String &naredba);
 bool jePrijestupnaGodina(int godina);
 int danUTjednu(int godina, int mjesec, int dan);
 int zadnjaNedjeljaUMjesecu(int godina, int mjesec);
 bool jeLjetnoVrijemeEU(time_t utcEpoch);
 time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch);
+String escapirajJsonString(const String &ulaz);
+void obradiNTPSerijskuNaredbu(const String &linija);
+void inicijalizirajMQTT();
+void obradiMQTT();
+void mqttPorukaPrimljena(char *tema, byte *payload, unsigned int duljina);
+void obradiMQTTSerijskuNaredbu(const String &linija);
+void postaviMQTTStatus(bool spojeno);
+void ispisiMQTTStatus();
+bool pokusajMQTTSpajanja(bool odmah);
+bool spremiMQTTPretplatu(const String &tema);
+void ponovnoPretplatiMQTTTeme();
+bool parsirajMQTTConnectPayload(const String &payload, String &broker, uint16_t &port, String &korisnik, String &lozinka);
+String ocistiJednolinijskiTekst(const String &ulaz, size_t maxDuljina);
 
 void setup() {
-  Serial.begin(9600);  // dijelimo vezu s Megom
+  Serial.begin(9600);
   delay(200);
 
-  Serial.println("ESP BOOT");                // DEBUG: start
+  Serial.println("ESP BOOT");
   Serial.println("FAZA: Povezivanje na WiFi");
 
   pokupiWifiKonfiguracijuIzSerijske();
@@ -83,25 +124,28 @@ void setup() {
   Serial.println("FAZA: Pokretanje NTP klijenta");
   ntpKlijent.begin();
 
-  Serial.println("FAZA: Konfiguracija web poslužitelja");
+  Serial.println("FAZA: Konfiguracija MQTT klijenta");
+  inicijalizirajMQTT();
+
+  Serial.println("FAZA: Konfiguracija web posluzitelja");
   konfigurirajWebPosluzitelj();
 
-  Serial.println("FAZA: INIT završen, ulazak u loop()");
+  Serial.println("FAZA: INIT zavrsen, ulazak u loop()");
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    // WiFi pao – prijavi i pokušaj ponovo
     if (wifiIkadSpojen) {
       Serial.println("FAZA: WiFi veza izgubljena, ponovno spajanje...");
     } else {
-      Serial.println("FAZA: WiFi još nije uspostavljen, pokušavam...");
+      Serial.println("FAZA: WiFi jos nije uspostavljen, pokusavam...");
     }
     poveziNaWiFi();
   }
 
-  osvjeziNTPSat();      // DEBUG unutar funkcije
-  obradiSerijskiUlaz(); // DEBUG unutar funkcije
+  osvjeziNTPSat();
+  obradiSerijskiUlaz();
+  obradiMQTT();
   posaljiNTPAkoTreba();
 
   webPosluzitelj.handleClient();
@@ -119,14 +163,26 @@ void prijaviPromjenuWiFiStatusa() {
     Serial.println("WIFI:CONNECTED");
   } else {
     ntpPoslanNakonSpajanja = false;
+    postaviMQTTStatus(false);
     Serial.println("WIFI:DISCONNECTED");
   }
+}
+
+unsigned long dohvatiWiFiOdgoduNovogPokusaja() {
+  if (wifiBrojPokusajaZaredom <= 1) {
+    return WIFI_ODGODA_NAKON_PRVOG_MS;
+  }
+
+  if (wifiBrojPokusajaZaredom == 2) {
+    return WIFI_ODGODA_NAKON_DRUGOG_MS;
+  }
+
+  return WIFI_ODGODA_NAKON_TRECEG_MS;
 }
 
 void poveziNaWiFi() {
   unsigned long sada = millis();
 
-  // Ako je spojeno, resetiraj brojače i izađi
   if (WiFi.status() == WL_CONNECTED) {
     if (wifiPokusajUToku) {
       Serial.println();
@@ -142,7 +198,6 @@ void poveziNaWiFi() {
 
   prijaviPromjenuWiFiStatusa();
 
-  // Provjeri treba li započeti novi pokušaj
   if (!wifiPokusajUToku && sada >= wifiSljedeciPokusajDozvoljen) {
     WiFi.mode(WIFI_STA);
 
@@ -164,21 +219,18 @@ void poveziNaWiFi() {
     wifiBrojPokusajaZaredom++;
   }
 
-  // Tijekom pokušaja, povremeno provjeri timeout kako bi loop() ostao živ
   if (wifiPokusajUToku && (sada - wifiPokusajPocetak >= WIFI_POKUSAJ_TIMEOUT_MS)) {
     Serial.println();
-    Serial.println("WIFI: Timeout pokušaja, odspajam i čekam prije novog pokušaja");
+    Serial.println("WIFI: Timeout pokusaja, odspajam i cekam prije novog pokusaja");
     WiFi.disconnect();
     wifiPokusajUToku = false;
     prijaviPromjenuWiFiStatusa();
 
-    // Nakon nekoliko uzastopnih pokušaja napravi dulju pauzu
-    if (wifiBrojPokusajaZaredom >= WIFI_MAX_POKUSAJA_PRIJE_ODGODE) {
-      wifiSljedeciPokusajDozvoljen = sada + WIFI_ODGODA_POKUSAJA_MS;
-      wifiBrojPokusajaZaredom = 0;
-    } else {
-      wifiSljedeciPokusajDozvoljen = sada + 500;
-    }
+    unsigned long odgoda = dohvatiWiFiOdgoduNovogPokusaja();
+    wifiSljedeciPokusajDozvoljen = sada + odgoda;
+    Serial.print("WIFI: Novi pokusaj za ");
+    Serial.print(odgoda / 1000UL);
+    Serial.println(" s");
   }
 }
 
@@ -215,7 +267,6 @@ void osvjeziNTPSat() {
   static unsigned long zadnjiLog = 0;
   unsigned long sada = millis();
 
-  // zovi update redovno
   bool promjena = ntpKlijent.update();
 
   if (promjena && ntpKlijent.isTimeSet()) {
@@ -223,10 +274,6 @@ void osvjeziNTPSat() {
       Serial.print("NTPLOG: Prvi put postavljeno vrijeme, epoch=");
       Serial.println(ntpKlijent.getEpochTime());
       ntpIkadPostavljen = true;
-    } else if (sada - zadnjiLog > 60000) { // svake minute malo loga
-      Serial.print("NTPLOG: osvjezeno, epoch=");
-      Serial.println(ntpKlijent.getEpochTime());
-      zadnjiLog = sada;
     }
   } else if (!ntpKlijent.isTimeSet() && (sada - zadnjiLog > 10000)) {
     Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
@@ -247,10 +294,10 @@ void posaljiNTPAkoTreba() {
     return;
   }
 
-  int satniKljuc = (lokalniTm.tm_year + 1900) * 1000000L +
-                   (lokalniTm.tm_mon + 1) * 10000L +
-                   lokalniTm.tm_mday * 100L +
-                   lokalniTm.tm_hour;
+  long satniKljuc = (lokalniTm.tm_year + 1900) * 1000000L +
+                    (lokalniTm.tm_mon + 1) * 10000L +
+                    lokalniTm.tm_mday * 100L +
+                    lokalniTm.tm_hour;
 
   if (!ntpPoslanNakonSpajanja) {
     posaljiNTPPremaMegai();
@@ -283,7 +330,298 @@ void posaljiNTPPremaMegai() {
   Serial.println(isoBuffer);
 
   Serial.print("NTP:");
-  Serial.println(isoBuffer);  // Mega očekuje lokalni ISO bez vremenske zone
+  Serial.println(isoBuffer);
+}
+
+void inicijalizirajMQTT() {
+  mqttKlijent.setCallback(mqttPorukaPrimljena);
+  mqttKlijent.setBufferSize(512);
+  postaviMQTTStatus(false);
+}
+
+void obradiMQTT() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (mqttKlijent.connected()) {
+      mqttKlijent.disconnect();
+    }
+    postaviMQTTStatus(false);
+    return;
+  }
+
+  mqttKlijent.loop();
+
+  bool stvarnoSpojen = mqttKlijent.connected();
+  if (stvarnoSpojen != mqttStatusPrijavljenKaoSpojen) {
+    postaviMQTTStatus(stvarnoSpojen);
+  }
+
+  if (!mqttKonfiguriran) {
+    return;
+  }
+
+  if (!mqttKlijent.connected()) {
+    pokusajMQTTSpajanja(false);
+  }
+}
+
+void mqttPorukaPrimljena(char *tema, byte *payload, unsigned int duljina) {
+  String temaString = ocistiJednolinijskiTekst(String(tema), MQTT_TOPIC_MAX - 1);
+  String payloadString = "";
+  payloadString.reserve(duljina);
+
+  for (unsigned int i = 0; i < duljina; ++i) {
+    char znak = static_cast<char>(payload[i]);
+    if (znak == '\r' || znak == '\n') {
+      payloadString += ' ';
+    } else {
+      payloadString += znak;
+    }
+  }
+
+  payloadString = ocistiJednolinijskiTekst(payloadString, MQTT_PAYLOAD_MAX - 1);
+
+  Serial.print("MQTT:MSG|");
+  Serial.print(temaString);
+  Serial.print("|");
+  Serial.println(payloadString);
+}
+
+void postaviMQTTStatus(bool spojeno) {
+  if (mqttStatusPrijavljenKaoSpojen == spojeno) {
+    return;
+  }
+
+  mqttStatusPrijavljenKaoSpojen = spojeno;
+  if (spojeno) {
+    Serial.println("MQTT:CONNECTED");
+  } else {
+    Serial.println("MQTT:DISCONNECTED");
+  }
+}
+
+void ispisiMQTTStatus() {
+  bool spojeno = mqttKlijent.connected();
+  mqttStatusPrijavljenKaoSpojen = spojeno;
+  Serial.println(spojeno ? "MQTT:CONNECTED" : "MQTT:DISCONNECTED");
+}
+
+bool pokusajMQTTSpajanja(bool odmah) {
+  if (!mqttKonfiguriran || WiFi.status() != WL_CONNECTED) {
+    postaviMQTTStatus(false);
+    return false;
+  }
+
+  unsigned long sada = millis();
+  if (!odmah && (sada - mqttZadnjiPokusajSpajanja < MQTT_POKUSAJ_INTERVAL_MS)) {
+    return false;
+  }
+  mqttZadnjiPokusajSpajanja = sada;
+
+  mqttKlijent.setServer(mqttBrokerAdresa, mqttBrokerPort);
+
+  String clientId = "toranj-esp-";
+  clientId += String(ESP.getChipId(), HEX);
+
+  bool spojeno = false;
+  if (strlen(mqttKorisnik) > 0) {
+    spojeno = mqttKlijent.connect(clientId.c_str(), mqttKorisnik, mqttLozinka);
+  } else {
+    spojeno = mqttKlijent.connect(clientId.c_str());
+  }
+
+  if (spojeno) {
+    Serial.print("MQTTLOG: Spojen na broker ");
+    Serial.print(mqttBrokerAdresa);
+    Serial.print(":");
+    Serial.println(mqttBrokerPort);
+    ponovnoPretplatiMQTTTeme();
+    postaviMQTTStatus(true);
+    return true;
+  }
+
+  Serial.print("MQTTLOG: Spajanje nije uspjelo, rc=");
+  Serial.println(mqttKlijent.state());
+  postaviMQTTStatus(false);
+  return false;
+}
+
+bool spremiMQTTPretplatu(const String &tema) {
+  if (tema.length() == 0 || tema.length() >= MQTT_TOPIC_MAX) {
+    Serial.println("MQTTLOG: tema za pretplatu je prazna ili preduga");
+    return false;
+  }
+
+  for (size_t i = 0; i < mqttBrojPretplata; ++i) {
+    if (tema.equals(mqttPretplate[i])) {
+      return true;
+    }
+  }
+
+  if (mqttBrojPretplata >= MQTT_MAX_PRETPLATA) {
+    Serial.println("MQTTLOG: dosegnut limit spremljenih pretplata");
+    return false;
+  }
+
+  tema.toCharArray(mqttPretplate[mqttBrojPretplata], MQTT_TOPIC_MAX);
+  mqttBrojPretplata++;
+  return true;
+}
+
+void ponovnoPretplatiMQTTTeme() {
+  for (size_t i = 0; i < mqttBrojPretplata; ++i) {
+    if (mqttPretplate[i][0] == '\0') {
+      continue;
+    }
+
+    bool uspjeh = mqttKlijent.subscribe(mqttPretplate[i]);
+    Serial.print("MQTTLOG: pretplata ");
+    Serial.print(mqttPretplate[i]);
+    Serial.println(uspjeh ? " OK" : " ERR");
+  }
+}
+
+bool parsirajMQTTConnectPayload(const String &payload, String &broker, uint16_t &port, String &korisnik, String &lozinka) {
+  int granica1 = payload.indexOf('|');
+  int granica2 = (granica1 >= 0) ? payload.indexOf('|', granica1 + 1) : -1;
+  int granica3 = (granica2 >= 0) ? payload.indexOf('|', granica2 + 1) : -1;
+  if (granica1 <= 0 || granica2 <= granica1 || granica3 <= granica2) {
+    return false;
+  }
+
+  broker = payload.substring(0, granica1);
+  String portString = payload.substring(granica1 + 1, granica2);
+  korisnik = payload.substring(granica2 + 1, granica3);
+  lozinka = payload.substring(granica3 + 1);
+  broker.trim();
+  portString.trim();
+  korisnik = ocistiJednolinijskiTekst(korisnik, MQTT_KORISNIK_MAX - 1);
+  lozinka = ocistiJednolinijskiTekst(lozinka, MQTT_LOZINKA_MAX - 1);
+
+  if (broker.length() == 0 || broker.length() >= MQTT_BROKER_MAX) {
+    return false;
+  }
+
+  long procitaniPort = portString.toInt();
+  if (procitaniPort <= 0 || procitaniPort > 65535) {
+    return false;
+  }
+  if (korisnik.length() >= MQTT_KORISNIK_MAX || lozinka.length() >= MQTT_LOZINKA_MAX) {
+    return false;
+  }
+
+  port = static_cast<uint16_t>(procitaniPort);
+  return true;
+}
+
+String ocistiJednolinijskiTekst(const String &ulaz, size_t maxDuljina) {
+  String izlaz = "";
+  size_t limit = ulaz.length();
+  if (limit > maxDuljina) {
+    limit = maxDuljina;
+  }
+
+  izlaz.reserve(limit);
+  for (size_t i = 0; i < limit; ++i) {
+    char znak = ulaz.charAt(i);
+    if (znak == '\r' || znak == '\n') {
+      izlaz += ' ';
+    } else {
+      izlaz += znak;
+    }
+  }
+  return izlaz;
+}
+
+void obradiMQTTSerijskuNaredbu(const String &linija) {
+  if (linija == "MQTT:STATUS") {
+    ispisiMQTTStatus();
+    return;
+  }
+
+  if (linija == "MQTT:DISCONNECT") {
+    if (mqttKlijent.connected()) {
+      mqttKlijent.disconnect();
+    }
+    postaviMQTTStatus(false);
+    return;
+  }
+
+  if (linija.startsWith("MQTT:CONNECT|")) {
+    String broker = "";
+    uint16_t port = MQTT_ZADANI_PORT;
+    String korisnik = "";
+    String lozinka = "";
+    if (!parsirajMQTTConnectPayload(linija.substring(13), broker, port, korisnik, lozinka)) {
+      Serial.println("MQTTLOG: neispravan CONNECT payload");
+      postaviMQTTStatus(false);
+      return;
+    }
+
+    broker.toCharArray(mqttBrokerAdresa, MQTT_BROKER_MAX);
+    mqttBrokerPort = port;
+    korisnik.toCharArray(mqttKorisnik, MQTT_KORISNIK_MAX);
+    lozinka.toCharArray(mqttLozinka, MQTT_LOZINKA_MAX);
+    mqttKonfiguriran = true;
+
+    if (mqttKlijent.connected()) {
+      mqttKlijent.disconnect();
+      postaviMQTTStatus(false);
+    }
+
+    pokusajMQTTSpajanja(true);
+    return;
+  }
+
+  if (linija.startsWith("MQTT:SUB|")) {
+    String tema = ocistiJednolinijskiTekst(linija.substring(9), MQTT_TOPIC_MAX - 1);
+    tema.trim();
+    if (!spremiMQTTPretplatu(tema)) {
+      Serial.println("MQTTLOG: spremanje pretplate nije uspjelo");
+      return;
+    }
+
+    if (mqttKlijent.connected()) {
+      bool uspjeh = mqttKlijent.subscribe(tema.c_str());
+      Serial.print("MQTTLOG: SUB ");
+      Serial.print(tema);
+      Serial.println(uspjeh ? " OK" : " ERR");
+    }
+    return;
+  }
+
+  if (linija.startsWith("MQTT:PUB|")) {
+    String payload = linija.substring(9);
+    int granica = payload.indexOf('|');
+    if (granica <= 0) {
+      Serial.println("MQTTLOG: neispravan PUB payload");
+      return;
+    }
+
+    String tema = ocistiJednolinijskiTekst(payload.substring(0, granica), MQTT_TOPIC_MAX - 1);
+    String poruka = ocistiJednolinijskiTekst(payload.substring(granica + 1), MQTT_PAYLOAD_MAX - 1);
+    tema.trim();
+
+    if (tema.length() == 0) {
+      Serial.println("MQTTLOG: prazna tema za publish");
+      return;
+    }
+
+    if (!mqttKlijent.connected()) {
+      if (!pokusajMQTTSpajanja(true)) {
+        Serial.println("MQTTLOG: publish preskocen jer broker nije spojen");
+        return;
+      }
+    }
+
+    bool uspjeh = mqttKlijent.publish(tema.c_str(), poruka.c_str());
+    Serial.print("MQTTLOG: PUB ");
+    Serial.print(tema);
+    Serial.println(uspjeh ? " OK" : " ERR");
+    return;
+  }
+
+  Serial.print("MQTTLOG: nepoznata MQTT naredba ");
+  Serial.println(linija);
 }
 
 void obradiSerijskiUlaz() {
@@ -315,12 +653,12 @@ void obradiSerijskiUlaz() {
           }
 
           if (granice[0] != -1) {
-            String noviSsid     = payload.substring(0, granice[0]);
-            String novaLozinka  = payload.substring(granice[0] + 1, granice[1]);
+            String noviSsid = payload.substring(0, granice[0]);
+            String novaLozinka = payload.substring(granice[0] + 1, granice[1]);
             String dhcpZastavica = payload.substring(granice[1] + 1, granice[2]);
-            String novaIp       = payload.substring(granice[2] + 1, granice[3]);
-            String novaMaska    = payload.substring(granice[3] + 1, granice[4]);
-            String noviGateway  = payload.substring(granice[4] + 1);
+            String novaIp = payload.substring(granice[2] + 1, granice[3]);
+            String novaMaska = payload.substring(granice[3] + 1, granice[4]);
+            String noviGateway = payload.substring(granice[4] + 1);
 
             if (noviSsid.length() > 0 && novaLozinka.length() > 0 && dhcpZastavica.length() > 0) {
               wifiSsid = noviSsid;
@@ -337,6 +675,10 @@ void obradiSerijskiUlaz() {
               Serial.println(koristiDhcp ? "DA" : "NE");
 
               WiFi.disconnect();
+              wifiPokusajUToku = false;
+              wifiPokusajPocetak = 0;
+              wifiSljedeciPokusajDozvoljen = 0;
+              wifiBrojPokusajaZaredom = 0;
               wifiIkadSpojen = false;
               ntpIkadPostavljen = false;
               ntpPoslanNakonSpajanja = false;
@@ -349,6 +691,10 @@ void obradiSerijskiUlaz() {
           }
 
           Serial.println(uspjeh ? "ACK:WIFI" : "ERR:WIFI");
+        } else if (prijemniBuffer.startsWith("NTPCFG:")) {
+          obradiNTPSerijskuNaredbu(prijemniBuffer);
+        } else if (prijemniBuffer.startsWith("MQTT:")) {
+          obradiMQTTSerijskuNaredbu(prijemniBuffer);
         }
       }
       prijemniBuffer = "";
@@ -370,13 +716,13 @@ bool jePrijestupnaGodina(int godina) {
 }
 
 int zadnjaNedjeljaUMjesecu(int godina, int mjesec) {
-  static const int daniUMjesecu[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+  static const int daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   int brojDana = daniUMjesecu[mjesec - 1];
   if (mjesec == 2 && jePrijestupnaGodina(godina)) {
     brojDana = 29;
   }
 
-  int pomakDoNedjelje = danUTjednu(godina, mjesec, brojDana);  // 0 = nedjelja
+  int pomakDoNedjelje = danUTjednu(godina, mjesec, brojDana);
   return brojDana - pomakDoNedjelje;
 }
 
@@ -430,12 +776,56 @@ time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch) {
   return utcEpoch + ukupniOffset;
 }
 
+String escapirajJsonString(const String &ulaz) {
+  String izlaz = "";
+  izlaz.reserve(ulaz.length() + 8);
+
+  for (size_t i = 0; i < ulaz.length(); ++i) {
+    char znak = ulaz.charAt(i);
+    if (znak == '\\' || znak == '"') {
+      izlaz += '\\';
+      izlaz += znak;
+    } else if (znak == '\r' || znak == '\n') {
+      izlaz += ' ';
+    } else {
+      izlaz += znak;
+    }
+  }
+
+  return izlaz;
+}
+
+void obradiNTPSerijskuNaredbu(const String &linija) {
+  String server = ocistiJednolinijskiTekst(linija.substring(7), sizeof(ntpPosluzitelj) - 1);
+  server.trim();
+
+  if (server.length() == 0) {
+    Serial.println("NTPLOG: prazan NTP server, zadrzavam postojeci");
+    Serial.println("ERR:NTPCFG");
+    return;
+  }
+
+  server.toCharArray(ntpPosluzitelj, sizeof(ntpPosluzitelj));
+  ntpKlijent.setPoolServerName(ntpPosluzitelj);
+  ntpIkadPostavljen = false;
+  ntpPoslanNakonSpajanja = false;
+  zadnjiPoslaniNtpSatniKljuc = -1;
+
+  Serial.print("NTPLOG: postavljen novi NTP server ");
+  Serial.println(ntpPosluzitelj);
+  Serial.println("ACK:NTPCFG");
+}
+
 void konfigurirajWebPosluzitelj() {
   Serial.println("WEB: Registriram /status rutu");
   webPosluzitelj.on("/status", []() {
-    String tijelo = "{\"wifi\":\"" + WiFi.SSID() + "\"," +
-                    "\"ip\":\"" + WiFi.localIP().toString() + "\"," +
-                    "\"zadnji_odgovor\":\"" + zadnjiOdgovorMega + "\"}";
+    String tijelo = "{\"wifi\":\"" + escapirajJsonString(WiFi.SSID()) + "\",";
+    tijelo += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    tijelo += "\"mqtt\":\"";
+    tijelo += (mqttKlijent.connected() ? "connected" : "disconnected");
+    tijelo += "\",";
+    tijelo += "\"ntp_server\":\"" + escapirajJsonString(String(ntpPosluzitelj)) + "\",";
+    tijelo += "\"zadnji_odgovor\":\"" + escapirajJsonString(zadnjiOdgovorMega) + "\"}";
     webPosluzitelj.send(200, "application/json", tijelo);
   });
 
@@ -451,7 +841,7 @@ void konfigurirajWebPosluzitelj() {
     Serial.println(naredba);
 
     if (!jeNaredbaDozvoljena(naredba)) {
-      Serial.println("WEB CMD: Naredba nije dozvoljena");
+      Serial.println("WEB CMD: naredba nije dozvoljena");
       webPosluzitelj.send(422, "text/plain", "Nepoznata naredba za toranjski sat");
       return;
     }
@@ -466,14 +856,14 @@ void konfigurirajWebPosluzitelj() {
   });
 
   webPosluzitelj.begin();
-  Serial.println("WEB: Posluzitelj pokrenut na portu 80");
+  Serial.println("WEB: posluzitelj pokrenut na portu 80");
 }
 
 void saljiNaredbuMegai(const String &naredba) {
   Serial.print("SLANJE CMD: ");
   Serial.println(naredba);
   Serial.print("CMD:");
-  Serial.println(naredba);  // Mega obrađuje CMD: linije
+  Serial.println(naredba);
 }
 
 bool jeNaredbaDozvoljena(const String &naredba) {

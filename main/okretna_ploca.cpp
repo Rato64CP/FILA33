@@ -30,22 +30,70 @@ uint32_t pocetakFazeTick = 0;
 int offsetMinuta = 14;
 int zadnjiSlotUlaza = -1;
 
-static const uint8_t BROJ_ULAZA_PLOCE = 5;
+static const uint8_t BROJ_ULAZA_PLOCE = 10;
+static const uint8_t BROJ_ZVONA_MAX = 4;
 static const uint8_t PIN_ULAZA_PLOCE[BROJ_ULAZA_PLOCE] = {
   PIN_ULAZA_PLOCE_1,
   PIN_ULAZA_PLOCE_2,
   PIN_ULAZA_PLOCE_3,
   PIN_ULAZA_PLOCE_4,
-  PIN_ULAZA_PLOCE_5
+  PIN_ULAZA_PLOCE_5,
+  PIN_ULAZA_PLOCE_6,
+  PIN_ULAZA_PLOCE_7,
+  PIN_ULAZA_PLOCE_8,
+  PIN_ULAZA_PLOCE_9,
+  PIN_ULAZA_PLOCE_10
 };
 
-bool autoZvonoAktivno[2] = {false, false};
-unsigned long autoZvonoKraj[2] = {0, 0};
-bool autoSlavljenjeZakazano = false;
-unsigned long autoSlavljenjeStart = 0;
-unsigned long autoSlavljenjeTrajanje = 0;
-bool autoSlavljenjeAktivno = false;
-unsigned long autoSlavljenjeKraj = 0;
+enum PosebniAutomatskiNacin {
+  POSEBNI_NACIN_NONE = 0,
+  POSEBNI_NACIN_SLAVLJENJE = 1,
+  POSEBNI_NACIN_MRTVACKO = 2
+};
+
+bool autoZvonoAktivno[BROJ_ZVONA_MAX] = {false, false, false, false};
+bool autoZvonoZakazano[BROJ_ZVONA_MAX] = {false, false, false, false};
+unsigned long autoZvonoStart[BROJ_ZVONA_MAX] = {0, 0, 0, 0};
+unsigned long autoZvonoKraj[BROJ_ZVONA_MAX] = {0, 0, 0, 0};
+PosebniAutomatskiNacin autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
+unsigned long autoPosebniStart = 0;
+unsigned long autoPosebniTrajanje = 0;
+PosebniAutomatskiNacin autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
+unsigned long autoPosebniKraj = 0;
+
+void resetirajAutomatskiPosebniNacin() {
+  autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
+  autoPosebniStart = 0;
+  autoPosebniTrajanje = 0;
+  autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
+  autoPosebniKraj = 0;
+}
+
+bool jePosebniNacinAktivan(PosebniAutomatskiNacin nacin) {
+  if (nacin == POSEBNI_NACIN_SLAVLJENJE) {
+    return jeSlavljenjeUTijeku();
+  }
+  if (nacin == POSEBNI_NACIN_MRTVACKO) {
+    return jeMrtvackoUTijeku();
+  }
+  return false;
+}
+
+void pokreniPosebniNacin(PosebniAutomatskiNacin nacin) {
+  if (nacin == POSEBNI_NACIN_SLAVLJENJE) {
+    zapocniSlavljenje();
+  } else if (nacin == POSEBNI_NACIN_MRTVACKO) {
+    zapocniMrtvacko();
+  }
+}
+
+void zaustaviPosebniNacin(PosebniAutomatskiNacin nacin) {
+  if (nacin == POSEBNI_NACIN_SLAVLJENJE) {
+    zaustaviSlavljenje();
+  } else if (nacin == POSEBNI_NACIN_MRTVACKO) {
+    zaustaviMrtvacko();
+  }
+}
 
 int izracunajCiljnuPoziciju(const DateTime& now) {
   if (!jePlocaKonfigurirana()) {
@@ -133,35 +181,102 @@ bool vrijemeProslo(unsigned long sada, unsigned long cilj) {
 }
 
 void azurirajAutomatskaZvonjenja(unsigned long sadaMs) {
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    if (autoZvonoZakazano[i] && vrijemeProslo(sadaMs, autoZvonoStart[i])) {
+      aktivirajZvonjenjeNaTrajanje(i + 1, autoZvonoKraj[i] - autoZvonoStart[i]);
+      if (jeZvonoAktivno(i + 1)) {
+        autoZvonoAktivno[i] = true;
+        autoZvonoZakazano[i] = false;
+      }
+    }
+
     if (autoZvonoAktivno[i] && vrijemeProslo(sadaMs, autoZvonoKraj[i])) {
       deaktivirajZvonjenje(i + 1);
       autoZvonoAktivno[i] = false;
     }
   }
 
-  if (autoSlavljenjeAktivno && !jeSlavljenjeUTijeku()) {
-    autoSlavljenjeAktivno = false;
+  if (autoPosebniAktivniNacin != POSEBNI_NACIN_NONE &&
+      !jePosebniNacinAktivan(autoPosebniAktivniNacin)) {
+    autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
   }
-  if (autoSlavljenjeZakazano && vrijemeProslo(sadaMs, autoSlavljenjeStart)) {
-    autoSlavljenjeZakazano = false;
-    if (!jeSlavljenjeUTijeku()) {
-      zapocniSlavljenje();
-      autoSlavljenjeAktivno = true;
-      autoSlavljenjeKraj = sadaMs + autoSlavljenjeTrajanje;
+
+  if (autoPosebniZakazaniNacin != POSEBNI_NACIN_NONE &&
+      vrijemeProslo(sadaMs, autoPosebniStart)) {
+    pokreniPosebniNacin(autoPosebniZakazaniNacin);
+    if (jePosebniNacinAktivan(autoPosebniZakazaniNacin)) {
+      autoPosebniAktivniNacin = autoPosebniZakazaniNacin;
+      autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
+      autoPosebniKraj = sadaMs + autoPosebniTrajanje;
     }
   }
-  if (autoSlavljenjeAktivno && vrijemeProslo(sadaMs, autoSlavljenjeKraj)) {
-    zaustaviSlavljenje();
-    autoSlavljenjeAktivno = false;
+
+  if (autoPosebniAktivniNacin != POSEBNI_NACIN_NONE &&
+      vrijemeProslo(sadaMs, autoPosebniKraj)) {
+    zaustaviPosebniNacin(autoPosebniAktivniNacin);
+    if (!jePosebniNacinAktivan(autoPosebniAktivniNacin)) {
+      autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
+    } else {
+      // Ako poseban nacin nije stao zbog neke blokade, pokusaj ponovno kasnije.
+      autoPosebniKraj = sadaMs + 1000UL;
+    }
   }
 }
 
-void pokreniAutomatskoZvonjenje(int index, unsigned long sadaMs, unsigned long trajanjeMs) {
-  if (index < 0 || index > 1) return;
-  if (!autoZvonoAktivno[index]) aktivirajZvonjenje(index + 1);
-  autoZvonoAktivno[index] = true;
-  autoZvonoKraj[index] = sadaMs + trajanjeMs;
+void zakaziPosebniNacin(PosebniAutomatskiNacin nacin, unsigned long startMs, unsigned long trajanjeMs) {
+  if (nacin == POSEBNI_NACIN_NONE) {
+    return;
+  }
+
+  autoPosebniZakazaniNacin = nacin;
+  autoPosebniStart = startMs;
+  autoPosebniTrajanje = trajanjeMs;
+}
+
+unsigned long dohvatiKrajNajduljegAktivnogZvona(unsigned long pocetnaVrijednost) {
+  unsigned long kraj = pocetnaVrijednost;
+  for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    if ((autoZvonoAktivno[i] || autoZvonoZakazano[i]) && autoZvonoKraj[i] > kraj) {
+      kraj = autoZvonoKraj[i];
+    }
+  }
+  return kraj;
+}
+
+uint8_t dohvatiOznakuCavlaIzPolja(bool ulazi[BROJ_ULAZA_PLOCE], uint8_t brojMjestaZaCavle, uint8_t cavao) {
+  if (cavao < 1 || cavao > brojMjestaZaCavle) {
+    return 0;
+  }
+  return ulazi[cavao - 1] ? cavao : 0;
+}
+
+bool jeKonfliktPosebnihNacina(bool slavljenjeAktivno, bool mrtvackoAktivno) {
+  return slavljenjeAktivno && mrtvackoAktivno;
+}
+
+void pokreniAutomatskoZvonjenje(int index,
+                                unsigned long startMs,
+                                unsigned long trajanjeMs,
+                                bool odgodiPocetak) {
+  if (index < 0 || index >= BROJ_ZVONA_MAX) return;
+  autoZvonoStart[index] = startMs;
+  autoZvonoKraj[index] = startMs + trajanjeMs;
+
+  if (odgodiPocetak) {
+    autoZvonoZakazano[index] = true;
+    autoZvonoAktivno[index] = false;
+  } else {
+    aktivirajZvonjenjeNaTrajanje(index + 1, trajanjeMs);
+    if (jeZvonoAktivno(index + 1)) {
+      autoZvonoAktivno[index] = true;
+      autoZvonoZakazano[index] = false;
+    } else {
+      autoZvonoAktivno[index] = false;
+      autoZvonoZakazano[index] = false;
+      autoZvonoStart[index] = 0;
+      autoZvonoKraj[index] = 0;
+    }
+  }
 }
 
 void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
@@ -170,36 +285,93 @@ void obradiUlazePloce(const DateTime& now, unsigned long sadaMs) {
     ulazi[i] = (digitalRead(PIN_ULAZA_PLOCE[i]) == LOW);
   }
 
-  bool jeNedjelja = (now.dayOfTheWeek() == 0);
-  bool zvono1 = jeNedjelja ? ulazi[2] : ulazi[0];
-  bool zvono2 = jeNedjelja ? ulazi[3] : ulazi[1];
-  bool slavljenje = ulazi[4];
+  const bool jeNedjelja = (now.dayOfTheWeek() == 0);
+  const uint8_t brojMjestaZaCavle = dohvatiBrojMjestaZaCavle();
+  const uint8_t brojZvona = dohvatiBrojZvona();
+  const uint8_t cavaoSlavljenja = dohvatiCavaoSlavljenja();
+  const uint8_t cavaoMrtvackog = dohvatiCavaoMrtvackog();
 
-  unsigned long trajanjeZvona = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs()
-                                           : dohvatiTrajanjeZvonjenjaRadniMs();
-  if (trajanjeZvona == 0) trajanjeZvona = jeNedjelja ? 180000UL : 120000UL;
-  unsigned long trajanjeSlavljenja = dohvatiTrajanjeSlavljenjaMs();
-  if (trajanjeSlavljenja == 0) trajanjeSlavljenja = 120000UL;
+  String log = F("Cavli ploce:");
+  for (uint8_t i = 0; i < brojMjestaZaCavle; ++i) {
+    log += ' ';
+    log += (i + 1);
+    log += '=';
+    log += ulazi[i] ? F("ON") : F("OFF");
+  }
+  log += jeNedjelja ? F(" | nedjelja") : F(" | pon-sub");
+  posaljiPCLog(log);
+
+  const unsigned long trajanjeZvona = jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs()
+                                                 : dohvatiTrajanjeZvonjenjaRadniMs();
+  const unsigned long trajanjeSlavljenja = dohvatiTrajanjeSlavljenjaMs();
+  const bool slavljenjePrije = jeSlavljenjePrijeZvonjenja();
+  const bool slavljenjeAktivno = dohvatiOznakuCavlaIzPolja(ulazi, brojMjestaZaCavle, cavaoSlavljenja) != 0;
+  const bool mrtvackoAktivno = dohvatiOznakuCavlaIzPolja(ulazi, brojMjestaZaCavle, cavaoMrtvackog) != 0;
+
+  if (jeKonfliktPosebnihNacina(slavljenjeAktivno, mrtvackoAktivno)) {
+    posaljiPCLog(F("Cavli: istodobno aktivni slavljenje i mrtvacko - prednost ima slavljenje"));
+  }
 
   bool imaZvono = false;
-  if (zvono1) { pokreniAutomatskoZvonjenje(0, sadaMs, trajanjeZvona); imaZvono = true; }
-  if (zvono2) { pokreniAutomatskoZvonjenje(1, sadaMs, trajanjeZvona); imaZvono = true; }
-
-  if (slavljenje) {
-    if (!imaZvono) {
-      zapocniSlavljenje();
-      autoSlavljenjeAktivno = true;
-      autoSlavljenjeKraj = sadaMs + trajanjeSlavljenja;
-      autoSlavljenjeZakazano = false;
-    } else {
-      autoSlavljenjeZakazano = true;
-      autoSlavljenjeTrajanje = trajanjeSlavljenja;
-      unsigned long start = sadaMs + trajanjeZvona;
-      for (int i = 0; i < 2; ++i) {
-        if (autoZvonoAktivno[i] && autoZvonoKraj[i] > start) start = autoZvonoKraj[i];
-      }
-      autoSlavljenjeStart = start;
+  for (uint8_t zvono = 1; zvono <= brojZvona && zvono <= BROJ_ZVONA_MAX; ++zvono) {
+    const uint8_t cavao = jeNedjelja ? dohvatiCavaoNedjeljaZaZvono(zvono)
+                                     : dohvatiCavaoRadniZaZvono(zvono);
+    if (dohvatiOznakuCavlaIzPolja(ulazi, brojMjestaZaCavle, cavao) == 0) {
+      continue;
     }
+
+    pokreniAutomatskoZvonjenje(zvono - 1,
+                               slavljenjeAktivno && slavljenjePrije ? (sadaMs + trajanjeSlavljenja) : sadaMs,
+                               trajanjeZvona,
+                               slavljenjeAktivno && slavljenjePrije);
+    if (autoZvonoAktivno[zvono - 1] || autoZvonoZakazano[zvono - 1]) {
+      imaZvono = true;
+      String bellLog = F("Cavli: aktiviran BELL");
+      bellLog += zvono;
+      bellLog += F(" preko cavla ");
+      bellLog += cavao;
+      posaljiPCLog(bellLog);
+    }
+  }
+
+  const PosebniAutomatskiNacin trazeniPosebniNacin = slavljenjeAktivno
+      ? POSEBNI_NACIN_SLAVLJENJE
+      : (mrtvackoAktivno ? POSEBNI_NACIN_MRTVACKO : POSEBNI_NACIN_NONE);
+
+  if (trazeniPosebniNacin == POSEBNI_NACIN_NONE) {
+    if (autoPosebniAktivniNacin == POSEBNI_NACIN_NONE) {
+      resetirajAutomatskiPosebniNacin();
+    }
+    return;
+  }
+
+  const unsigned long trajanjePosebnog =
+      (trazeniPosebniNacin == POSEBNI_NACIN_SLAVLJENJE) ? trajanjeSlavljenja : trajanjeZvona;
+
+  if (!imaZvono || (trazeniPosebniNacin == POSEBNI_NACIN_SLAVLJENJE && slavljenjePrije)) {
+    pokreniPosebniNacin(trazeniPosebniNacin);
+    if (jePosebniNacinAktivan(trazeniPosebniNacin)) {
+      autoPosebniAktivniNacin = trazeniPosebniNacin;
+      autoPosebniKraj = sadaMs + trajanjePosebnog;
+      autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
+    }
+
+    if (trazeniPosebniNacin == POSEBNI_NACIN_SLAVLJENJE) {
+      posaljiPCLog(slavljenjePrije
+          ? F("Cavli: cavao slavljenja pokrece SLAVLJENJE PRIJE zvona")
+          : F("Cavli: cavao slavljenja odmah pokrece SLAVLJENJE"));
+    } else {
+      posaljiPCLog(F("Cavli: cavao mrtvackog odmah pokrece MRTVACKO"));
+    }
+    return;
+  }
+
+  const unsigned long startPosebnog = dohvatiKrajNajduljegAktivnogZvona(sadaMs + trajanjeZvona);
+  zakaziPosebniNacin(trazeniPosebniNacin, startPosebnog, trajanjePosebnog);
+  if (trazeniPosebniNacin == POSEBNI_NACIN_SLAVLJENJE) {
+    posaljiPCLog(F("Cavli: slavljenje zakazano nakon zavrsetka zvona"));
+  } else {
+    posaljiPCLog(F("Cavli: mrtvacko zakazano nakon zavrsetka zvona"));
   }
 }
 
@@ -226,6 +398,13 @@ void inicijalizirajPlocu() {
   zadnjiObradeniRtcTick = 0;
   pocetakFazeTick = 0;
   zadnjiSlotUlaza = -1;
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    autoZvonoAktivno[i] = false;
+    autoZvonoZakazano[i] = false;
+    autoZvonoStart[i] = 0;
+    autoZvonoKraj[i] = 0;
+  }
+  resetirajAutomatskiPosebniNacin();
   UnifiedMotionStateStore::logirajStanje(stanje);
   posaljiPCLog(F("Ploca: inicijalizirana kroz jedinstveni model stanja"));
 }
@@ -274,11 +453,6 @@ int dohvatiPozicijuPloce() {
 
 int dohvatiOffsetMinuta() {
   return offsetMinuta;
-}
-
-void kompenzirajPlocu(bool) {
-  zadnjaProvjeraMs = 0;
-  zadnjiObradeniRtcTick = 0;
 }
 
 bool jePlocaUSinkronu() {

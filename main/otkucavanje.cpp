@@ -1,8 +1,6 @@
-// otkucavanje.cpp – REFACTORED: Hammer Striking System WITH Celebration/Funeral
+// otkucavanje.cpp - REFACTORED: Hammer Striking System WITH Celebration/Funeral
 // Mechanical hammer striking (via relay impulses) with celebration and funeral modes
 // CELEBRATION and FUNERAL modes are ONLY in this file (NOT in zvonjenje.cpp)
-//
-
 
 #include <Arduino.h>
 #include <RTClib.h>
@@ -13,44 +11,43 @@
 #include "postavke.h"
 #include "lcd_display.h"
 #include "pc_serial.h"
+#include "debouncing.h"
 
 // ==================== HAMMER TIMING CONSTANTS ====================
 
-// Hammer pulse timing (relay impulse control)
-const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;  // 150ms hammer strike
-const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;       // 400ms between strikes
-const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;          // 2s između satnih udaraca
+const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;
+const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;
+const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;  // 2 s izmedu satnih udaraca
 
-// Slavljenje: točan uzorak 1-2-2 s definiranim pauzama
+// Slavljenje mod 1: tocan uzorak 1-2-2 s definiranim pauzama
 const unsigned long SLAVLJENJE_TRAJANJE_UDARCA_MS = 150UL;
 const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS = 300UL;
 const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS = 150UL;
 
-// Mrtvačko: oba čekića 150ms, zatim 10s pauza
+// Slavljenje mod 2: neprekinuti slijed 1-2-1-2 s istim impulsima i pauzama
+const unsigned long SLAVLJENJE_PAUZA_MOD2_MS = 150UL;
+
+// Mrtvacko: oba cekica 150 ms, zatim 10 s pauza
 const unsigned long MRTVACKO_TRAJANJE_UDARCA_MS = 150UL;
 const unsigned long MRTVACKO_PAUZA_MS = 10000UL;
-
-// Button debouncing: 30ms window for noise immunity
-const unsigned long DEBOUNCE_BUTTON_MS = 30UL;
 
 // ==================== STATE MACHINE CONSTANTS ====================
 
 enum VrstaOtkucavanja {
-  OTKUCAVANJE_NONE = 0,          // No striking
-  OTKUCAVANJE_SATI = 1,          // Hour striking sequence
-  OTKUCAVANJE_POLA = 2           // Half-hour single strike
+  OTKUCAVANJE_NONE = 0,
+  OTKUCAVANJE_SATI = 1,
+  OTKUCAVANJE_POLA = 2
 };
 
 // ==================== STATE VARIABLES ====================
 
-// Current striking operation state
 static struct {
-  VrstaOtkucavanja vrsta;             // Type of current operation
-  int preostali_udarci;               // Remaining strikes to perform
-  unsigned long vrijeme_pocetka_ms;   // When operation started
-  bool cekic_aktivan;                 // Is hammer currently energized
-  int aktivni_pin;                    // Which hammer pin is being used
-  unsigned long vrijeme_zadnje_aktivacije; // When hammer was last toggled
+  VrstaOtkucavanja vrsta;
+  int preostali_udarci;
+  unsigned long vrijeme_pocetka_ms;
+  bool cekic_aktivan;
+  int aktivni_pin;
+  unsigned long vrijeme_zadnje_aktivacije;
 } otkucavanje = {
   OTKUCAVANJE_NONE,
   0,
@@ -60,29 +57,31 @@ static struct {
   0
 };
 
-// Stanje slavljenja: beskonačni slijed 1,2,2 dok je način rada aktivan
+// Stanje slavljenja: beskonacni slijed 1,2,2 dok je nacin rada aktivan
 static struct {
-  bool slavljenje_aktivno;            // Is celebration mode running
-  unsigned long vrijeme_pocetka_ms;   // When celebration started
-  int trenutni_korak;                 // 0=Č1, 1=Č2, 2=Č2
-  unsigned long vrijeme_koraka_ms;    // Vrijeme početka trenutne faze
-  bool cekic_aktivan;                 // Je li čekić trenutno uključen
-  int aktivni_pin;                    // Trenutno aktivni čekić (ako je uključen)
+  bool slavljenje_aktivno;
+  unsigned long vrijeme_pocetka_ms;
+  int trenutni_korak;
+  uint8_t aktivni_mod;
+  unsigned long vrijeme_koraka_ms;
+  bool cekic_aktivan;
+  int aktivni_pin;
 } slavljenje = {
   false,
   0,
   0,
+  1,
   0,
   false,
   -1
 };
 
-// Stanje mrtvačkog: oba čekića zajedno pa duga pauza
+// Stanje mrtvackog: oba cekica zajedno pa duga pauza
 static struct {
-  bool mrtvacko_aktivno;              // Is funeral mode running
-  unsigned long vrijeme_pocetka_ms;   // When funeral mode started
-  bool cekici_aktivni;                // Jesu li oba čekića trenutno uključena
-  unsigned long vrijeme_faze_ms;      // Vrijeme početka trenutačne faze
+  bool mrtvacko_aktivno;
+  unsigned long vrijeme_pocetka_ms;
+  bool cekici_aktivni;
+  unsigned long vrijeme_faze_ms;
 } mrtvacko = {
   false,
   0,
@@ -90,63 +89,61 @@ static struct {
   0
 };
 
-// User settings and global state
-static bool blokada_otkucavanja = false;        // Can be set by user to disable all striking
-static DateTime zadnje_izmjereno_vrijeme;       // Track minute boundaries
-
-// Button state tracking with debouncing
-static struct {
-  // Celebration button (PIN 43)
-  bool prethodno_stanje_slavljenja;           // Previous state of celebration button
-  unsigned long vrijeme_promjene_slavljenja;  // When state change started
-  bool debounce_u_tijeku_slavljenja;          // Is debouncing in progress
-  
-  // Funeral button (PIN 42)
-  bool prethodno_stanje_mrtvackog;            // Previous state of funeral button
-  unsigned long vrijeme_promjene_mrtvackog;   // When state change started
-  bool debounce_u_tijeku_mrtvackog;           // Is debouncing in progress
-} dugmad = {
-  true, 0, false,  // Celebration button: init HIGH (unpressed)
-  true, 0, false   // Funeral button: init HIGH (unpressed)
-};
+static bool blokada_otkucavanja = false;
+static DateTime zadnje_izmjereno_vrijeme;
 
 // ==================== HELPER FUNCTIONS ====================
 
-// Activate hammer relay (energize for strike impulse)
 static void aktivirajCekic_Internal(int pin) {
   if (pin == PIN_CEKIC_MUSKI || pin == PIN_CEKIC_ZENSKI) {
     digitalWrite(pin, HIGH);
   }
 }
 
-// Deactivate hammer relay
 static void deaktivirajCekic_Internal(int pin) {
   if (pin == PIN_CEKIC_MUSKI || pin == PIN_CEKIC_ZENSKI) {
     digitalWrite(pin, LOW);
   }
 }
 
-// Sigurnosno gašenje oba čekića
+// Sigurnosno gasenje oba cekica
 static void deaktivirajObaCekica_Internal() {
   deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
   deaktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
 }
 
-// Check if operation can proceed (not blocked by bell inertia)
+static int dohvatiPinSlavljenjaZaKorak(uint8_t mod, int korak) {
+  if (mod == 2) {
+    return (korak % 2 == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
+  }
+
+  return (korak == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
+}
+
+static int dohvatiBrojKorakaSlavljenja(uint8_t mod) {
+  return (mod == 2) ? 4 : 3;
+}
+
+static unsigned long dohvatiPauzuSlavljenjaNakonKoraka(uint8_t mod, int korak) {
+  if (mod == 2) {
+    return SLAVLJENJE_PAUZA_MOD2_MS;
+  }
+
+  return (korak == 0) ? SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS : SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS;
+}
+
 static bool jeOperacijaDozvoljena() {
   if (blokada_otkucavanja) {
-    return false;  // User-set block
+    return false;
   }
-  
-  // Block if bell inertia is active (bell is ringing or recently rang)
+
   if (jeLiInerciaAktivna()) {
     return false;
   }
-  
+
   return true;
 }
 
-// Clear all striking state
 static void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHelper* razlog = nullptr) {
   if (otkucavanje.aktivni_pin >= 0) {
     deaktivirajCekic_Internal(otkucavanje.aktivni_pin);
@@ -157,7 +154,7 @@ static void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHel
   otkucavanje.aktivni_pin = -1;
   otkucavanje.vrijeme_pocetka_ms = 0;
   otkucavanje.vrijeme_zadnje_aktivacije = 0;
-  
+
   String log = jeOtkazivanje
       ? String(F("Otkucavanje: operacija otkazana"))
       : String(F("Otkucavanje: sekvenca dovrsena"));
@@ -169,19 +166,17 @@ static void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHel
   posaljiPCLog(log);
 }
 
-// Start next strike in sequence
 static void pokreniSljedeciUdarac() {
   if (otkucavanje.preostali_udarci <= 0) {
     ponistiAktivnoOtkucavanje(false, F("nema preostalih udaraca"));
     return;
   }
-  
-  // Activate hammer relay
+
   aktivirajCekic_Internal(otkucavanje.aktivni_pin);
   otkucavanje.cekic_aktivan = true;
   otkucavanje.vrijeme_zadnje_aktivacije = millis();
   otkucavanje.preostali_udarci--;
-  
+
   String log = F("Udarac: preostalo=");
   log += otkucavanje.preostali_udarci;
   posaljiPCLog(log);
@@ -189,94 +184,90 @@ static void pokreniSljedeciUdarac() {
 
 // ==================== NORMAL STRIKING SEQUENCE ====================
 
-// Strike hour: multiple rapid strikes (count of hours 1-12)
-// Used for automatic hourly striking and manual control
 void otkucajSate(int broj) {
   if (broj < 1 || broj > 12) {
-    return;  // Invalid hour count
+    return;
   }
-  
+
   if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-    return;  // Already striking
+    return;
   }
-  
+
   if (!jeOperacijaDozvoljena()) {
     posaljiPCLog(F("Otkucavanje: blokirano (inercija ili user blok)"));
     return;
   }
-  
-  // Start hour striking sequence
+
   otkucavanje.vrsta = OTKUCAVANJE_SATI;
   otkucavanje.preostali_udarci = broj;
-  otkucavanje.aktivni_pin = PIN_CEKIC_MUSKI;  // Male hammer for hourly
-  otkucavanje.vrijeme_pocetka_ms = 0;  // Will be set on first strike
+  otkucavanje.aktivni_pin = PIN_CEKIC_MUSKI;
+  otkucavanje.vrijeme_pocetka_ms = 0;
   otkucavanje.cekic_aktivan = false;
-  
-  String log = F("Otkucavanje: početi sat sa ");
+
+  String log = F("Otkucavanje: poceti sat sa ");
   log += broj;
   log += F(" udaraca");
   posaljiPCLog(log);
   signalizirajHammer1_Active();
-  
+
   pokreniSljedeciUdarac();
 }
 
-// Strike half-hour: single strike
-// Used for automatic half-hourly striking
 void otkucajPolasata() {
   if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-    return;  // Already striking
+    return;
   }
-  
+
   if (!jeOperacijaDozvoljena()) {
     posaljiPCLog(F("Otkucavanje: blokirano (inercija ili user blok)"));
     return;
   }
-  
-  // Start half-hour single strike
+
   otkucavanje.vrsta = OTKUCAVANJE_POLA;
   otkucavanje.preostali_udarci = 1;
-  otkucavanje.aktivni_pin = PIN_CEKIC_ZENSKI;  // Female hammer for half-hourly
+  otkucavanje.aktivni_pin = PIN_CEKIC_ZENSKI;
   otkucavanje.vrijeme_pocetka_ms = 0;
   otkucavanje.cekic_aktivan = false;
-  
+
   posaljiPCLog(F("Otkucavanje: jedan udarac za pola sata"));
   signalizirajHammer2_Active();
-  
+
   pokreniSljedeciUdarac();
 }
 
 // ==================== CELEBRATION MODE ====================
 
-// Pokretanje slavljenja: slijed Č1, Č2, Č2 s točno definiranim pauzama
+// Pokretanje slavljenja: odabrani slijed iz postavki
 void zapocniSlavljenje() {
   unsigned long sadaMs = millis();
-  
-  // Don't start if bell inertia active or user blocked
+  const uint8_t modSlavljenja = dohvatiModSlavljenja();
+
   if (!jeOperacijaDozvoljena()) {
-    posaljiPCLog(F("Slavljenje: ne može se pokrenuti (inercija ili blok)"));
+    posaljiPCLog(F("Slavljenje: ne moze se pokrenuti (inercija ili blok)"));
     return;
   }
-  
-  // Check if mutual exclusion: funeral is active
+
   if (mrtvacko.mrtvacko_aktivno) {
-    posaljiPCLog(F("Slavljenje: odbijeno - mrtvačko je aktivno (mutual exclusion)"));
+    posaljiPCLog(F("Slavljenje: odbijeno - mrtvacko je aktivno (mutual exclusion)"));
     return;
   }
-  
+
   slavljenje.slavljenje_aktivno = true;
   slavljenje.vrijeme_pocetka_ms = sadaMs;
-  slavljenje.trenutni_korak = 0; // Korak A: ČEKIĆ 1
+  slavljenje.trenutni_korak = 0;
+  slavljenje.aktivni_mod = modSlavljenja;
   slavljenje.vrijeme_koraka_ms = sadaMs;
   slavljenje.cekic_aktivan = true;
-  slavljenje.aktivni_pin = PIN_CEKIC_MUSKI;
-  aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+  slavljenje.aktivni_pin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
+  aktivirajCekic_Internal(slavljenje.aktivni_pin);
 
-  posaljiPCLog(F("Slavljenje: pokrenuto (uzorak Č1-Č2-Č2)"));
+  String log = F("Slavljenje: pokrenuto (mod ");
+  log += modSlavljenja;
+  log += (modSlavljenja == 2) ? F(", uzorak C1-C2-C1-C2)") : F(", uzorak C1-C2-C2)");
+  posaljiPCLog(log);
   signalizirajCelebration_Mode();
 }
 
-// Stop celebration mode immediately
 void zaustaviSlavljenje() {
   if (slavljenje.slavljenje_aktivno) {
     slavljenje.slavljenje_aktivno = false;
@@ -287,21 +278,19 @@ void zaustaviSlavljenje() {
   }
 }
 
-// Check if celebration mode is currently active
 bool jeSlavljenjeUTijeku() {
   return slavljenje.slavljenje_aktivno;
 }
 
-// Ažuriranje slavljenja (neblokirajući automat stanja)
+// Azuriranje slavljenja (neblokirajuci automat stanja)
 static void azurirajSlavljenje(unsigned long sadaMs) {
   if (!slavljenje.slavljenje_aktivno) {
     return;
   }
 
   const unsigned long proteklo = sadaMs - slavljenje.vrijeme_koraka_ms;
-  const unsigned long trazena_pauza = (slavljenje.trenutni_korak == 0)
-      ? SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS
-      : SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS;
+  const unsigned long trazena_pauza =
+      dohvatiPauzuSlavljenjaNakonKoraka(slavljenje.aktivni_mod, slavljenje.trenutni_korak);
 
   if (slavljenje.cekic_aktivan) {
     if (proteklo >= SLAVLJENJE_TRAJANJE_UDARCA_MS) {
@@ -314,8 +303,10 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
   }
 
   if (proteklo >= trazena_pauza) {
-    slavljenje.trenutni_korak = (slavljenje.trenutni_korak + 1) % 3;
-    const int sljedeci_pin = (slavljenje.trenutni_korak == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
+    const int brojKoraka = dohvatiBrojKorakaSlavljenja(slavljenje.aktivni_mod);
+    slavljenje.trenutni_korak = (slavljenje.trenutni_korak + 1) % brojKoraka;
+    const int sljedeci_pin =
+        dohvatiPinSlavljenjaZaKorak(slavljenje.aktivni_mod, slavljenje.trenutni_korak);
     aktivirajCekic_Internal(sljedeci_pin);
     slavljenje.aktivni_pin = sljedeci_pin;
     slavljenje.cekic_aktivan = true;
@@ -325,22 +316,20 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
 
 // ==================== FUNERAL MODE ====================
 
-// Pokretanje mrtvačkog: oba čekića 150ms, zatim 10s pauza
+// Pokretanje mrtvackog: oba cekica 150 ms, zatim 10 s pauza
 void zapocniMrtvacko() {
   unsigned long sadaMs = millis();
-  
-  // Don't start if bell inertia active or user blocked
+
   if (!jeOperacijaDozvoljena()) {
-    posaljiPCLog(F("Mrtvačko: ne može se pokrenuti (inercija ili blok)"));
+    posaljiPCLog(F("Mrtvacko: ne moze se pokrenuti (inercija ili blok)"));
     return;
   }
-  
-  // Check if mutual exclusion: celebration is active
+
   if (slavljenje.slavljenje_aktivno) {
-    posaljiPCLog(F("Mrtvačko: odbijeno - slavljenje je aktivno (mutual exclusion)"));
+    posaljiPCLog(F("Mrtvacko: odbijeno - slavljenje je aktivno (mutual exclusion)"));
     return;
   }
-  
+
   mrtvacko.mrtvacko_aktivno = true;
   mrtvacko.vrijeme_pocetka_ms = sadaMs;
   mrtvacko.cekici_aktivni = true;
@@ -348,26 +337,24 @@ void zapocniMrtvacko() {
   aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
   aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
 
-  posaljiPCLog(F("Mrtvačko: pokrenuto (oba čekića 150ms / pauza 10s)"));
+  posaljiPCLog(F("Mrtvacko: pokrenuto (oba cekica 150ms / pauza 10s)"));
   signalizirajFuneral_Mode();
 }
 
-// Stop funeral mode immediately
 void zaustaviMrtvacko() {
   if (mrtvacko.mrtvacko_aktivno) {
     mrtvacko.mrtvacko_aktivno = false;
     deaktivirajObaCekica_Internal();
     mrtvacko.cekici_aktivni = false;
-    posaljiPCLog(F("Mrtvačko: zaustavljeno"));
+    posaljiPCLog(F("Mrtvacko: zaustavljeno"));
   }
 }
 
-// Check if funeral mode is currently active
 bool jeMrtvackoUTijeku() {
   return mrtvacko.mrtvacko_aktivno;
 }
 
-// Ažuriranje mrtvačkog (neblokirajući automat stanja)
+// Azuriranje mrtvackog (neblokirajuci automat stanja)
 static void azurirajMrtvacko(unsigned long sadaMs) {
   if (!mrtvacko.mrtvacko_aktivno) {
     return;
@@ -394,81 +381,37 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
 
 // ==================== BUTTON DEBOUNCING (PIN 43 & 42) ====================
 
-// Debounce tipke slavljenja (PIN 43) s razinom upravljanja:
-// dok je tipka spojena na GND slavljenje traje, a otpuštanje ga zaustavlja.
-static void provjeriDugmeSlavljenja(unsigned long sadaMs) {
-  bool trenutnoStanje = (digitalRead(PIN_KEY_CELEBRATION) == LOW);  // LOW = pressed
-  
-  // If state matches previous, no change
-  if (trenutnoStanje == dugmad.prethodno_stanje_slavljenja) {
-    if (dugmad.debounce_u_tijeku_slavljenja) {
-      dugmad.debounce_u_tijeku_slavljenja = false;
-    }
+// Dok je tipka slavljenja spojena na GND, slavljenje traje.
+static void provjeriDugmeSlavljenja() {
+  SwitchState novoStanje = SWITCH_RELEASED;
+  if (!obradiDebouncedInput(PIN_KEY_CELEBRATION, 30, &novoStanje)) {
     return;
   }
-  
-  // State changed - start debounce timer if not already debouncing
-  if (!dugmad.debounce_u_tijeku_slavljenja) {
-    dugmad.vrijeme_promjene_slavljenja = sadaMs;
-    dugmad.debounce_u_tijeku_slavljenja = true;
-    return;
-  }
-  
-  // Check if debounce time has elapsed
-  unsigned long vremeProslo = sadaMs - dugmad.vrijeme_promjene_slavljenja;
-  if (vremeProslo >= DEBOUNCE_BUTTON_MS) {
-    // Debounce complete - accept the state change
-    dugmad.prethodno_stanje_slavljenja = trenutnoStanje;
-    dugmad.debounce_u_tijeku_slavljenja = false;
-    
-    // Slavljenje prati stvarno stanje ulaza tipke toranjskog sata.
-    if (trenutnoStanje) {
-      if (!slavljenje.slavljenje_aktivno) {
-        zapocniSlavljenje();
-        posaljiPCLog(F("Dugme: slavljenje pokrenuto"));
-      }
-    } else if (slavljenje.slavljenje_aktivno) {
-      zaustaviSlavljenje();
-      posaljiPCLog(F("Dugme: slavljenje zaustavljeno"));
+
+  if (novoStanje == SWITCH_PRESSED) {
+    if (!slavljenje.slavljenje_aktivno) {
+      zapocniSlavljenje();
+      posaljiPCLog(F("Dugme: slavljenje pokrenuto"));
     }
+  } else if (slavljenje.slavljenje_aktivno) {
+    zaustaviSlavljenje();
+    posaljiPCLog(F("Dugme: slavljenje zaustavljeno"));
   }
 }
 
-// Debounce funeral button (PIN 42) with 30ms window
-static void provjeriDugmeMrtvackog(unsigned long sadaMs) {
-  bool trenutnoStanje = (digitalRead(PIN_KEY_FUNERAL) == LOW);  // LOW = pressed
-  
-  // If state matches previous, no change
-  if (trenutnoStanje == dugmad.prethodno_stanje_mrtvackog) {
-    if (dugmad.debounce_u_tijeku_mrtvackog) {
-      dugmad.debounce_u_tijeku_mrtvackog = false;
-    }
+static void provjeriDugmeMrtvackog() {
+  SwitchState novoStanje = SWITCH_RELEASED;
+  if (!obradiDebouncedInput(PIN_KEY_FUNERAL, 30, &novoStanje)) {
     return;
   }
-  
-  // State changed - start debounce timer if not already debouncing
-  if (!dugmad.debounce_u_tijeku_mrtvackog) {
-    dugmad.vrijeme_promjene_mrtvackog = sadaMs;
-    dugmad.debounce_u_tijeku_mrtvackog = true;
-    return;
-  }
-  
-  // Check if debounce time has elapsed
-  unsigned long vremeProslo = sadaMs - dugmad.vrijeme_promjene_mrtvackog;
-  if (vremeProslo >= DEBOUNCE_BUTTON_MS) {
-    // Debounce complete - accept the state change
-    dugmad.prethodno_stanje_mrtvackog = trenutnoStanje;
-    dugmad.debounce_u_tijeku_mrtvackog = false;
-    
-    // Execute action on button press (transition from HIGH to LOW)
-    if (trenutnoStanje) {
-      if (mrtvacko.mrtvacko_aktivno) {
-        zaustaviMrtvacko();
-        posaljiPCLog(F("Dugme: mrtvačko zaustavljeno"));
-      } else {
-        zapocniMrtvacko();
-        posaljiPCLog(F("Dugme: mrtvačko pokrenuto"));
-      }
+
+  if (novoStanje == SWITCH_PRESSED) {
+    if (mrtvacko.mrtvacko_aktivno) {
+      zaustaviMrtvacko();
+      posaljiPCLog(F("Dugme: mrtvacko zaustavljeno"));
+    } else {
+      zapocniMrtvacko();
+      posaljiPCLog(F("Dugme: mrtvacko pokrenuto"));
     }
   }
 }
@@ -476,17 +419,17 @@ static void provjeriDugmeMrtvackog(unsigned long sadaMs) {
 // ==================== NORMAL HOUR STRIKING MANAGEMENT ====================
 
 void inicijalizirajOtkucavanje() {
-  // Izlazi za čekiće
+  // Izlazi za cekice
   pinMode(PIN_CEKIC_MUSKI, OUTPUT);
   pinMode(PIN_CEKIC_ZENSKI, OUTPUT);
   digitalWrite(PIN_CEKIC_MUSKI, LOW);
   digitalWrite(PIN_CEKIC_ZENSKI, LOW);
 
-  // Ulazi za tipke (slavljenje / mrtvačko)
+  // Ulazi za tipke (slavljenje / mrtvacko)
   pinMode(PIN_KEY_CELEBRATION, INPUT_PULLUP);
   pinMode(PIN_KEY_FUNERAL, INPUT_PULLUP);
 
-  // Početno stanje modula
+  // Pocetno stanje modula
   otkucavanje.vrsta = OTKUCAVANJE_NONE;
   otkucavanje.preostali_udarci = 0;
   otkucavanje.vrijeme_pocetka_ms = 0;
@@ -497,6 +440,7 @@ void inicijalizirajOtkucavanje() {
   slavljenje.slavljenje_aktivno = false;
   slavljenje.vrijeme_pocetka_ms = 0;
   slavljenje.trenutni_korak = 0;
+  slavljenje.aktivni_mod = 1;
   slavljenje.vrijeme_koraka_ms = 0;
   slavljenje.cekic_aktivan = false;
   slavljenje.aktivni_pin = -1;
@@ -506,35 +450,23 @@ void inicijalizirajOtkucavanje() {
   mrtvacko.cekici_aktivni = false;
   mrtvacko.vrijeme_faze_ms = 0;
 
-  dugmad.prethodno_stanje_slavljenja = true;
-  dugmad.vrijeme_promjene_slavljenja = 0;
-  dugmad.debounce_u_tijeku_slavljenja = false;
-  dugmad.prethodno_stanje_mrtvackog = true;
-  dugmad.vrijeme_promjene_mrtvackog = 0;
-  dugmad.debounce_u_tijeku_mrtvackog = false;
-
   zadnje_izmjereno_vrijeme = dohvatiTrenutnoVrijeme();
   blokada_otkucavanja = false;
 
   posaljiPCLog(F("Otkucavanje: inicijalizirano"));
 }
 
-// Called from main loop to manage hour/half-hour striking sequences
 void upravljajOtkucavanjem() {
   unsigned long sadaMs = millis();
   DateTime sada = dohvatiTrenutnoVrijeme();
-  
-  // Check celebration/funeral buttons (PIN 43/42) with debouncing
-  provjeriDugmeSlavljenja(sadaMs);
-  provjeriDugmeMrtvackog(sadaMs);
-  
-  // Update celebration mode (if active)
+
+  provjeriDugmeSlavljenja();
+  provjeriDugmeMrtvackog();
+
   azurirajSlavljenje(sadaMs);
-  
-  // Update funeral mode (if active)
   azurirajMrtvacko(sadaMs);
-  
-  // Ako se pojavi inercija, odmah sigurno zaustavi sve aktivne načine rada čekića
+
+  // Ako se pojavi inercija, odmah zaustavi sve aktivne nacine rada cekica.
   if (jeLiInerciaAktivna()) {
     if (slavljenje.slavljenje_aktivno) {
       zaustaviSlavljenje();
@@ -546,22 +478,16 @@ void upravljajOtkucavanjem() {
       ponistiAktivnoOtkucavanje(true, F("aktivna inercija zvona"));
     }
   }
-  
-  // Manage normal striking sequences (hour/half-hour)
+
   if (otkucavanje.vrsta == OTKUCAVANJE_NONE) {
-    // Not currently striking - check for automatic hour/half-hour striking
-    
-    // Track minute change
     static int zadnja_minuta = -1;
     if (sada.minute() != zadnja_minuta) {
       zadnja_minuta = sada.minute();
-      
-      // Provjera automatskog otkucavanja na puni sat (00) i pola sata (30)
+
       if (sada.minute() == 0 && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        // Puni sat: broj udaraca u 12-satnom formatu
         int broj = sada.hour() % 12;
-        if (broj == 0) broj = 12;  // 12-satni format
-        
+        if (broj == 0) broj = 12;
+
         bool tihiSatiAktivni = jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour());
         if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) && !tihiSatiAktivni) {
           otkucajSate(broj);
@@ -569,7 +495,6 @@ void upravljajOtkucavanjem() {
           posaljiPCLog(F("Satno otkucavanje preskoceno: tihi sati"));
         }
       } else if (sada.minute() == 30 && !jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        // Pola sata: jedan udarac, također blokiran tijekom tihih sati
         bool tihiSatiAktivni = jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour());
         if (jeDozvoljenoOtkucavanjeUSatu(sada.hour()) && !tihiSatiAktivni) {
           otkucajPolasata();
@@ -578,54 +503,42 @@ void upravljajOtkucavanjem() {
         }
       }
     }
-    
-    return;  // No active striking
+
+    return;
   }
-  
-  // Manage ongoing striking operation
+
   if (!jeOperacijaDozvoljena() && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
     ponistiAktivnoOtkucavanje(true, F("blokada ili inercija tijekom sekvence"));
     return;
   }
-  
-  // Get timing configuration from settings
+
   unsigned long trajanje_impulsa = dohvatiTrajanjeImpulsaCekica();
   unsigned long pauza_mezi = dohvatiPauzuIzmeduUdaraca();
 
-  // Za puni sat sekvenca mora biti fiksna: 150 ms impuls + 2 s pauza.
   if (otkucavanje.vrsta == OTKUCAVANJE_SATI) {
     trajanje_impulsa = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
     pauza_mezi = SATNO_OTKUCAJ_PAUZA_MS;
   }
-  
+
   if (trajanje_impulsa == 0) trajanje_impulsa = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   if (pauza_mezi == 0) pauza_mezi = PAUZA_MEZI_UDARACA_DEFAULT;
-  
-  // Manage hammer pulse timing
+
   if (otkucavanje.cekic_aktivan) {
-    // Hammer is currently energized
     unsigned long proteklo = sadaMs - otkucavanje.vrijeme_zadnje_aktivacije;
-    
-    // Deactivate after impulse duration
     if (proteklo >= trajanje_impulsa) {
       deaktivirajCekic_Internal(otkucavanje.aktivni_pin);
       otkucavanje.cekic_aktivan = false;
       otkucavanje.vrijeme_zadnje_aktivacije = sadaMs;
     }
   } else {
-    // Hammer is inactive - wait for pause then start next strike
     if (otkucavanje.vrijeme_zadnje_aktivacije == 0) {
-      // First strike - go immediately
       pokreniSljedeciUdarac();
     } else {
       unsigned long proteklo = sadaMs - otkucavanje.vrijeme_zadnje_aktivacije;
-      
-      // Wait for pause between strikes
       if (proteklo >= pauza_mezi) {
         if (otkucavanje.preostali_udarci > 0) {
           pokreniSljedeciUdarac();
         } else {
-          // Sequence complete
           ponistiAktivnoOtkucavanje(false, F("odradjeni svi udarci"));
         }
       }
@@ -635,18 +548,16 @@ void upravljajOtkucavanjem() {
 
 // ==================== USER BLOCKING CONTROL ====================
 
-// Allow user to block all hammer striking (e.g., during bell movement or night hours)
 void postaviBlokaduOtkucavanja(bool blokiraj) {
   if (blokada_otkucavanja == blokiraj) {
-    return;  // No change
+    return;
   }
-  
+
   blokada_otkucavanja = blokiraj;
-  
+
   if (blokada_otkucavanja) {
-    posaljiPCLog(F("Blokada otkucavanja: UKLJUČENA"));
-    
-    // Stop any active striking
+    posaljiPCLog(F("Blokada otkucavanja: UKLJUCENA"));
+
     if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
       ponistiAktivnoOtkucavanje(true, F("korisnicka blokada otkucavanja"));
     }
@@ -657,6 +568,6 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
       zaustaviMrtvacko();
     }
   } else {
-    posaljiPCLog(F("Blokada otkucavanja: ISKLJUČENA"));
+    posaljiPCLog(F("Blokada otkucavanja: ISKLJUCENA"));
   }
 }
