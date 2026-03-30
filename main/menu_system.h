@@ -1,23 +1,29 @@
-// menu_system.h – Comprehensive 6-key LCD menu system with state management
+// menu_system.h - LCD izbornik toranjskog sata
 #pragma once
 
 #include <stdint.h>
 
 typedef enum {
-  MENU_STATE_DISPLAY_TIME,        // Main clock display
-  MENU_STATE_MAIN_MENU,           // Main menu (5 options)
-  MENU_STATE_SETTINGS,            // Settings submenu
-  MENU_STATE_HAND_CORRECTION,     // Hand correction mode
-  MENU_STATE_TIME_ADJUST,         // Manual time adjustment
-  MENU_STATE_QUIET_HOURS,         // Podešavanje tihih sati satnih otkucaja
-  MENU_STATE_NAIL_SETTINGS,       // Postavke cavala okretne ploce
-  MENU_STATE_MODE_SELECT,         // Operation mode selection
-  MENU_STATE_WIFI_CONFIG,         // WiFi configuration
-  MENU_STATE_MQTT_CONFIG,         // MQTT configuration
-  MENU_STATE_SYNC_CONFIG,         // NTP i DCF sinkronizacija
-  MENU_STATE_INFO_DISPLAY,        // System information display
-  MENU_STATE_CONFIRMATION,        // Confirmation dialog
-  MENU_STATE_PASSWORD_ENTRY       // Password entry for admin functions
+  MENU_STATE_DISPLAY_TIME,        // Glavni prikaz toranjskog sata
+  MENU_STATE_MAIN_MENU,           // Glavni meni
+  MENU_STATE_SETTINGS,            // Postavke
+  MENU_STATE_CLOCK_SETTINGS,      // Maticni sat
+  MENU_STATE_DCF_CONFIG,          // DCF postavke
+  MENU_STATE_NTP_CONFIG,          // NTP postavke
+  MENU_STATE_HAND_SETTINGS,       // Kazaljke
+  MENU_STATE_PLATE_SETTINGS,      // Okretna ploca
+  MENU_STATE_PLATE_ADJUST,        // Namjestanje okretne ploce
+  MENU_STATE_NETWORK_SETTINGS,    // Mreza
+  MENU_STATE_SYSTEM_SETTINGS,     // Sustav
+  MENU_STATE_HAND_CORRECTION,     // Rucno namjestanje kazaljki
+  MENU_STATE_TIME_ADJUST,         // Rucno namjestanje maticnog sata
+  MENU_STATE_WIFI_CONFIG,         // WiFi konfiguracija
+  MENU_STATE_INFO_DISPLAY,        // Informacije o toranjskom satu
+  MENU_STATE_CONFIRMATION,        // Potvrda akcije
+  MENU_STATE_QUIET_HOURS,         // Zadrzano radi kompatibilnosti
+  MENU_STATE_NAIL_SETTINGS,       // Zadrzano radi kompatibilnosti
+  MENU_STATE_MODE_SELECT,         // Zadrzano radi kompatibilnosti
+  MENU_STATE_SYNC_CONFIG          // Zadrzano radi kompatibilnosti
 } MenuState;
 
 typedef enum {
@@ -30,20 +36,9 @@ typedef enum {
   KEY_NONE
 } KeyEvent;
 
-// Menu system initialization
 void inicijalizirajMenuSistem();
-
-// Main menu loop – call from loop()
 void upravljajMenuSistemom();
-
-// Process key input (called after debouncing)
 void obradiKluc(KeyEvent event);
-
-// Get current menu state
 MenuState dohvatiMenuState();
-
-// Force return to main clock display
 void povratakNaGlavniPrikaz();
-
-// Update LCD display based on current menu state
 void osvjeziLCDZaMeni();

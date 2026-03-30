@@ -103,11 +103,13 @@ struct PostavkeSpremnik {
   char mqttLozinka[33];
   char ntpServer[40];
   bool dcfOmogucen;
+  bool wifiOmogucen;
+  bool imaKazaljke;
   uint16_t checksum;
 };
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
-constexpr uint8_t POSTAVKE_VERZIJA = 8;
+constexpr uint8_t POSTAVKE_VERZIJA = 10;
 
 constexpr int BAZA_POSTAVKE =
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);
@@ -169,10 +171,19 @@ constexpr int BAZA_DST_STATUS =
 constexpr int SLOTOVI_DST_STATUS = 4;
 constexpr int SLOT_SIZE_DST_STATUS = sizeof(DSTStatus);
 
+// ==================== EEPROM DIJAGNOSTIKA ====================
+// Zasebna adresa za provjeru zdravlja 24C32 EEPROM-a toranjskog sata.
+// Namjerno je odvojena od recovery i wear-leveling slotova kako health-check
+// ne bi mogao prepisati stanje kazaljki, ploce ili backup nakon restarta.
+
+constexpr int BAZA_EEPROM_DIJAGNOSTIKA =
+  BAZA_DST_STATUS + (SLOTOVI_DST_STATUS * SLOT_SIZE_DST_STATUS);
+constexpr int VELICINA_EEPROM_DIJAGNOSTIKA = sizeof(uint32_t);
+
 // ==================== VALIDATION MACROS ====================
 
 static_assert(
-  (BAZA_DST_STATUS + SLOTOVI_DST_STATUS * SLOT_SIZE_DST_STATUS) <= 4096,
+  (BAZA_EEPROM_DIJAGNOSTIKA + VELICINA_EEPROM_DIJAGNOSTIKA) <= 4096,
   "EEPROM layout exceeds 24C32 capacity (4096 bytes)"
 );
 

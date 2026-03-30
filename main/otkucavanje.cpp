@@ -610,3 +610,7 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
     posaljiPCLog(F("Blokada otkucavanja: ISKLJUCENA"));
   }
 }
+
+bool jeOtkucavanjeUTijeku() {
+  return otkucavanje.vrsta != OTKUCAVANJE_NONE;
+}

@@ -14,6 +14,7 @@
 #include "postavke.h"
 #include "mqtt_handler.h"
 #include "lcd_display.h"
+#include "dcf_sync.h"
 
 // Always use Serial3 (for Mega 2560 tower clock)
 static HardwareSerial& espSerijskiPort = Serial3;
@@ -25,6 +26,144 @@ static char ulazniBuffer[ESP_ULAZNI_BUFFER_MAX + 1];
 static size_t ulazniBufferDuljina = 0;
 static bool mqttBrokerNijeKonfiguriranPrijavljen = false;
 static bool ntpCekanjePrijavljeno = false;
+static bool wifiPovezanNaESP = false;
+
+void posaljiESPKomandu(const char* komanda);
+void posaljiESPKomandu(const String& komanda);
+
+static bool parsirajWebMQTTPayload(const char* payload,
+                                   bool& omogucen,
+                                   String& broker,
+                                   uint16_t& port,
+                                   String& korisnik,
+                                   String& lozinka) {
+  if (payload == nullptr) {
+    return false;
+  }
+
+  String tekst = String(payload);
+  const int g1 = tekst.indexOf('|');
+  const int g2 = (g1 >= 0) ? tekst.indexOf('|', g1 + 1) : -1;
+  const int g3 = (g2 >= 0) ? tekst.indexOf('|', g2 + 1) : -1;
+  const int g4 = (g3 >= 0) ? tekst.indexOf('|', g3 + 1) : -1;
+  if (g1 <= 0 || g2 <= g1 || g3 <= g2 || g4 <= g3) {
+    return false;
+  }
+
+  const String omogucenTekst = tekst.substring(0, g1);
+  broker = tekst.substring(g1 + 1, g2);
+  const String portTekst = tekst.substring(g2 + 1, g3);
+  korisnik = tekst.substring(g3 + 1, g4);
+  lozinka = tekst.substring(g4 + 1);
+
+  broker.trim();
+  korisnik.trim();
+  lozinka.trim();
+
+  if (!(omogucenTekst == "0" || omogucenTekst == "1")) {
+    return false;
+  }
+  omogucen = (omogucenTekst == "1");
+
+  if (broker.length() == 0 || broker.length() >= 40) {
+    return false;
+  }
+  if (korisnik.length() >= 33 || lozinka.length() >= 33) {
+    return false;
+  }
+
+  const long procitaniPort = portTekst.toInt();
+  if (procitaniPort <= 0 || procitaniPort > 65535) {
+    return false;
+  }
+  port = static_cast<uint16_t>(procitaniPort);
+  return true;
+}
+
+static void primijeniWebMQTTKonfiguraciju(const char* payload) {
+  bool omogucen = false;
+  uint16_t port = 1883;
+  String broker = "";
+  String korisnik = "";
+  String lozinka = "";
+
+  if (!parsirajWebMQTTPayload(payload, omogucen, broker, port, korisnik, lozinka)) {
+    espSerijskiPort.println(F("ERR:WEBMQTT"));
+    posaljiPCLog(F("WEB MQTT: neispravan payload iz ESP-a"));
+    return;
+  }
+
+  if (lozinka.length() == 0) {
+    lozinka = String(dohvatiMQTTLozinku());
+  }
+
+  postaviMQTTOmogucen(omogucen);
+  postaviMQTTPodatke(broker.c_str(), port, korisnik.c_str(), lozinka.c_str());
+  posaljiMQTTPostavkeESP();
+
+  if (omogucen) {
+    char komanda[160];
+    snprintf(komanda,
+             sizeof(komanda),
+             "MQTT:CONNECT|%s|%u|%s|%s",
+             dohvatiMQTTBroker(),
+             dohvatiMQTTPort(),
+             dohvatiMQTTKorisnika(),
+             dohvatiMQTTLozinku());
+    posaljiESPKomandu(komanda);
+  } else {
+    posaljiESPKomandu("MQTT:DISCONNECT");
+  }
+
+  espSerijskiPort.println(F("ACK:WEBMQTT"));
+  char log[128];
+  snprintf(log,
+           sizeof(log),
+           "WEB MQTT: spremljeno %s @%s:%u korisnik=%s",
+           omogucen ? "ON" : "OFF",
+           dohvatiMQTTBroker(),
+           dohvatiMQTTPort(),
+           dohvatiMQTTKorisnika());
+  posaljiPCLog(log);
+}
+
+static void posaljiStatusESPU() {
+  const DateTime sada = dohvatiTrenutnoVrijeme();
+  char vrijemeIso[21];
+  snprintf(vrijemeIso,
+           sizeof(vrijemeIso),
+           "%04d-%02d-%02dT%02d:%02d:%02d",
+           sada.year(),
+           sada.month(),
+           sada.day(),
+           sada.hour(),
+           sada.minute(),
+           sada.second());
+
+  char statusLinija[256];
+  snprintf(statusLinija,
+           sizeof(statusLinija),
+           "STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|dcf=%d|dcfr=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d",
+           vrijemeIso,
+           dohvatiOznakuIzvoraVremena(),
+           jeVrijemePotvrdjenoZaAutomatiku() ? 1 : 0,
+           jeWiFiPovezanNaESP() ? 1 : 0,
+           jeMQTTPovezan() ? 1 : 0,
+           jeMQTTOmogucen() ? 1 : 0,
+           jeNTPOmogucen() ? 1 : 0,
+           jeDCFOmogucen() ? 1 : 0,
+           jeDCFSinkronizacijaUTijeku() ? 1 : 0,
+           suKazaljkeUSinkronu() ? 1 : 0,
+           dohvatiMemoriraneKazaljkeMinuta(),
+           jePlocaUSinkronu() ? 1 : 0,
+           dohvatiPozicijuPloce(),
+           jeSlavljenjeUTijeku() ? 1 : 0,
+           jeMrtvackoUTijeku() ? 1 : 0,
+           jeOtkucavanjeUTijeku() ? 1 : 0,
+           jeZvonoAktivno(1) ? 1 : 0,
+           jeZvonoAktivno(2) ? 1 : 0);
+  espSerijskiPort.println(statusLinija);
+}
 
 static void resetirajUlazniBuffer() {
   ulazniBuffer[0] = '\0';
@@ -66,6 +205,11 @@ static bool jeBucnaMQTTStatusnaLinija(const char* linija) {
 static bool jePrepoznataESPLinija(const char* linija) {
   return strcmp(linija, "WIFI:CONNECTED") == 0 ||
          strcmp(linija, "WIFI:DISCONNECTED") == 0 ||
+         strncmp(linija, "WIFI:", 5) == 0 ||
+         strcmp(linija, "CFGREQ") == 0 ||
+         strncmp(linija, "STATUS:", 7) == 0 ||
+         strcmp(linija, "STATUS?") == 0 ||
+         strncmp(linija, "WEBMQTT:", 8) == 0 ||
          strncmp(linija, "NTP:", 4) == 0 ||
          strncmp(linija, "CMD:", 4) == 0 ||
          strncmp(linija, "MQTTLOG:", 8) == 0 ||
@@ -114,13 +258,34 @@ static void obradiNTPLogLinijuESP(const char* linija) {
   logirajLinijuESP("ESP NTP: ", poruka);
 }
 
+static void obradiWiFiLogLinijuESP(const char* linija) {
+  const char* poruka = linija + 5;
+  while (*poruka == ' ') {
+    ++poruka;
+  }
+
+  logirajLinijuESP("ESP WiFi: ", poruka);
+}
+
+static void posaljiKonfiguracijuESPuNakonZahtjeva() {
+  posaljiWifiPostavkeESP();
+  posaljiWiFiStatusESP();
+  posaljiNTPPostavkeESP();
+  posaljiMQTTPostavkeESP();
+  posaljiPCLog(F("ESP zatrazio osvjezavanje konfiguracije"));
+}
+
 void inicijalizirajESP() {
   espSerijskiPort.begin(ESP_BRZINA);
   resetirajUlazniBuffer();
+  wifiPovezanNaESP = false;
+  postaviWiFiStatus(false);
   posaljiPCLog(F("ESP serijska veza inicijalizirana"));
   delay(50);
   posaljiWifiPostavkeESP();
+  posaljiWiFiStatusESP();
   posaljiNTPPostavkeESP();
+  posaljiMQTTPostavkeESP();
 }
 
 void posaljiWifiPostavkeESP() {
@@ -140,6 +305,14 @@ void posaljiWifiPostavkeESP() {
   posaljiPCLog(F("Poslane WiFi postavke ESP-u"));
 }
 
+void posaljiWiFiStatusESP() {
+  espSerijskiPort.print(F("WIFIEN:"));
+  espSerijskiPort.println(jeWiFiOmogucen() ? '1' : '0');
+  posaljiPCLog(jeWiFiOmogucen()
+                   ? F("Poslana naredba ESP-u: WiFi ukljucen")
+                   : F("Poslana naredba ESP-u: WiFi iskljucen"));
+}
+
 void posaljiNTPPostavkeESP() {
   espSerijskiPort.print(F("NTPCFG:"));
   espSerijskiPort.println(dohvatiNTPServer());
@@ -147,6 +320,24 @@ void posaljiNTPPostavkeESP() {
   char log[96];
   snprintf(log, sizeof(log), "Poslan NTP server ESP-u: %s", dohvatiNTPServer());
   posaljiPCLog(log);
+}
+
+void posaljiMQTTPostavkeESP() {
+  char komanda[128];
+  snprintf(komanda,
+           sizeof(komanda),
+           "MQTTCFG:%d|%s|%u|%s",
+           jeMQTTOmogucen() ? 1 : 0,
+           dohvatiMQTTBroker(),
+           dohvatiMQTTPort(),
+           dohvatiMQTTKorisnika());
+  espSerijskiPort.println(komanda);
+  posaljiPCLog(F("Poslane MQTT postavke ESP-u za web prikaz"));
+}
+
+void posaljiNTPZahtjevESP() {
+  espSerijskiPort.println(F("NTPREQ:SYNC"));
+  posaljiPCLog(F("Poslan zahtjev ESP-u za rucno NTP osvjezavanje toranjskog sata"));
 }
 
 void posaljiESPKomandu(const char* komanda) {
@@ -159,6 +350,10 @@ void posaljiESPKomandu(const char* komanda) {
 
 void posaljiESPKomandu(const String& komanda) {
   espSerijskiPort.println(komanda);
+}
+
+bool jeWiFiPovezanNaESP() {
+  return wifiPovezanNaESP;
 }
 
 static bool parsirajISOVrijeme(const char* iso, DateTime& dt) {
@@ -242,6 +437,7 @@ static void obradiESPRedak() {
   }
 
   if (strcmp(ulazniBuffer, "WIFI:CONNECTED") == 0) {
+    wifiPovezanNaESP = true;
     postaviWiFiStatus(true);
     posaljiPCLog(F("ESP WiFi status: spojeno"));
     resetirajUlazniBuffer();
@@ -249,8 +445,38 @@ static void obradiESPRedak() {
   }
 
   if (strcmp(ulazniBuffer, "WIFI:DISCONNECTED") == 0) {
+    wifiPovezanNaESP = false;
     postaviWiFiStatus(false);
     posaljiPCLog(F("ESP WiFi status: odspojeno"));
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "WIFI:", 5) == 0) {
+    obradiWiFiLogLinijuESP(ulazniBuffer);
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strcmp(ulazniBuffer, "CFGREQ") == 0) {
+    posaljiKonfiguracijuESPuNakonZahtjeva();
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strcmp(ulazniBuffer, "STATUS?") == 0) {
+    posaljiStatusESPU();
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "STATUS:", 7) == 0) {
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "WEBMQTT:", 8) == 0) {
+    primijeniWebMQTTKonfiguraciju(ulazniBuffer + 8);
     resetirajUlazniBuffer();
     return;
   }
@@ -266,18 +492,26 @@ static void obradiESPRedak() {
 
     DateTime ntpVrijeme;
     if (parsirajISOVrijeme(iso, ntpVrijeme)) {
-      azurirajVrijemeIzNTP(ntpVrijeme);
-      zatraziPoravnanjeTaktaKazaljki();
-      zatraziPoravnanjeTaktaPloce();
+      if (jeNTPOmogucen()) {
+        azurirajVrijemeIzNTP(ntpVrijeme);
+        zatraziPoravnanjeTaktaKazaljki();
+        zatraziPoravnanjeTaktaPloce();
+      }
       espSerijskiPort.println(F("ACK:NTP"));
-      logirajLinijuESP("Primljen NTP iz ESP-a: ", iso);
-
-      if (!suKazaljkeUSinkronu()) {
-        posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP"));
-        pokreniBudnoKorekciju();
-        posaljiPCLog(F("Pokrenuta dinamicka korekcija kazaljki nakon NTP sinkronizacije"));
+      if (jeNTPOmogucen()) {
+        logirajLinijuESP("Primljen NTP iz ESP-a: ", iso);
       } else {
-        posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
+        logirajLinijuESP("Preskocen NTP iz ESP-a jer je NTP iskljucen: ", iso);
+      }
+
+      if (jeNTPOmogucen() && imaKazaljkeSata()) {
+        if (!suKazaljkeUSinkronu()) {
+          posaljiPCLog(F("Kazaljke nisu u sinkronu nakon NTP"));
+          pokreniBudnoKorekciju();
+          posaljiPCLog(F("Pokrenuta dinamicka korekcija kazaljki nakon NTP sinkronizacije"));
+        } else {
+          posaljiPCLog(F("Kazaljke su vec u sinkronu s vremenom nakon NTP"));
+        }
       }
     }
 
@@ -293,16 +527,13 @@ static void obradiESPRedak() {
     else if (strcmp(komanda, "ZVONO1_OFF") == 0)      iskljuciZvono(1);
     else if (strcmp(komanda, "ZVONO2_ON") == 0)       ukljuciZvono(2);
     else if (strcmp(komanda, "ZVONO2_OFF") == 0)      iskljuciZvono(2);
-    else if (strcmp(komanda, "ZVONO3_ON") == 0)       ukljuciZvono(3);
-    else if (strcmp(komanda, "ZVONO3_OFF") == 0)      iskljuciZvono(3);
-    else if (strcmp(komanda, "ZVONO4_ON") == 0)       ukljuciZvono(4);
-    else if (strcmp(komanda, "ZVONO4_OFF") == 0)      iskljuciZvono(4);
     else if (strcmp(komanda, "OTKUCAVANJE_OFF") == 0) postaviBlokaduOtkucavanja(true);
     else if (strcmp(komanda, "OTKUCAVANJE_ON") == 0)  postaviBlokaduOtkucavanja(false);
     else if (strcmp(komanda, "SLAVLJENJE_ON") == 0)   zapocniSlavljenje();
     else if (strcmp(komanda, "SLAVLJENJE_OFF") == 0)  zaustaviSlavljenje();
     else if (strcmp(komanda, "MRTVACKO_ON") == 0)     zapocniMrtvacko();
     else if (strcmp(komanda, "MRTVACKO_OFF") == 0)    zaustaviMrtvacko();
+    else if (strcmp(komanda, "DCF_START") == 0)       pokreniRucniDCFPrijem();
     else uspjeh = false;
 
     if (uspjeh) {

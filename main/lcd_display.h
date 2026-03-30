@@ -21,3 +21,6 @@ void signalizirajFuneral_Mode();
 void signalizirajError_RTC();
 void signalizirajError_EEPROM();
 void signalizirajError_I2C();
+void signalizirajUpozorenjeRtcBaterije();
+void potvrdiUpozorenjeRtcBaterije();
+bool jeUpozorenjeRtcBaterijeAktivno();

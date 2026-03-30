@@ -48,6 +48,12 @@ void provjeriTipke() {
     bool promjena = obradiDebouncedInput(pin, 30, &novoStanje);
     
     if (promjena && novoStanje == SWITCH_PRESSED) {
+      if (event == KEY_SELECT && jeUpozorenjeRtcBaterijeAktivno()) {
+        potvrdiUpozorenjeRtcBaterije();
+        posaljiPCLog(F("RTC: upozorenje za bateriju potvrdjeno tipkom SELECT"));
+        return;
+      }
+
       // Key was pressed
       String log = F("Tipka: ");
       switch (event) {

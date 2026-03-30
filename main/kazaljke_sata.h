@@ -20,3 +20,5 @@ void obavijestiKazaljkeDSTPromjena(int pomakMinuta);
 void postaviRucnuPozicijuKazaljki(int satKazaljke, int minutaKazaljke);
 void pokreniBudnoKorekciju();
 void zatraziPoravnanjeTaktaKazaljki();
+void postaviRucnuBlokaduKazaljki(bool blokirano);
+bool jeRucnaBlokadaKazaljkiAktivna();

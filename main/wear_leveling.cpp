@@ -2,6 +2,7 @@
 
 #include "wear_leveling.h"
 
+#include "eeprom_konstante.h"
 #include "i2c_eeprom.h"
 #include "pc_serial.h"
 
@@ -56,8 +57,30 @@ bool zapisiMeta(int index, const MetaWearLeveling& meta) {
   return VanjskiEEPROM::zapisi(adresaMetaZapisa(index), &meta, sizeof(meta));
 }
 
-int pronadiMetaIndex(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
-  int prazanIndex = -1;
+bool jeMetaZaAktivniSegment(const MetaWearLeveling& meta) {
+  if (!jeMetaValjana(meta)) {
+    return false;
+  }
+
+  return
+    (meta.baznaAdresa == EepromLayout::BAZA_OFFSET_MINUTA &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_OFFSET_MINUTA &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_OFFSET_MINUTA) ||
+    (meta.baznaAdresa == EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_ZADNJA_SINKRONIZACIJA) ||
+    (meta.baznaAdresa == EepromLayout::BAZA_POSTAVKE &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_POSTAVKE &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_POSTAVKE) ||
+    (meta.baznaAdresa == EepromLayout::BAZA_UNIFIED_STANJE &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_UNIFIED_STANJE &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_UNIFIED_STANJE) ||
+    (meta.baznaAdresa == EepromLayout::BAZA_DST_STATUS &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_DST_STATUS &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_DST_STATUS);
+}
+
+int pronadiTocniMetaIndex(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
   for (int i = 0; i < BROJ_META_ZAPISA; ++i) {
     MetaWearLeveling meta{};
     if (!procitajMeta(i, meta)) {
@@ -69,9 +92,47 @@ int pronadiMetaIndex(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
         meta.velicinaSlota == velicinaSlota) {
       return i;
     }
+  }
+  return -1;
+}
+
+int pronadiMetaIndexZaPisanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
+  int prazanIndex = -1;
+  int kompatibilanIndex = -1;
+  int zastarjeliIndex = -1;
+  for (int i = 0; i < BROJ_META_ZAPISA; ++i) {
+    MetaWearLeveling meta{};
+    if (!procitajMeta(i, meta)) {
+      continue;
+    }
+    if (jeMetaValjana(meta) &&
+        meta.baznaAdresa == baznaAdresa &&
+        meta.brojSlotova == brojSlotova &&
+        meta.velicinaSlota == velicinaSlota) {
+      return i;
+    }
+    if (jeMetaValjana(meta) &&
+        meta.baznaAdresa == baznaAdresa &&
+        meta.brojSlotova == brojSlotova &&
+        kompatibilanIndex < 0) {
+      // Dopusti da nova verzija firmwarea za isti logicki segment
+      // preuzme postojeci meta zapis, npr. nakon promjene velicine
+      // strukture postavki toranjskog sata.
+      kompatibilanIndex = i;
+    }
     if (!jeMetaValjana(meta) && prazanIndex < 0) {
       prazanIndex = i;
+    } else if (jeMetaValjana(meta) && !jeMetaZaAktivniSegment(meta) && zastarjeliIndex < 0) {
+      // Ako je meta prostor pun starim rasporedima iz prijasnjih firmwarea,
+      // recikliraj prvi zapis koji vise ne pripada nijednom aktivnom segmentu.
+      zastarjeliIndex = i;
     }
+  }
+  if (kompatibilanIndex >= 0) {
+    return kompatibilanIndex;
+  }
+  if (zastarjeliIndex >= 0) {
+    return zastarjeliIndex;
   }
   return prazanIndex;
 }
@@ -110,7 +171,7 @@ bool napisiSlot(int adresa, const void* izvor, size_t duljina) {
 }
 
 int odrediSlotZaCitanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
-  const int metaIndex = pronadiMetaIndex(baznaAdresa, brojSlotova, velicinaSlota);
+  const int metaIndex = pronadiTocniMetaIndex(baznaAdresa, brojSlotova, velicinaSlota);
   if (metaIndex < 0) {
     return brojSlotova - 1;
   }
@@ -123,7 +184,7 @@ int odrediSlotZaCitanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota) 
 }
 
 int odrediSlotZaPisanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {
-  const int metaIndex = pronadiMetaIndex(baznaAdresa, brojSlotova, velicinaSlota);
+  const int metaIndex = pronadiMetaIndexZaPisanje(baznaAdresa, brojSlotova, velicinaSlota);
   if (metaIndex < 0) {
     return 0;
   }
@@ -136,7 +197,7 @@ int odrediSlotZaPisanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota) 
 }
 
 void zapamtiZadnjiSlot(int baznaAdresa, int brojSlotova, size_t velicinaSlota, uint8_t slot) {
-  const int metaIndex = pronadiMetaIndex(baznaAdresa, brojSlotova, velicinaSlota);
+  const int metaIndex = pronadiMetaIndexZaPisanje(baznaAdresa, brojSlotova, velicinaSlota);
   if (metaIndex < 0) {
     posaljiPCLog(F("WearLeveling: nema slobodnog meta zapisa za segment"));
     return;
@@ -149,6 +210,7 @@ void zapamtiZadnjiSlot(int baznaAdresa, int brojSlotova, size_t velicinaSlota, u
       postojeci.brojSlotova == brojSlotova) {
     MetaWearLeveling meta = postojeci;
     meta.zadnjiSlot = slot;
+    meta.velicinaSlota = static_cast<uint16_t>(velicinaSlota);
     meta.checksum = izracunajChecksumMeta(meta);
     zapisiMeta(metaIndex, meta);
     return;

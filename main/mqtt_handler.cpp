@@ -1,14 +1,12 @@
-// mqtt_handler.cpp – Home Assistant MQTT integration with 9 entities + vise servisa
+// mqtt_handler.cpp – Home Assistant MQTT integracija za toranjski sat
 // MQTT entities exposed to Home Assistant:
-// 1. clock_time (sensor) – Current clock time
-// 2. time_source (sensor) – RTC/NTP/DCF source
-// 3. last_sync (sensor) – Timestamp of last synchronization
-// 4. bell1_state (binary_sensor) – Bell 1 ringing status
-// 5. bell2_state (binary_sensor) – Bell 2 ringing status
-// 6. hammer1_state (binary_sensor) – Hammer 1 active status
-// 7. hammer2_state (binary_sensor) – Hammer 2 active status
-// 8. operation_mode (sensor) – Normal/Celebration/Funeral/Waiting
-// 9. silent_mode (binary_sensor) – Silent mode status
+// 1. clock_time (sensor) – trenutno vrijeme toranjskog sata
+// 2. time_source (sensor) – RTC/MAN/NTP/DCF/ERR izvor vremena
+// 3. last_sync (sensor) – vrijeme zadnje sinkronizacije
+// 4. bell1_state (binary_sensor) – stanje zvona 1
+// 5. bell2_state (binary_sensor) – stanje zvona 2
+// 6. operation_mode (sensor) – normalno/slavljenje/mrtvacko
+// 7. silent_mode (binary_sensor) – stanje tihog moda
 //
 // MQTT servisi za toranjski sat:
 // 1. ring_bell – genericko zvono 1 ili 2
@@ -56,13 +54,8 @@ static const unsigned long MQTT_RECONNECT_INTERVAL = 10000;  // 10 seconds
 // Entity states
 static bool bell1_active = false;
 static bool bell2_active = false;
-static bool bell3_active = false;
-static bool bell4_active = false;
-static bool hammer1_active = false;
-static bool hammer2_active = false;
 static bool silent_mode_active = false;
 static const char* current_mode = "normal";
-static unsigned long last_entity_update = 0;
 
 static bool jePayloadUkljucen(const String& poruka) {
   return poruka == "on" || poruka == "true" || poruka == "1" || poruka == "start";
@@ -101,7 +94,7 @@ static void objaviDiscoveryKonfiguraciju(const char* komponenta,
 
 // ==================== HOMEASSISTANT MQTT DISCOVERY ====================
 
-// Send Home Assistant MQTT discovery configuration for all 9 entities
+// Send Home Assistant MQTT discovery configuration for svih 7 entiteta
 void publishHADiscovery() {
   if (!mqtt_connected) {
     posaljiPCLog(F("MQTT: Not connected, skipping HA discovery"));
@@ -125,22 +118,6 @@ void publishHADiscovery() {
                                "toranj_bell2_state", "bell2/state",
                                "\"payload_on\":\"on\",\"payload_off\":\"off\","
                                "\"icon\":\"mdi:bell-outline\"");
-  objaviDiscoveryKonfiguraciju("binary_sensor", "bell3_state", "Bell 3",
-                               "toranj_bell3_state", "bell3/state",
-                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
-                               "\"icon\":\"mdi:bell-outline\"");
-  objaviDiscoveryKonfiguraciju("binary_sensor", "bell4_state", "Bell 4",
-                               "toranj_bell4_state", "bell4/state",
-                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
-                               "\"icon\":\"mdi:bell-outline\"");
-  objaviDiscoveryKonfiguraciju("binary_sensor", "hammer1_state", "Hammer 1 (Male)",
-                               "toranj_hammer1_state", "hammer1/state",
-                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
-                               "\"icon\":\"mdi:hammer\"");
-  objaviDiscoveryKonfiguraciju("binary_sensor", "hammer2_state", "Hammer 2 (Female)",
-                               "toranj_hammer2_state", "hammer2/state",
-                               "\"payload_on\":\"on\",\"payload_off\":\"off\","
-                               "\"icon\":\"mdi:hammer\"");
   objaviDiscoveryKonfiguraciju("sensor", "operation_mode", "Operation Mode",
                                "toranj_operation_mode", "mode",
                                "\"icon\":\"mdi:cog\"");
@@ -154,8 +131,6 @@ void publishHADiscovery() {
     BASE_TOPIC "/service/set_mode",
     BASE_TOPIC "/service/bell1",
     BASE_TOPIC "/service/bell2",
-    BASE_TOPIC "/service/bell3",
-    BASE_TOPIC "/service/bell4",
     BASE_TOPIC "/service/slavljenje",
     BASE_TOPIC "/service/mrtvacko",
     BASE_TOPIC "/service/hand_correction",
@@ -216,23 +191,7 @@ void objaviStatusMQTT() {
   bell2_active = jeZvonoAktivno(2);
   objaviStanjeNaTemu("bell2/state", bell2_active ? "on" : "off");
 
-  // Entity 6: Bell 3 state
-  bell3_active = jeZvonoAktivno(3);
-  objaviStanjeNaTemu("bell3/state", bell3_active ? "on" : "off");
-
-  // Entity 7: Bell 4 state
-  bell4_active = jeZvonoAktivno(4);
-  objaviStanjeNaTemu("bell4/state", bell4_active ? "on" : "off");
-
-  // Entity 8: Hammer 1 state
-  hammer1_active = jeZvonoUTijeku();  // Would need actual hammer tracking
-  objaviStanjeNaTemu("hammer1/state", hammer1_active ? "on" : "off");
-
-  // Entity 9: Hammer 2 state
-  hammer2_active = jeZvonoUTijeku();  // Would need actual hammer tracking
-  objaviStanjeNaTemu("hammer2/state", hammer2_active ? "on" : "off");
-
-  // Entity 10: Operation mode
+  // Entity 6: Operation mode
   if (jeSlavljenjeUTijeku()) {
     current_mode = "celebration";
   } else if (jeMrtvackoUTijeku()) {
@@ -242,7 +201,7 @@ void objaviStatusMQTT() {
   }
   objaviStanjeNaTemu("mode", current_mode);
 
-  // Entity 11: Silent mode
+  // Entity 7: Silent mode
   objaviStanjeNaTemu("silent/state", silent_mode_active ? "on" : "off");
 }
 
@@ -254,7 +213,7 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
   // Service 1: Ring bell
   if (tema.endsWith("/service/ring_bell")) {
     int bell = poruka.toInt();
-    if (bell >= 1 && bell <= 4) {
+    if (bell >= 1 && bell <= 2) {
       ukljuciZvono(bell);
       String log = F("MQTT: Ring Bell ");
       log += bell;
@@ -281,28 +240,6 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
     } else if (jePayloadIskljucen(poruka)) {
       iskljuciZvono(2);
       posaljiPCLog(F("MQTT: Bell2 OFF"));
-    }
-    return;
-  }
-
-  if (tema.endsWith("/service/bell3")) {
-    if (jePayloadUkljucen(poruka)) {
-      ukljuciZvono(3);
-      posaljiPCLog(F("MQTT: Bell3 ON"));
-    } else if (jePayloadIskljucen(poruka)) {
-      iskljuciZvono(3);
-      posaljiPCLog(F("MQTT: Bell3 OFF"));
-    }
-    return;
-  }
-
-  if (tema.endsWith("/service/bell4")) {
-    if (jePayloadUkljucen(poruka)) {
-      ukljuciZvono(4);
-      posaljiPCLog(F("MQTT: Bell4 ON"));
-    } else if (jePayloadIskljucen(poruka)) {
-      iskljuciZvono(4);
-      posaljiPCLog(F("MQTT: Bell4 OFF"));
     }
     return;
   }
@@ -347,6 +284,11 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
 
   // Service 3: Hand correction
   if (tema.endsWith("/service/hand_correction")) {
+    if (!imaKazaljkeSata()) {
+      posaljiPCLog(F("MQTT: korekcija kazaljki ignorirana - kazaljke nisu ugradjene"));
+      return;
+    }
+
     // Format: "HH:MM"
     int colon = poruka.indexOf(':');
     if (colon > 0) {
@@ -383,6 +325,10 @@ void obradiMQTTKomandu(const String& tema, const String& poruka) {
 
   // Service 6: Rapid correction
   if (tema.endsWith("/service/rapid_correction")) {
+    if (!imaKazaljkeSata()) {
+      posaljiPCLog(F("MQTT: brza korekcija ignorirana - kazaljke nisu ugradjene"));
+      return;
+    }
     pokreniBudnoKorekciju();
     posaljiPCLog(F("MQTT: Rapid hand correction initiated"));
     return;

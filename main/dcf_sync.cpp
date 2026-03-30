@@ -1,10 +1,6 @@
-// dcf_sync.cpp – DCF77 synchronization module (simplified, no external library)
-// Provides time synchronization from DCF77 signal during night hours (22:00-06:00)
-// Implements basic bit-pattern detection without external DCF77 library
-// Falls back to RTC if DCF signal is unavailable
-// CORRECTED: Include time_glob.h instead of vrijeme_izvor.h
-
+// dcf_sync.cpp - nocni DCF77 fallback za toranjski sat
 #include <Arduino.h>
+#include <string.h>
 #include "dcf_sync.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
@@ -12,270 +8,488 @@
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "postavke.h"
+#include "esp_serial.h"
 
-// ==================== DCF77 CONFIGURATION ====================
+namespace {
 
-// DCF77 receiver signal on PIN_DCF_SIGNAL (open-collector input)
-// Signal characteristics:
-// - 1-second pulse every second (100ms LOW = bit 0, 200ms LOW = bit 1)
-// - Minute mark: 2-second pause between minutes
-// - 59 bits per minute (0-58 are data, bit 59 is minute marker)
+static const uint8_t DCF_SAT_NOC_OD = 22;
+static const uint8_t DCF_SAT_NOC_DO = 6;
+static const unsigned long DCF_CEKANJE_WIFI_MS = 300000UL;
+static const unsigned long DCF_VRIJEME_STABILIZACIJE_MS = 60000UL;
+static const unsigned long DCF_MAX_TRAJANJE_POKUSAJA_PO_SATU_MS = 20UL * 60000UL;
+static const unsigned long DCF_MINUTA_MARKER_MS = 1500UL;
 
-// Night operation window for DCF sync (22:00 to 06:00)
-// DCF77 is more reliable at night with fewer RF disturbances
-static const uint8_t DCF_SAT_NOC_OD = 22;  // Night window starts at 22:00
-static const uint8_t DCF_SAT_NOC_DO = 6;   // Night window ends at 06:00
+static const unsigned long PULS_0_MIN_MS = 70UL;
+static const unsigned long PULS_0_MAX_MS = 140UL;
+static const unsigned long PULS_1_MIN_MS = 160UL;
+static const unsigned long PULS_1_MAX_MS = 260UL;
 
-// Check interval for DCF updates (once per minute)
-static const unsigned long DCF_INTERVAL_PROVJERE_MS = 60000;
+static bool dcfInicijaliziran = false;
+static bool dcfPrijemAktivan = false;
+static bool dcfUlazJeNizak = false;
+static uint8_t dcfBitovi[59] = {};
+static uint8_t dcfBrojBita = 0;
+static unsigned long dcfPocetakSesijeMs = 0;
+static unsigned long dcfKrajSesijeMs = 0;
+static unsigned long dcfPocetakPulsaMs = 0;
+static unsigned long dcfZadnjiKrajPulsaMs = 0;
+static uint32_t zadnjiSatniPokusajKljuc = 0;
+static uint32_t zadnjaUspjesnaNocDcfKljuc = 0;
+static uint32_t dcfVizualniBrojac = 0;
+static DateTime zadnjeDCF((uint32_t)0);
+static bool rucniDcfZahtjev = false;
+static bool rucniDcfAktivan = false;
 
-// Signal stabilization period: wait 60 seconds after night window starts
-// before attempting to read DCF77 (signal needs time to stabilize)
-static const unsigned long DCF_VRIJEME_STABILIZACIJE_MS = 60000;
+static void oznaciPromjenuDcfVizualizacije() {
+  dcfVizualniBrojac++;
+}
 
-// ==================== DCF77 BIT DETECTION ====================
-
-// Pulse width detection thresholds (milliseconds)
-// Bit encoding: 100ms pulse = bit 0, 200ms pulse = bit 1
-static const unsigned long PULS_0_MIN = 80;      // Minimum pulse for bit 0
-static const unsigned long PULS_0_MAX = 150;     // Maximum pulse for bit 0
-static const unsigned long PULS_1_MIN = 180;     // Minimum pulse for bit 1
-static const unsigned long PULS_1_MAX = 250;     // Maximum pulse for bit 1
-
-// ==================== STATE TRACKING ====================
-
-// Has DCF receiver been started?
-static bool dcfPokrenut = false;
-
-// Last successful time update from DCF77
-static DateTime zadnjeDCF = DateTime((uint32_t)0);
-
-// Timestamp of last DCF sync attempt
-static unsigned long zadnjaProvjeraMillis = 0;
-
-// When night window started (for stabilization timeout)
-static unsigned long vrijemePocetka = 0;
-
-// DCF bit buffer (59 bits per minute)
-static uint8_t dcfBitovi[59];
-static int dcfBrojBita = 0;
-static unsigned long dcfPosljednjaPulsaVrijeme = 0;
-static bool dcfSadaJeNiska = false;
-
-// ==================== HELPER FUNCTIONS ====================
-
-// Check if current time is within DCF77 operating window (22:00-06:00)
-// DCF77 signal is better at night with fewer RF disturbances
-static bool jeNocniDCFInterval() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  uint8_t sat = sada.hour();
-  
+static bool jeNocniDCFInterval(const DateTime& sada) {
+  const uint8_t sat = sada.hour();
   if (DCF_SAT_NOC_OD == DCF_SAT_NOC_DO) {
-    return false;  // Invalid configuration if boundaries are equal
+    return false;
   }
 
-  // Handle wrap-around at midnight (22:00 to 23:59, then 00:00 to 06:00)
   if (DCF_SAT_NOC_OD > DCF_SAT_NOC_DO) {
     return sat >= DCF_SAT_NOC_OD || sat < DCF_SAT_NOC_DO;
   }
 
-  // Normal range without wrap-around (unusual for DCF but supported)
   return sat >= DCF_SAT_NOC_OD && sat < DCF_SAT_NOC_DO;
 }
 
-// Check if DCF signal has stabilized since night window started
-// Returns true if enough time (60s) has passed since entering night window
-static bool dcfStabiliziran() {
-  return (millis() - vrijemePocetka) > DCF_VRIJEME_STABILIZACIJE_MS;
-}
-
-// Detect DCF bit from pulse duration
-// Returns: 0 for bit 0, 1 for bit 1, -1 for invalid pulse
-static int procitajDCFBit(unsigned long trajanjePulseMs) {
-  if (trajanjePulseMs >= PULS_0_MIN && trajanjePulseMs <= PULS_0_MAX) {
-    return 0;  // Bit 0 detected
-  } else if (trajanjePulseMs >= PULS_1_MIN && trajanjePulseMs <= PULS_1_MAX) {
-    return 1;  // Bit 1 detected
+static uint32_t izracunajKljucNocnogPokusaja(const DateTime& sada) {
+  DateTime referenca = sada;
+  if (sada.hour() < DCF_SAT_NOC_DO && sada.unixtime() >= 86400UL) {
+    referenca = DateTime(sada.unixtime() - 86400UL);
   }
-  return -1;  // Invalid pulse duration
+
+  return static_cast<uint32_t>(referenca.year()) * 10000UL +
+         static_cast<uint32_t>(referenca.month()) * 100UL +
+         static_cast<uint32_t>(referenca.day());
 }
 
-// Decode DCF77 time from 59-bit buffer
-// Returns DateTime object or DateTime(0) if decoding fails
-static DateTime dekodiraiDCFVrijeme() {
-  // DCF77 bit positions (0-indexed):
-  // 0: Not used
-  // 1: CEST/CET flag (0=CET, 1=CEST)
-  // 2: CEST transition flag
-  // 3: Leap second flag
-  // 4: Start of time data
-  // 5-10: Minutes (6 bits, BCD coded)
-  // 11: Minute parity
-  // 12-17: Hours (6 bits, BCD coded)
-  // 18-24: Day of month (6 bits, BCD coded)
-  // 25-28: Day of week (3 bits, 1=Monday)
-  // 29-34: Month (5 bits, BCD coded)
-  // 35-39: Year (8 bits, BCD coded, offset from 2000)
-  // 40-58: Parity bits
-  
-  // Simplified approach: extract minutes and hours only
-  // Full implementation would need parity checking and BCD decoding
-  
-  if (dcfBrojBita < 59) {
-    return DateTime((uint32_t)0);  // Incomplete buffer
+static uint32_t izracunajKljucSatnogPokusaja(const DateTime& sada, uint32_t nocniKljuc) {
+  return nocniKljuc * 100UL + static_cast<uint32_t>(sada.hour());
+}
+
+static unsigned long izracunajPreostaliProzorPokusajaMs(const DateTime& sada) {
+  const unsigned long protekloUSatuMs =
+      static_cast<unsigned long>(sada.minute()) * 60000UL +
+      static_cast<unsigned long>(sada.second()) * 1000UL;
+  if (protekloUSatuMs >= DCF_MAX_TRAJANJE_POKUSAJA_PO_SATU_MS) {
+    return 0;
   }
-  
-  // Extract minutes (bits 5-10, BCD coded)
-  // BCD: tens in bits 5-9, ones in bits 10
-  // This is simplified - full DCF77 has more complex encoding
-  
-  // For now, just signal that we received a complete frame
-  // Return current RTC time as fallback (DCF77 reception requires full implementation)
-  return dohvatiTrenutnoVrijeme();
+  return DCF_MAX_TRAJANJE_POKUSAJA_PO_SATU_MS - protekloUSatuMs;
 }
 
-// ==================== PUBLIC FUNCTIONS ====================
+static void ocistiDcfOkvir() {
+  memset(dcfBitovi, 0, sizeof(dcfBitovi));
+  dcfBrojBita = 0;
+}
 
-// Initialize DCF77 receiver module
-// Called during system startup to configure interrupt-based decoding
-void inicijalizirajDCF() {
+static void postaviDcfPrijemnikAktivan(bool aktivan) {
+  digitalWrite(PIN_DCF_AKTIVACIJA, aktivan ? LOW : HIGH);
+}
+
+static void resetirajDcfSesiju(bool ugasiPrijemnik) {
+  const bool bioAktivan = dcfPrijemAktivan;
+  ocistiDcfOkvir();
+  dcfPrijemAktivan = false;
+  dcfPocetakSesijeMs = 0;
+  dcfKrajSesijeMs = 0;
+  dcfPocetakPulsaMs = 0;
+  dcfZadnjiKrajPulsaMs = 0;
+  dcfUlazJeNizak = false;
+  if (ugasiPrijemnik) {
+    postaviDcfPrijemnikAktivan(false);
+  }
+  if (bioAktivan) {
+    oznaciPromjenuDcfVizualizacije();
+  }
+}
+
+static void pokreniRucniPokusaj() {
+  postaviDcfPrijemnikAktivan(true);
+  ocistiDcfOkvir();
+  dcfPrijemAktivan = true;
+  dcfPocetakSesijeMs = millis();
+  dcfKrajSesijeMs = dcfPocetakSesijeMs + DCF_MAX_TRAJANJE_POKUSAJA_PO_SATU_MS;
+  dcfPocetakPulsaMs = 0;
+  dcfZadnjiKrajPulsaMs = 0;
+  dcfUlazJeNizak = (digitalRead(PIN_DCF_SIGNAL) == LOW);
+  rucniDcfZahtjev = false;
+  rucniDcfAktivan = true;
+  oznaciPromjenuDcfVizualizacije();
+  posaljiPCLog(F("DCF77: pokrenut rucni prijem iz izbornika toranjskog sata"));
+}
+
+static bool trebaNocniFallback() {
   if (!jeDCFOmogucen()) {
-    dcfPokrenut = false;
-    dcfBrojBita = 0;
+    return false;
+  }
+
+  if (strcmp(dohvatiOznakuIzvoraVremena(), "NTP") == 0 && !jeSinkronizacijaZastarjela()) {
+    return false;
+  }
+
+  if (!jeWiFiOmogucen()) {
+    return true;
+  }
+
+  if (jeWiFiPovezanNaESP()) {
+    return false;
+  }
+
+  return millis() >= DCF_CEKANJE_WIFI_MS;
+}
+
+static bool dcfJeStabiliziran() {
+  return dcfPrijemAktivan &&
+         (millis() - dcfPocetakSesijeMs) >= DCF_VRIJEME_STABILIZACIJE_MS;
+}
+
+static int procitajDCFBit(unsigned long trajanjePulsaMs) {
+  if (trajanjePulsaMs >= PULS_0_MIN_MS && trajanjePulsaMs <= PULS_0_MAX_MS) {
+    return 0;
+  }
+  if (trajanjePulsaMs >= PULS_1_MIN_MS && trajanjePulsaMs <= PULS_1_MAX_MS) {
+    return 1;
+  }
+  return -1;
+}
+
+static bool provjeriParitet(uint8_t od, uint8_t doUkljucivo, uint8_t indeksPariteta) {
+  uint8_t paritet = 0;
+  for (uint8_t i = od; i <= doUkljucivo; ++i) {
+    paritet ^= dcfBitovi[i];
+  }
+  return paritet == dcfBitovi[indeksPariteta];
+}
+
+static uint8_t procitajVrijednost(const uint8_t* indeksi, const uint8_t* tezine, uint8_t brojIndeksa) {
+  uint8_t vrijednost = 0;
+  for (uint8_t i = 0; i < brojIndeksa; ++i) {
+    if (dcfBitovi[indeksi[i]] != 0) {
+      vrijednost = static_cast<uint8_t>(vrijednost + tezine[i]);
+    }
+  }
+  return vrijednost;
+}
+
+static DateTime dekodirajDCFVrijeme() {
+  static const uint8_t minuteIndeksi[] = {21, 22, 23, 24, 25, 26, 27};
+  static const uint8_t minuteTezine[] = {1, 2, 4, 8, 10, 20, 40};
+  static const uint8_t satIndeksi[] = {29, 30, 31, 32, 33, 34};
+  static const uint8_t satTezine[] = {1, 2, 4, 8, 10, 20};
+  static const uint8_t danIndeksi[] = {36, 37, 38, 39, 40, 41};
+  static const uint8_t danTezine[] = {1, 2, 4, 8, 10, 20};
+  static const uint8_t mjesecIndeksi[] = {45, 46, 47, 48, 49};
+  static const uint8_t mjesecTezine[] = {1, 2, 4, 8, 10};
+  static const uint8_t godinaIndeksi[] = {50, 51, 52, 53, 54, 55, 56, 57};
+  static const uint8_t godinaTezine[] = {1, 2, 4, 8, 10, 20, 40, 80};
+
+  if (dcfBrojBita != 59) {
+    return DateTime((uint32_t)0);
+  }
+
+  if (dcfBitovi[20] != 1) {
+    return DateTime((uint32_t)0);
+  }
+
+  const bool cet = dcfBitovi[17] != 0;
+  const bool cest = dcfBitovi[18] != 0;
+  if (cet == cest) {
+    return DateTime((uint32_t)0);
+  }
+
+  if (!provjeriParitet(21, 27, 28) ||
+      !provjeriParitet(29, 34, 35) ||
+      !provjeriParitet(36, 57, 58)) {
+    return DateTime((uint32_t)0);
+  }
+
+  const uint8_t minuta = procitajVrijednost(minuteIndeksi, minuteTezine, sizeof(minuteIndeksi));
+  const uint8_t sat = procitajVrijednost(satIndeksi, satTezine, sizeof(satIndeksi));
+  const uint8_t dan = procitajVrijednost(danIndeksi, danTezine, sizeof(danIndeksi));
+  const uint8_t mjesec = procitajVrijednost(mjesecIndeksi, mjesecTezine, sizeof(mjesecIndeksi));
+  const uint8_t godina = procitajVrijednost(godinaIndeksi, godinaTezine, sizeof(godinaIndeksi));
+
+  if (minuta > 59 || sat > 23 || dan == 0 || dan > 31 || mjesec == 0 || mjesec > 12) {
+    return DateTime((uint32_t)0);
+  }
+
+  DateTime dekodirano(2000 + godina, mjesec, dan, sat, minuta, 0);
+  if (dekodirano.year() != 2000 + godina ||
+      dekodirano.month() != mjesec ||
+      dekodirano.day() != dan ||
+      dekodirano.hour() != sat ||
+      dekodirano.minute() != minuta) {
+    return DateTime((uint32_t)0);
+  }
+
+  return dekodirano;
+}
+
+static void zavrsiSatniPokusaj(uint32_t satniKljuc, const __FlashStringHelper* poruka) {
+  zadnjiSatniPokusajKljuc = satniKljuc;
+  resetirajDcfSesiju(true);
+  if (poruka != nullptr) {
+    posaljiPCLog(poruka);
+  }
+}
+
+static void pokreniSatniPokusaj(const DateTime& sada, uint32_t satniKljuc) {
+  const unsigned long preostaliProzorMs = izracunajPreostaliProzorPokusajaMs(sada);
+  if (preostaliProzorMs == 0) {
+    zadnjiSatniPokusajKljuc = satniKljuc;
+    return;
+  }
+
+  postaviDcfPrijemnikAktivan(true);
+  ocistiDcfOkvir();
+  dcfPrijemAktivan = true;
+  dcfPocetakSesijeMs = millis();
+  dcfKrajSesijeMs = dcfPocetakSesijeMs + preostaliProzorMs;
+  dcfPocetakPulsaMs = 0;
+  dcfZadnjiKrajPulsaMs = 0;
+  dcfUlazJeNizak = (digitalRead(PIN_DCF_SIGNAL) == LOW);
+  oznaciPromjenuDcfVizualizacije();
+
+  char log[96];
+  snprintf(
+      log,
+      sizeof(log),
+      "DCF77: satni pokusaj %02d:%02d-%02d:20, cekam valjani minutni okvir",
+      sada.hour(),
+      0,
+      sada.hour());
+  posaljiPCLog(log);
+}
+
+static void obradiDovrseniOkvir(uint32_t nocniKljuc, uint32_t satniKljuc) {
+  if (dcfBrojBita != 59) {
+    ocistiDcfOkvir();
+    return;
+  }
+
+  const DateTime novoVrijeme = dekodirajDCFVrijeme();
+  if (novoVrijeme.unixtime() == 0 || novoVrijeme.year() < 2024) {
+    posaljiPCLog(F("DCF77: primljen okvir nije valjan, nastavljam slusanje"));
+    ocistiDcfOkvir();
+    return;
+  }
+
+  zadnjeDCF = novoVrijeme;
+  if (!rucniDcfAktivan) {
+    zadnjaUspjesnaNocDcfKljuc = nocniKljuc;
+    zadnjiSatniPokusajKljuc = satniKljuc;
+  }
+  azurirajVrijemeIzDCF(novoVrijeme);
+  zatraziPoravnanjeTaktaKazaljki();
+  zatraziPoravnanjeTaktaPloce();
+
+  char log[80];
+  snprintf(
+      log,
+      sizeof(log),
+      "%s %04d-%02d-%02d %02d:%02d",
+      rucniDcfAktivan ? "DCF77: rucna sinkronizacija uspjesna" :
+                        "DCF77: nocna sinkronizacija uspjesna",
+      novoVrijeme.year(),
+      novoVrijeme.month(),
+      novoVrijeme.day(),
+      novoVrijeme.hour(),
+      novoVrijeme.minute());
+  posaljiPCLog(log);
+
+  resetirajDcfSesiju(true);
+  rucniDcfAktivan = false;
+}
+
+static void obradiDcfSignal(uint32_t nocniKljuc, uint32_t satniKljuc) {
+  const unsigned long sadaMs = millis();
+  const bool ulazJeNizak = (digitalRead(PIN_DCF_SIGNAL) == LOW);
+
+  if (ulazJeNizak == dcfUlazJeNizak) {
+    return;
+  }
+
+  dcfUlazJeNizak = ulazJeNizak;
+  oznaciPromjenuDcfVizualizacije();
+
+  if (ulazJeNizak) {
+    if (dcfZadnjiKrajPulsaMs != 0 &&
+        (sadaMs - dcfZadnjiKrajPulsaMs) >= DCF_MINUTA_MARKER_MS) {
+      obradiDovrseniOkvir(nocniKljuc, satniKljuc);
+      if (!dcfPrijemAktivan) {
+        return;
+      }
+    }
+    dcfPocetakPulsaMs = sadaMs;
+    return;
+  }
+
+  if (dcfPocetakPulsaMs == 0) {
+    return;
+  }
+
+  const unsigned long trajanjePulsaMs = sadaMs - dcfPocetakPulsaMs;
+  dcfPocetakPulsaMs = 0;
+  dcfZadnjiKrajPulsaMs = sadaMs;
+
+  const int bit = procitajDCFBit(trajanjePulsaMs);
+  if (bit < 0) {
+    ocistiDcfOkvir();
+    return;
+  }
+
+  if (dcfBrojBita < sizeof(dcfBitovi)) {
+    dcfBitovi[dcfBrojBita++] = static_cast<uint8_t>(bit);
+  } else {
+    ocistiDcfOkvir();
+  }
+}
+
+}  // namespace
+
+void inicijalizirajDCF() {
+  pinMode(PIN_DCF_SIGNAL, INPUT);
+  pinMode(PIN_DCF_AKTIVACIJA, OUTPUT);
+  postaviDcfPrijemnikAktivan(false);
+
+  dcfInicijaliziran = true;
+  zadnjeDCF = DateTime((uint32_t)0);
+  zadnjiSatniPokusajKljuc = 0;
+  zadnjaUspjesnaNocDcfKljuc = 0;
+  resetirajDcfSesiju(false);
+
+  if (!jeDCFOmogucen()) {
     posaljiPCLog(F("DCF77: onemogucen u postavkama toranjskog sata"));
     return;
   }
 
-  // Configure physical pin for DCF signal (open collector input)
-  pinMode(PIN_DCF_SIGNAL, INPUT);
-  
-  // Initialize bit buffer
-  memset(dcfBitovi, 0, sizeof(dcfBitovi));
-  dcfBrojBita = 0;
-  dcfPokrenut = true;
-  
-  // Record when night window started (for stabilization timeout)
-  vrijemePocetka = millis();
-  
-  // Initialize last check timestamp to force check on first call
-  zadnjaProvjeraMillis = 0;
-  
-  String log = F("DCF77: Inicijaliziran na PIN = ");
-  log += PIN_DCF_SIGNAL;
-  posaljiPCLog(log);
+  posaljiPCLog(F("DCF77: inicijaliziran, fallback radi po satnim nocnim prozorima"));
 }
 
-// Main DCF77 synchronization routine
-// Call from main loop() once per second to check for time updates
-// Only attempts sync during night hours (22:00-06:00) when signal is stronger
 void osvjeziDCFSinkronizaciju() {
+  if (!dcfInicijaliziran) {
+    inicijalizirajDCF();
+  }
+
   if (!jeDCFOmogucen()) {
-    dcfPokrenut = false;
-    dcfBrojBita = 0;
+    if (dcfPrijemAktivan) {
+      resetirajDcfSesiju(true);
+    }
+    rucniDcfZahtjev = false;
+    rucniDcfAktivan = false;
     return;
   }
 
-  if (!dcfPokrenut) {
-    inicijalizirajDCF();
-    if (!dcfPokrenut) {
+  if (rucniDcfZahtjev && !dcfPrijemAktivan) {
+    pokreniRucniPokusaj();
+  }
+
+  if (rucniDcfAktivan) {
+    if (!dcfPrijemAktivan) {
+      rucniDcfAktivan = false;
       return;
     }
-  }
 
-  // Module not initialized
-  if (!dcfPokrenut) {
-    return;
-  }
-
-  // Outside operating window (daytime 06:00-22:00) - skip DCF checking
-  if (!jeNocniDCFInterval()) {
-    // Reset check timestamp on transition to day mode
-    zadnjaProvjeraMillis = 0;
-    dcfBrojBita = 0;  // Reset buffer on day transition
-    return;
-  }
-
-  // Calculate time since last check
-  unsigned long sadaMs = millis();
-  
-  // Skip if checked recently (only check every 60 seconds)
-  if (zadnjaProvjeraMillis != 0 && 
-      (sadaMs - zadnjaProvjeraMillis) < DCF_INTERVAL_PROVJERE_MS) {
-    return;
-  }
-  
-  // Update last check timestamp
-  zadnjaProvjeraMillis = sadaMs;
-
-  // Wait for signal stabilization after entering night window
-  if (!dcfStabiliziran()) {
-    return;
-  }
-
-  // Read DCF signal and detect pulse edges
-  bool trenutnaVrijednost = (digitalRead(PIN_DCF_SIGNAL) == LOW);
-  
-  // Edge detection: LOW pulse (DCF sends LOW for bits)
-  if (trenutnaVrijednost != dcfSadaJeNiska) {
-    unsigned long trajanjePulseMs = sadaMs - dcfPosljednjaPulsaVrijeme;
-    
-    // Falling edge (HIGH to LOW) - start of bit pulse
-    if (trenutnaVrijednost && !dcfSadaJeNiska) {
-      dcfPosljednjaPulsaVrijeme = sadaMs;
+    if (millis() >= dcfKrajSesijeMs) {
+      resetirajDcfSesiju(true);
+      rucniDcfAktivan = false;
+      posaljiPCLog(F("DCF77: rucni prijem istekao bez valjane sinkronizacije"));
+      return;
     }
-    // Rising edge (LOW to HIGH) - end of bit pulse
-    else if (!trenutnaVrijednost && dcfSadaJeNiska) {
-      // Detect bit value from pulse duration
-      int bit = procitajDCFBit(trajanjePulseMs);
-      
-      if (bit >= 0 && dcfBrojBita < 59) {
-        // Valid bit detected
-        dcfBitovi[dcfBrojBita] = bit;
-        dcfBrojBita++;
-        
-        // Complete minute (59 bits received)
-        if (dcfBrojBita >= 59) {
-          // Attempt to decode time
-          DateTime novi = dekodiraiDCFVrijeme();
-          
-          if (novi.unixtime() > 0) {
-            zadnjeDCF = novi;
-            
-            // Update RTC if DCF signal is better than current source
-            String trenutniIzvor = dohvatiIzvorVremena();
-            if (trenutniIzvor != "NTP" || jeSinkronizacijaZastarjela()) {
-              azurirajVrijemeIzDCF(novi);
-              zatraziPoravnanjeTaktaKazaljki();
-              zatraziPoravnanjeTaktaPloce();
-              
-              String log = F("DCF77: Sinkronizacija - ");
-              log += novi.year();
-              log += F("-");
-              log += novi.month();
-              log += F("-");
-              log += novi.day();
-              log += F(" ");
-              log += novi.hour();
-              log += F(":");
-              log += novi.minute();
-              posaljiPCLog(log);
-            }
-          }
-          
-          // Reset for next minute
-          dcfBrojBita = 0;
-        }
-      } else if (bit < 0) {
-        // Invalid pulse - might be minute mark (2-second pause)
-        // Reset on minute boundary
-        if (trajanjePulseMs > 1500) {
-          dcfBrojBita = 0;  // Minute mark detected, reset buffer
-          posaljiPCLog(F("DCF77: Minute mark"));
-        }
-      }
+
+    if (!dcfJeStabiliziran()) {
+      return;
     }
-    
-    dcfSadaJeNiska = trenutnaVrijednost;
+
+    obradiDcfSignal(0, 0);
+    return;
   }
+
+  const DateTime sada = dohvatiTrenutnoVrijeme();
+  if (!jeNocniDCFInterval(sada)) {
+    if (dcfPrijemAktivan) {
+      resetirajDcfSesiju(true);
+    }
+    return;
+  }
+
+  const uint32_t nocniKljuc = izracunajKljucNocnogPokusaja(sada);
+  const uint32_t satniKljuc = izracunajKljucSatnogPokusaja(sada, nocniKljuc);
+  if (zadnjaUspjesnaNocDcfKljuc == nocniKljuc) {
+    if (dcfPrijemAktivan) {
+      resetirajDcfSesiju(true);
+    }
+    return;
+  }
+
+  if (!trebaNocniFallback()) {
+    if (dcfPrijemAktivan) {
+      resetirajDcfSesiju(true);
+    }
+    return;
+  }
+
+  if (!dcfPrijemAktivan) {
+    if (izracunajPreostaliProzorPokusajaMs(sada) == 0) {
+      return;
+    }
+    if (zadnjiSatniPokusajKljuc == satniKljuc) {
+      return;
+    }
+    pokreniSatniPokusaj(sada, satniKljuc);
+    return;
+  }
+
+  if (millis() >= dcfKrajSesijeMs) {
+    char log[80];
+    snprintf(
+        log,
+        sizeof(log),
+        "DCF77: satni pokusaj %02d:00 istekao bez valjane sinkronizacije",
+        sada.hour());
+    zavrsiSatniPokusaj(satniKljuc, nullptr);
+    posaljiPCLog(log);
+    return;
+  }
+
+  if (!dcfJeStabiliziran()) {
+    return;
+  }
+
+  obradiDcfSignal(nocniKljuc, satniKljuc);
 }
 
+bool jeDCFSinkronizacijaUTijeku() {
+  return dcfPrijemAktivan;
+}
+
+bool jeDCFImpulsAktivan() {
+  return dcfPrijemAktivan && dcfUlazJeNizak;
+}
+
+uint32_t dohvatiDcfVizualniBrojac() {
+  return dcfVizualniBrojac;
+}
+
+void pokreniRucniDCFPrijem() {
+  if (!jeDCFOmogucen()) {
+    posaljiPCLog(F("DCF77: rucni prijem odbijen jer je DCF iskljucen u postavkama"));
+    return;
+  }
+
+  if (!dcfInicijaliziran) {
+    inicijalizirajDCF();
+  }
+
+  if (dcfPrijemAktivan) {
+    posaljiPCLog(F("DCF77: prijem je vec aktivan"));
+    return;
+  }
+
+  rucniDcfZahtjev = true;
+}

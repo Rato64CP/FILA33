@@ -12,14 +12,12 @@
 
 // Trajanje inercije: 90 sekundi nakon rada zvona.
 const unsigned long TRAJANJE_INERCIJE_MS = 90000UL;
-static const uint8_t BROJ_ZVONA_MAX = 4;
+static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
 
 static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
   PIN_ZVONO_1,
-  PIN_ZVONO_2,
-  PIN_ZVONO_3,
-  PIN_ZVONO_4
+  PIN_ZVONO_2
 };
 
 static const uint8_t PINOVI_RUCNIH_SKLOPKI[BROJ_RUCNIH_SKLOPKI_ZVONA] = {
@@ -33,7 +31,7 @@ static struct {
   bool aktivan[BROJ_ZVONA_MAX];
   unsigned long start_ms[BROJ_ZVONA_MAX];
   unsigned long duration_ms[BROJ_ZVONA_MAX];
-} zvona = {{false, false, false, false}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+} zvona = {};
 
 // Inercija nakon aktivacije zvona.
 static struct {
@@ -46,6 +44,8 @@ static struct {
 static struct {
   bool override_aktivan[BROJ_RUCNIH_SKLOPKI_ZVONA];
 } manualnoUpravljanje = {{false, false}};
+
+static bool dozvoliPaljenjeZvonaIzRucneSklopke = false;
 
 // ==================== RELAY CONTROL ====================
 
@@ -118,6 +118,12 @@ static void deaktivirajBell_Relej(int indeks) {
   posaljiPCLog(log);
 }
 
+static void ukljuciZvonoIzRucneSklopke(int zvono) {
+  dozvoliPaljenjeZvonaIzRucneSklopke = true;
+  ukljuciZvono(zvono);
+  dozvoliPaljenjeZvonaIzRucneSklopke = false;
+}
+
 // ==================== PUBLIC API ====================
 
 void ukljuciZvono(int zvono) {
@@ -126,9 +132,19 @@ void ukljuciZvono(int zvono) {
     return;
   }
 
+  if (!jeVrijemePotvrdjenoZaAutomatiku() && !dozvoliPaljenjeZvonaIzRucneSklopke) {
+    posaljiPCLog(F("Zvona: automatsko ili daljinsko paljenje blokirano dok vrijeme nije potvrdeno"));
+    return;
+  }
+
   if (!zvona.aktivan[indeks]) {
     aktivirajBell_Relej(indeks);
     zvona.aktivan[indeks] = true;
+    // Rucno i daljinsko paljenje preko weba/MQTT traje dok ne stigne
+    // eksplicitno gasenje. Samo putanja `aktivirajZvonjenjeNaTrajanje()`
+    // postavlja vremenski ogranicen rad.
+    zvona.start_ms[indeks] = millis();
+    zvona.duration_ms[indeks] = 0;
   }
 }
 
@@ -141,6 +157,8 @@ void iskljuciZvono(int zvono) {
   if (zvona.aktivan[indeks]) {
     deaktivirajBell_Relej(indeks);
     zvona.aktivan[indeks] = false;
+    zvona.start_ms[indeks] = 0;
+    zvona.duration_ms[indeks] = 0;
     inercija.inercija_aktivna = true;
     inercija.vrijeme_pocetka = millis();
   }
@@ -214,11 +232,6 @@ void inicijalizirajZvona() {
   pinMode(PIN_ULAZA_PLOCE_3, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_4, INPUT_PULLUP);
   pinMode(PIN_ULAZA_PLOCE_5, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_6, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_7, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_8, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_9, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_10, INPUT_PULLUP);
 
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     pinMode(PINOVI_RUCNIH_SKLOPKI[i], INPUT_PULLUP);
@@ -226,7 +239,7 @@ void inicijalizirajZvona() {
   }
 
   inercija.inercija_aktivna = false;
-  posaljiPCLog(F("Zvona: inicijalizirana za do 4 zvona toranjskog sata"));
+  posaljiPCLog(F("Zvona: inicijalizirana za 2 zvona toranjskog sata"));
 }
 
 // ==================== MAIN LOOP MANAGEMENT ====================
@@ -244,7 +257,7 @@ void upravljajZvonom() {
       if (novoStanje == SWITCH_PRESSED) {
         if (jeZvonoOmogucenoPoPostavkama(i + 1)) {
           manualnoUpravljanje.override_aktivan[i] = true;
-          ukljuciZvono(i + 1);
+          ukljuciZvonoIzRucneSklopke(i + 1);
         } else {
           manualnoUpravljanje.override_aktivan[i] = false;
           log += F(" (preskoceno)");
@@ -260,7 +273,7 @@ void upravljajZvonom() {
   // Ako je rucni override aktivan, ima prioritet nad MQTT/web automatikom.
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     if (manualnoUpravljanje.override_aktivan[i] && !zvona.aktivan[i]) {
-      ukljuciZvono(i + 1);
+      ukljuciZvonoIzRucneSklopke(i + 1);
     }
   }
 
@@ -269,7 +282,7 @@ void upravljajZvonom() {
   for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
     const bool rucniOverride =
         (i < BROJ_RUCNIH_SKLOPKI_ZVONA) ? manualnoUpravljanje.override_aktivan[i] : false;
-    if (zvona.aktivan[i] && !rucniOverride) {
+    if (zvona.aktivan[i] && !rucniOverride && zvona.duration_ms[i] > 0) {
       const unsigned long proteklo = sadaMs - zvona.start_ms[i];
       if (proteklo >= zvona.duration_ms[i]) {
         iskljuciZvono(i + 1);

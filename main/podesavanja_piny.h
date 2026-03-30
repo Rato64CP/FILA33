@@ -17,12 +17,10 @@
 #define PIN_RELEJ_NEPARNE_PLOCE       25  // Odd relay for plate (second phase)
 
 // ==================== PINOVI ZVONA I CEKICA ====================
-// Releji zvona prosireni su do 4 izlaza.
+// Toranjski sat koristi samo dva releja zvona.
 
 #define PIN_ZVONO_1                   26  // Zvono 1
 #define PIN_ZVONO_2                   27  // Zvono 2
-#define PIN_ZVONO_3                   46  // Zvono 3
-#define PIN_ZVONO_4                   47  // Zvono 4
 
 // Cekici 3 i 4 su pripremljeni za drugu fazu prosirenja.
 #define PIN_CEKIC_MUSKI               28  // Cekic 1 - muski
@@ -31,23 +29,19 @@
 #define PIN_CEKIC_4                   49  // Cekic 4
 
 // ==================== ULAZI OKRETNE PLOCE ====================
-// Mehanicki ulazi ploce prosireni su do 10 cavala.
+// Mehanicki ulazi ploce koriste 5 cavala.
 
 #define PIN_ULAZA_PLOCE_1             30  // Cavao 1
 #define PIN_ULAZA_PLOCE_2             31  // Cavao 2
 #define PIN_ULAZA_PLOCE_3             32  // Cavao 3
 #define PIN_ULAZA_PLOCE_4             33  // Cavao 4
 #define PIN_ULAZA_PLOCE_5             34  // Cavao 5
-#define PIN_ULAZA_PLOCE_6             50  // Cavao 6
-#define PIN_ULAZA_PLOCE_7             51  // Cavao 7
-#define PIN_ULAZA_PLOCE_8             52  // Cavao 8
-#define PIN_ULAZA_PLOCE_9             53  // Cavao 9
-#define PIN_ULAZA_PLOCE_10            A0  // Cavao 10
 
 // ==================== TIME SYNCHRONIZATION INPUTS ====================
 // DCF77 receiver - external synchronization source
 
 #define PIN_DCF_SIGNAL                35  // DCF77 digital signal (LOW = impulse)
+#define PIN_DCF_AKTIVACIJA            A9  // Opcionalni izlaz za P1 DCF prijemnika (LOW=ukljucen)
 #define PIN_RTC_SQW                   2   // DS3231 SQW 1 Hz takt za precizno okidanje
 
 // ==================== I2C BUS ====================

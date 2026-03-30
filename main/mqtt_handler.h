@@ -1,4 +1,4 @@
-// mqtt_handler.h – Home Assistant MQTT integration with 9 entities + 8 services
+// mqtt_handler.h – Home Assistant MQTT integracija za toranjski sat
 #pragma once
 
 #include <Arduino.h>

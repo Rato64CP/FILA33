@@ -58,5 +58,7 @@ bool jeWatchdogResetDetektiran() {
 }
 
 bool jePowerLossResetDetektiran() {
-  return (zadnje_reset_zastavice & ((1 << BORF) | (1 << PORF))) != 0;
+  const bool imaBrownOutIliPowerOn = (zadnje_reset_zastavice & ((1 << BORF) | (1 << PORF))) != 0;
+  const bool imaVanjskiReset = (zadnje_reset_zastavice & (1 << EXTRF)) != 0;
+  return imaBrownOutIliPowerOn && !imaVanjskiReset;
 }

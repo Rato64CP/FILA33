@@ -18,6 +18,7 @@ constexpr uint8_t FAZA_STABILNO = 0;
 constexpr uint8_t UNIFIED_VERZIJA = EepromLayout::UNIFIED_STANJE_VERZIJA;
 constexpr uint8_t RESERVED_SEKVENCA_POCETNA = 1;
 bool cacheInicijaliziran = false;
+int cacheSlot = -1;
 EepromLayout::UnifiedMotionState cacheStanje{};
 
 bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
@@ -66,6 +67,25 @@ bool ucitajNajnovijeStanje(EepromLayout::UnifiedMotionState& stanje, int* slotNa
     *slotNajnoviji = najboljiSlot;
   }
   return pronadeno;
+}
+
+int adresaSlota(int slot) {
+  return EepromLayout::BAZA_UNIFIED_STANJE +
+         slot * static_cast<int>(sizeof(EepromLayout::UnifiedMotionState));
+}
+
+bool zapisiDirektnoSlot(int slot, const EepromLayout::UnifiedMotionState& stanje) {
+  if (slot < 0 || slot >= EepromLayout::SLOTOVI_UNIFIED_STANJE) {
+    return false;
+  }
+
+  const bool uspjeh = VanjskiEEPROM::zapisi(adresaSlota(slot), &stanje, sizeof(stanje));
+  if (!uspjeh) {
+    String log = F("UnifiedMotionState: EEPROM zapis nije uspio, slot=");
+    log += slot;
+    posaljiPCLog(log);
+  }
+  return uspjeh;
 }
 
 bool jednakoLogickoStanje(EepromLayout::UnifiedMotionState lijevo,
@@ -140,12 +160,14 @@ bool ucitaj(EepromLayout::UnifiedMotionState& stanje) {
     return true;
   }
 
-  if (!ucitajNajnovijeStanje(stanje)) {
+  int najnovijiSlot = -1;
+  if (!ucitajNajnovijeStanje(stanje, &najnovijiSlot)) {
     return false;
   }
 
   cacheStanje = stanje;
   cacheInicijaliziran = true;
+  cacheSlot = najnovijiSlot;
   return true;
 }
 
@@ -166,9 +188,16 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
   }
 
   EepromLayout::UnifiedMotionState trenutno{};
+  int trenutniSlot = -1;
   if (!cacheInicijaliziran && ucitaj(trenutno) &&
       jednakoLogickoStanje(trenutno, stanje)) {
     return;
+  }
+
+  if (!cacheInicijaliziran) {
+    ucitajNajnovijeStanje(trenutno, &trenutniSlot);
+  } else {
+    trenutniSlot = cacheSlot;
   }
 
   EepromLayout::UnifiedMotionState stanjeZaSpremanje = stanje;
@@ -177,11 +206,18 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
   stanjeZaSpremanje.reserved =
     (zadnjaSekvenca == 0) ? RESERVED_SEKVENCA_POCETNA : static_cast<uint8_t>(zadnjaSekvenca + 1);
 
-  WearLeveling::spremi(EepromLayout::BAZA_UNIFIED_STANJE,
-                       EepromLayout::SLOTOVI_UNIFIED_STANJE,
-                       stanjeZaSpremanje);
+  // UnifiedMotionState vec ima vlastitu sekvencu (`reserved`) i skeniranje
+  // svih 8 slotova pri citanju, pa ovdje namjerno ne koristimo zajednicki
+  // wear-leveling meta-zapis. Time cuvamo 24C32 od pregrijavanja istog
+  // meta bloka bez promjene recovery logike toranjskog sata.
+  const int sljedeciSlot =
+      (trenutniSlot >= 0) ? ((trenutniSlot + 1) % EepromLayout::SLOTOVI_UNIFIED_STANJE) : 0;
+  if (!zapisiDirektnoSlot(sljedeciSlot, stanjeZaSpremanje)) {
+    return;
+  }
   cacheStanje = stanjeZaSpremanje;
   cacheInicijaliziran = true;
+  cacheSlot = sljedeciSlot;
 }
 
 void logirajStanje(const EepromLayout::UnifiedMotionState& stanje) {

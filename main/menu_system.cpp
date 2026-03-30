@@ -15,6 +15,7 @@
 #include "postavke.h"
 #include "pc_serial.h"
 #include "esp_serial.h"
+#include "dcf_sync.h"
 #include "debouncing.h"
 #include "podesavanja_piny.h"
 
@@ -22,45 +23,83 @@
 
 static MenuState trenutnoStanje = MENU_STATE_DISPLAY_TIME;
 static unsigned long zadnjaAktivnost = 0;
-static const unsigned long TIMEOUT_MENIJA_MS = 30000; // 30 seconds auto-return to clock
+static const unsigned long TIMEOUT_MENIJA_MS = 30000; // Auto-povratak na sat nakon 30 s
 
 // ==================== MENU NAVIGATION ====================
 
 static int odabraniIndex = 0;
-static const int BROJ_STAVKI_GLAVNI_MENU = 5;
-static const char TEKST_GLAVNI_KOREKCIJA_RUKU[] PROGMEM = "Korekcija ruku";
+static const int BROJ_STAVKI_GLAVNI_MENU = 3;
 static const char TEKST_GLAVNI_POSTAVKE[] PROGMEM = "Postavke";
 static const char TEKST_GLAVNI_INFORMACIJE[] PROGMEM = "Informacije";
-static const char TEKST_GLAVNI_WIFI[] PROGMEM = "WiFi";
 static const char TEKST_GLAVNI_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeGlavnogMenuja[] PROGMEM = {
-  TEKST_GLAVNI_KOREKCIJA_RUKU,
   TEKST_GLAVNI_POSTAVKE,
   TEKST_GLAVNI_INFORMACIJE,
-  TEKST_GLAVNI_WIFI,
   TEKST_GLAVNI_POVRATAK
 };
 
-static const int BROJ_STAVKI_POSTAVKI = 9;
-static const char TEKST_POSTAVKE_VRIJEME[] PROGMEM = "Vrijeme";
-static const char TEKST_POSTAVKE_MOD_ZVONA[] PROGMEM = "Mod zvona";
-static const char TEKST_POSTAVKE_TIHI_SATI[] PROGMEM = "Tihi sati";
-static const char TEKST_POSTAVKE_CAVLI[] PROGMEM = "Cavli";
-static const char TEKST_POSTAVKE_SLAVLJENJE[] PROGMEM = "Slavljenje";
-static const char TEKST_POSTAVKE_SINKRONIZ[] PROGMEM = "Sinkroniz.";
-static const char TEKST_POSTAVKE_LCD[] PROGMEM = "LCD svjetlo";
-static const char TEKST_POSTAVKE_MQTT[] PROGMEM = "MQTT";
+static const int BROJ_STAVKI_POSTAVKI = 6;
+static const char TEKST_POSTAVKE_MATICNI_SAT[] PROGMEM = "Maticni sat";
+static const char TEKST_POSTAVKE_KAZALJKE[] PROGMEM = "Kazaljke";
+static const char TEKST_POSTAVKE_PLOCA[] PROGMEM = "Okretna ploca";
+static const char TEKST_POSTAVKE_MREZA[] PROGMEM = "Mreza";
+static const char TEKST_POSTAVKE_SUSTAV[] PROGMEM = "Sustav";
 static const char TEKST_POSTAVKE_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkePostavki[] PROGMEM = {
-  TEKST_POSTAVKE_VRIJEME,
-  TEKST_POSTAVKE_MOD_ZVONA,
-  TEKST_POSTAVKE_TIHI_SATI,
-  TEKST_POSTAVKE_CAVLI,
-  TEKST_POSTAVKE_SLAVLJENJE,
-  TEKST_POSTAVKE_SINKRONIZ,
-  TEKST_POSTAVKE_LCD,
-  TEKST_POSTAVKE_MQTT,
+  TEKST_POSTAVKE_MATICNI_SAT,
+  TEKST_POSTAVKE_KAZALJKE,
+  TEKST_POSTAVKE_PLOCA,
+  TEKST_POSTAVKE_MREZA,
+  TEKST_POSTAVKE_SUSTAV,
   TEKST_POSTAVKE_POVRATAK
+};
+
+static const int BROJ_STAVKI_MATICNOG_SATA = 4;
+static const char TEKST_MATICNI_RUCNO[] PROGMEM = "Rucno namjesti";
+static const char TEKST_MATICNI_DCF[] PROGMEM = "DCF postavke";
+static const char TEKST_MATICNI_NTP[] PROGMEM = "NTP postavke";
+static const char TEKST_MATICNI_POVRATAK[] PROGMEM = "Povratak";
+static const char* const stavkeMaticnogSata[] PROGMEM = {
+  TEKST_MATICNI_RUCNO,
+  TEKST_MATICNI_DCF,
+  TEKST_MATICNI_NTP,
+  TEKST_MATICNI_POVRATAK
+};
+
+static const int BROJ_STAVKI_KAZALJKI = 3;
+static const char TEKST_KAZALJKE_NAMJESTANJE[] PROGMEM = "Namjestanje";
+static const char TEKST_KAZALJKE_UGRADENE[] PROGMEM = "Ugradjene";
+static const char TEKST_KAZALJKE_POVRATAK[] PROGMEM = "Povratak";
+static const char* const stavkeKazaljki[] PROGMEM = {
+  TEKST_KAZALJKE_NAMJESTANJE,
+  TEKST_KAZALJKE_UGRADENE,
+  TEKST_KAZALJKE_POVRATAK
+};
+
+static const int BROJ_STAVKI_PLOCE = 3;
+static const char TEKST_PLOCA_AKTIVNA[] PROGMEM = "ON/OFF";
+static const char TEKST_PLOCA_NAMJESTANJE[] PROGMEM = "Namjestanje";
+static const char TEKST_PLOCA_POVRATAK[] PROGMEM = "Povratak";
+static const char* const stavkePloce[] PROGMEM = {
+  TEKST_PLOCA_AKTIVNA,
+  TEKST_PLOCA_NAMJESTANJE,
+  TEKST_PLOCA_POVRATAK
+};
+
+static const int BROJ_STAVKI_MREZE = 2;
+static const char TEKST_MREZA_WIFI[] PROGMEM = "WiFi";
+static const char TEKST_MREZA_POVRATAK[] PROGMEM = "Povratak";
+static const char* const stavkeMreze[] PROGMEM = {
+  TEKST_MREZA_WIFI,
+  TEKST_MREZA_POVRATAK
+};
+
+static const int BROJ_STAVKI_SUSTAVA = 2;
+static const char TEKST_SUSTAV_LCD[] PROGMEM = "LCD svjetlo";
+static const char TEKST_SUSTAV_POVRATAK[] PROGMEM = "Povratak";
+static const char* const stavkeSustava[] PROGMEM = {
+  TEKST_SUSTAV_LCD,
+  TEKST_SUSTAV_POVRATAK
 };
 
 static const int BROJ_STAVKI_MODA = 3;
@@ -80,26 +119,33 @@ static char porukaZaKonfirmaciju[17] = "";
 static void (*funkcijaNaDA)() = NULL;
 static MenuState stanjePovratkaKonfirmacije = MENU_STATE_DISPLAY_TIME;
 
-// ==================== PASSWORD ENTRY ====================
-
-static char unesenaLozinka[9] = "";
-static int pozicija_lozinke = 0;
-static bool u_modu_lozinke = false;
-
 // ==================== HAND CORRECTION ====================
 
 static int korektnaMinuta = 0;
-static int korektniSat = 0;
+static int korektniSat = 12;
 static bool u_korekciji_ruku = false;
-static int faza_korekcije = 0; // 0 = hours, 1 = minutes, 2 = confirm
+static int faza_korekcije = 0; // 0 = hours, 1 = minutes
+static int odabraniIndexKazaljke = 0;
+static MenuState stanjePovratkaKorekcijeRuku = MENU_STATE_MAIN_MENU;
 
 // ==================== TIME ADJUSTMENT ====================
 
 static int privremeniSat = 0;
 static int privremenaMinuta = 0;
-static int privremenaSekuned = 0;
-static int faza_vremena = 0; // 0 = hours, 1 = minutes, 2 = seconds, 3 = confirm
-static bool potvrdiVrijeme = true;
+static int faza_vremena = 0; // 0 = sat, 1 = minuta, 2 = spremi
+
+// ==================== MATICNI SAT / DCF / NTP ====================
+
+static int dcfStrana = 0;
+static int ntpStrana = 0;
+static bool ntpOmogucenUredjivanje = true;
+
+// ==================== OKRETNA PLOCA ====================
+
+static int plocaSatUredjivanje = 5;
+static int plocaMinutaUredjivanje = 0;
+static int faza_ploce = 0; // 0 = sat, 1 = minuta, 2 = spremi
+static bool plocaAktivnaUredjivanje = true;
 
 // ==================== QUIET HOURS ADJUSTMENT ====================
 
@@ -122,8 +168,9 @@ static int faza_postavki_cavala = 0;
 static int infoStrana = 0;
 static const int BROJ_INFO_STRANA = 3;
 static int wifiStrana = 0;
-static const int BROJ_WIFI_STRANA = 3;
+static const int BROJ_WIFI_STRANA = 4;
 static bool wifiUredjivanjeAktivno = false;
+static bool wifiOmogucenUredjivanje = true;
 static int wifiPolje = 0; // 0 = SSID, 1 = lozinka
 static int wifiKursor = 0;
 static int wifiOdabirZnaka = 0;
@@ -133,11 +180,6 @@ union MrezniUredjivanje {
     char lozinka[33];
   } wifi;
   struct {
-    char broker[40];
-    char korisnik[33];
-    char lozinka[33];
-  } mqtt;
-  struct {
     char ntpServer[40];
   } sink;
 };
@@ -146,16 +188,6 @@ static MrezniUredjivanje mrezniUredjivanje = {};
 #define wifiLozinkaUredjivanje mrezniUredjivanje.wifi.lozinka
 static const char WIFI_SKUP_ZNAKOVA[] PROGMEM =
   " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.,!@#";
-static int mqttStrana = 0;
-static const int BROJ_MQTT_STRANA = 6;
-static bool mqttUredjivanjeAktivno = false;
-static int mqttPolje = 0; // 0 = broker, 1 = korisnik, 2 = lozinka
-static int mqttKursor = 0;
-static bool mqttOmogucenUredjivanje = false;
-static uint16_t mqttPortUredjivanje = 1883;
-#define mqttBrokerUredjivanje mrezniUredjivanje.mqtt.broker
-#define mqttKorisnikUredjivanje mrezniUredjivanje.mqtt.korisnik
-#define mqttLozinkaUredjivanje mrezniUredjivanje.mqtt.lozinka
 static int sinkStrana = 0;
 static const int BROJ_SINK_STRANA = 3;
 static bool sinkUredjivanjeAktivno = false;
@@ -206,16 +238,6 @@ static int dohvatiWiFiMaxDuljinu() {
   return (wifiPolje == 0) ? 32 : 32;
 }
 
-static char* dohvatiMQTTBufferZaUredjivanje() {
-  if (mqttPolje == 0) return mqttBrokerUredjivanje;
-  return (mqttPolje == 1) ? mqttKorisnikUredjivanje : mqttLozinkaUredjivanje;
-}
-
-static int dohvatiMQTTMaxDuljinu() {
-  if (mqttPolje == 0) return 39;
-  return 32;
-}
-
 static int dohvatiSinkMaxDuljinu() {
   return 39;
 }
@@ -228,6 +250,46 @@ static void ucitajTekstIzProgmem(const char* const* niz, int indeks, char* odred
 static void kopirajLiteralIzFlash(char* odrediste, size_t velicina, PGM_P literal) {
   strncpy_P(odrediste, literal, velicina - 1);
   odrediste[velicina - 1] = '\0';
+}
+
+static int pretvoriMinuteUKazaljkeSat12h(int minutaKazaljki) {
+  const int sat24 = ((minutaKazaljki / 60) % 12 + 12) % 12;
+  return (sat24 == 0) ? 12 : sat24;
+}
+
+static void pokreniNamjestanjeKazaljki(MenuState povratnoStanje) {
+  if (!imaKazaljkeSata()) {
+    posaljiPCLog(F("Kazaljke nisu ugradjene - namjestanje nije dostupno"));
+    return;
+  }
+
+  const int memoriraneMinute = dohvatiMemoriraneKazaljkeMinuta();
+  korektniSat = pretvoriMinuteUKazaljkeSat12h(memoriraneMinute);
+  korektnaMinuta = ((memoriraneMinute % 60) + 60) % 60;
+  faza_korekcije = 0;
+  u_korekciji_ruku = true;
+  stanjePovratkaKorekcijeRuku = povratnoStanje;
+  postaviRucnuBlokaduKazaljki(true);
+  trenutnoStanje = MENU_STATE_HAND_CORRECTION;
+  posaljiPCLog(F("Ulazak u namjestanje kazaljki"));
+}
+
+static void zavrsiNamjestanjeKazaljki(bool potvrdiPromjenu) {
+  if (potvrdiPromjenu) {
+    const int satKazaljke = (korektniSat % 12);
+    postaviRucnuPozicijuKazaljki(satKazaljke, korektnaMinuta);
+
+    char log[56];
+    snprintf(log, sizeof(log), "Namjestanje kazaljki: %02d:%02d", korektniSat, korektnaMinuta);
+    posaljiPCLog(log);
+  } else {
+    posaljiPCLog(F("Namjestanje kazaljki: odustajanje"));
+  }
+
+  postaviRucnuBlokaduKazaljki(false);
+  u_korekciji_ruku = false;
+  faza_korekcije = 0;
+  trenutnoStanje = potvrdiPromjenu ? MENU_STATE_DISPLAY_TIME : stanjePovratkaKorekcijeRuku;
 }
 
 static int dohvatiBrojZnakovaZaUredjivanje() {
@@ -249,6 +311,7 @@ static int pronadiIndeksZnaka(char znak) {
 }
 
 static void ucitajWiFiUredjivanjeIzPostavki() {
+  wifiOmogucenUredjivanje = jeWiFiOmogucen();
   strncpy(wifiSsidUredjivanje, dohvatiWifiSsid(), sizeof(wifiSsidUredjivanje) - 1);
   wifiSsidUredjivanje[sizeof(wifiSsidUredjivanje) - 1] = '\0';
   strncpy(wifiLozinkaUredjivanje, dohvatiWifiLozinku(), sizeof(wifiLozinkaUredjivanje) - 1);
@@ -281,23 +344,6 @@ static void obrisiJedanWiFiZnak() {
     wifiKursor--;
   }
   wifiOdabirZnaka = pronadiIndeksZnaka(buffer[wifiKursor]);
-}
-
-static void ucitajMQTTUredjivanjeIzPostavki() {
-  mqttOmogucenUredjivanje = jeMQTTOmogucen();
-  mqttPortUredjivanje = dohvatiMQTTPort();
-  strncpy(mqttBrokerUredjivanje, dohvatiMQTTBroker(), sizeof(mqttBrokerUredjivanje) - 1);
-  mqttBrokerUredjivanje[sizeof(mqttBrokerUredjivanje) - 1] = '\0';
-  strncpy(mqttKorisnikUredjivanje, dohvatiMQTTKorisnika(), sizeof(mqttKorisnikUredjivanje) - 1);
-  mqttKorisnikUredjivanje[sizeof(mqttKorisnikUredjivanje) - 1] = '\0';
-  strncpy(mqttLozinkaUredjivanje, dohvatiMQTTLozinku(), sizeof(mqttLozinkaUredjivanje) - 1);
-  mqttLozinkaUredjivanje[sizeof(mqttLozinkaUredjivanje) - 1] = '\0';
-}
-
-static void pokreniMQTTUredjivanje(int polje) {
-  mqttPolje = polje;
-  mqttKursor = 0;
-  mqttUredjivanjeAktivno = true;
 }
 
 static void ucitajSinkUredjivanjeIzPostavki() {
@@ -334,14 +380,16 @@ static uint8_t ograniceniCavaoZaMeni(int vrijednost) {
 }
 
 static void sanitizirajRasporedCavalaUredjivanje() {
-  if (brojMjestaZaCavleUredjivanje < 5) brojMjestaZaCavleUredjivanje = 5;
-  if (brojMjestaZaCavleUredjivanje > 10) brojMjestaZaCavleUredjivanje = 10;
-  if (brojZvonaUredjivanje < 1) brojZvonaUredjivanje = 1;
-  if (brojZvonaUredjivanje > 4) brojZvonaUredjivanje = 4;
+  brojMjestaZaCavleUredjivanje = 5;
+  brojZvonaUredjivanje = 2;
 
   for (uint8_t i = 0; i < 4; ++i) {
     cavliRadniUredjivanje[i] = ograniceniCavaoZaMeni(cavliRadniUredjivanje[i]);
     cavliNedjeljaUredjivanje[i] = ograniceniCavaoZaMeni(cavliNedjeljaUredjivanje[i]);
+  }
+  for (uint8_t i = 2; i < 4; ++i) {
+    cavliRadniUredjivanje[i] = 0;
+    cavliNedjeljaUredjivanje[i] = 0;
   }
   cavaoSlavljenjaUredjivanje = ograniceniCavaoZaMeni(cavaoSlavljenjaUredjivanje);
   cavaoMrtvackogUredjivanje = ograniceniCavaoZaMeni(cavaoMrtvackogUredjivanje);
@@ -397,39 +445,17 @@ static void potvrdiSpremanjePostavkiCavala() {
 }
 
 static void potvrdiSpremanjeWiFiPostavki() {
+  postaviWiFiOmogucen(wifiOmogucenUredjivanje);
   postaviWiFiPodatke(wifiSsidUredjivanje, wifiLozinkaUredjivanje);
   posaljiWifiPostavkeESP();
-  posaljiPCLog(F("WiFi: spremljene postavke i poslano ESP-u"));
-  povratakNaGlavniPrikaz();
-}
-
-static void potvrdiSpremanjeMQTTPostavki() {
-  postaviMQTTOmogucen(mqttOmogucenUredjivanje);
-  postaviMQTTPodatke(
-    mqttBrokerUredjivanje,
-    mqttPortUredjivanje,
-    mqttKorisnikUredjivanje,
-    mqttLozinkaUredjivanje);
-  if (mqttOmogucenUredjivanje) {
-    char komanda[160];
-    snprintf(
-        komanda,
-        sizeof(komanda),
-        "MQTT:CONNECT|%s|%u|%s|%s",
-        dohvatiMQTTBroker(),
-        dohvatiMQTTPort(),
-        dohvatiMQTTKorisnika(),
-        dohvatiMQTTLozinku());
-    posaljiESPKomandu(komanda);
-  } else {
-    posaljiESPKomandu("MQTT:DISCONNECT");
-  }
-  posaljiPCLog(F("MQTT: spremljene postavke i poslano ESP-u"));
+  posaljiWiFiStatusESP();
+  posaljiPCLog(F("WiFi: spremljene postavke, status i poslano ESP-u"));
   povratakNaGlavniPrikaz();
 }
 
 static void potvrdiSpremanjeSinkPostavki() {
   postaviSinkronizacijskePostavke(ntpServerUredjivanje, dcfOmogucenUredjivanje);
+  inicijalizirajDCF();
   posaljiNTPPostavkeESP();
   posaljiPCLog(F("Sinkronizacija: spremljene NTP i DCF postavke"));
   povratakNaGlavniPrikaz();
@@ -451,20 +477,107 @@ static void prikaziPostavkeMenu() {
   char redak1[17];
   char redak2[17];
   kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("POSTAVKE"));
-  if (odabraniIndex == 3) {
-    snprintf(redak2, sizeof(redak2), "> Cavli %d/%dz",
-             dohvatiBrojMjestaZaCavle(), dohvatiBrojZvona());
-  } else if (odabraniIndex == 4) {
-    snprintf(redak2, sizeof(redak2), "> Slavljenje:%d", dohvatiModSlavljenja());
-  } else if (odabraniIndex == 5) {
-    snprintf(redak2, sizeof(redak2), "> DCF: %s", jeDCFOmogucen() ? "ON" : "OFF");
-  } else if (odabraniIndex == 6) {
-    snprintf(redak2, sizeof(redak2), "> LCD: %s", jeLCDPozadinskoOsvjetljenjeUkljuceno() ? "ON" : "OFF");
-  } else if (odabraniIndex == 7) {
-    snprintf(redak2, sizeof(redak2), "> MQTT: %s", jeMQTTOmogucen() ? "ON" : "OFF");
+  char stavka[15];
+  ucitajTekstIzProgmem(stavkePostavki, odabraniIndex, stavka, sizeof(stavka));
+  snprintf(redak2, sizeof(redak2), "> %s", stavka);
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziMaticniSatMenu() {
+  char redak1[17];
+  char redak2[17];
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MATICNI SAT"));
+  char stavka[15];
+  ucitajTekstIzProgmem(stavkeMaticnogSata, odabraniIndex, stavka, sizeof(stavka));
+  snprintf(redak2, sizeof(redak2), "> %s", stavka);
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziMrezuMenu() {
+  char redak1[17];
+  char redak2[17];
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MREZA"));
+  char stavka[15];
+  ucitajTekstIzProgmem(stavkeMreze, odabraniIndex, stavka, sizeof(stavka));
+  snprintf(redak2, sizeof(redak2), "> %s", stavka);
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziSustavMenu() {
+  char redak1[17];
+  char redak2[17];
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("SUSTAV"));
+  if (odabraniIndex == 0) {
+    snprintf(redak2, sizeof(redak2), "> LCD: %s",
+             jeLCDPozadinskoOsvjetljenjeUkljuceno() ? "ON" : "OFF");
+  } else {
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("> Povratak"));
+  }
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziPlocaMenu() {
+  char redak1[17];
+  char redak2[17];
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("OKRETNA PLOCA"));
+  if (odabraniIndex == 0) {
+    snprintf(redak2, sizeof(redak2), "> Aktivna:%s",
+             jePlocaKonfigurirana() ? "ON" : "OFF");
   } else {
     char stavka[15];
-    ucitajTekstIzProgmem(stavkePostavki, odabraniIndex, stavka, sizeof(stavka));
+    ucitajTekstIzProgmem(stavkePloce, odabraniIndex, stavka, sizeof(stavka));
+    snprintf(redak2, sizeof(redak2), "> %s", stavka);
+  }
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziDcfConfig() {
+  char redak1[17];
+  char redak2[17];
+  if (dcfStrana == 0) {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("DCF aktivan"));
+    if (dcfOmogucenUredjivanje) {
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("ON RIGHT=Start"));
+    } else {
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("OFF [UP/DOWN]"));
+    }
+  } else {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Pokreni DCF"));
+    snprintf(redak2, sizeof(redak2), "%s [SEL]", jeDCFSinkronizacijaUTijeku() ? "U TIJEKU" : "START");
+  }
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziNtpConfig() {
+  char redak1[17];
+  char redak2[17];
+  if (ntpStrana == 0) {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("NTP aktivan"));
+    if (ntpOmogucenUredjivanje) {
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("ON RIGHT=Dalje"));
+    } else {
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("OFF [UP/DOWN]"));
+    }
+  } else if (ntpStrana == 1) {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Pokreni NTP"));
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("SEL=Zahtjev"));
+  } else {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("NTP server"));
+    snprintf(redak2, sizeof(redak2), "%.16s", ntpServerUredjivanje);
+  }
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziKazaljkeMenu() {
+  char redak1[17];
+  char redak2[17];
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("KAZALJKE"));
+
+  if (odabraniIndexKazaljke == 1) {
+    snprintf(redak2, sizeof(redak2), "> Ugradj: %s", imaKazaljkeSata() ? "DA" : "NE");
+  } else {
+    char stavka[15];
+    ucitajTekstIzProgmem(stavkeKazaljki, odabraniIndexKazaljke, stavka, sizeof(stavka));
     snprintf(redak2, sizeof(redak2), "> %s", stavka);
   }
   prikaziPoruku(redak1, redak2);
@@ -484,15 +597,12 @@ static void prikaziKorekcijuRuku() {
   char redak1[17];
   char redak2[17];
 
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Trenutna poz."));
   if (faza_korekcije == 0) {
-    snprintf(redak1, sizeof(redak1), "Sat: %dh", korektniSat);
-  } else if (faza_korekcije == 1) {
-    snprintf(redak1, sizeof(redak1), "Minuta: %dm", korektnaMinuta);
+    snprintf(redak2, sizeof(redak2), ">%02d<:%02d", korektniSat, korektnaMinuta);
   } else {
-    snprintf(redak1, sizeof(redak1), "Potvrdi?");
+    snprintf(redak2, sizeof(redak2), "%02d:>%02d<", korektniSat, korektnaMinuta);
   }
-
-  kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[UP/DOWN podesi]"));
   prikaziPoruku(redak1, redak2);
 }
 
@@ -500,22 +610,28 @@ static void prikaziPrilagodbanjeVremena() {
   char redak1[17];
   char redak2[17];
 
+  snprintf(redak1, sizeof(redak1), "Vrijeme %02d:%02d", privremeniSat, privremenaMinuta);
   if (faza_vremena == 0) {
-    snprintf(redak1, sizeof(redak1), "Sat: %d", privremeniSat);
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[UP/DOWN][SEL]"));
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(">SAT< MIN SPREM"));
   } else if (faza_vremena == 1) {
-    snprintf(redak1, sizeof(redak1), "Minuta: %d", privremenaMinuta);
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[UP/DOWN][SEL]"));
-  } else if (faza_vremena == 2) {
-    snprintf(redak1, sizeof(redak1), "Sekunda: %d", privremenaSekuned);
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[UP/DOWN][SEL]"));
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(" SAT >MIN<SPREM"));
   } else {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Spremi vrijeme?"));
-    if (potvrdiVrijeme) {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(">DA        NE"));
-    } else {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(" DA       >NE"));
-    }
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(" SAT  MIN >OK<"));
+  }
+  prikaziPoruku(redak1, redak2);
+}
+
+static void prikaziPodesavanjePloceNovo() {
+  char redak1[17];
+  char redak2[17];
+
+  snprintf(redak1, sizeof(redak1), "Ploca %02d:%02d", plocaSatUredjivanje, plocaMinutaUredjivanje);
+  if (faza_ploce == 0) {
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(">SAT< MIN SPREM"));
+  } else if (faza_ploce == 1) {
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(" SAT >MIN<SPREM"));
+  } else {
+    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR(" SAT  MIN >OK<"));
   }
   prikaziPoruku(redak1, redak2);
 }
@@ -540,31 +656,31 @@ static void prikaziPodesavanjeCavala() {
 
   if (faza_postavki_cavala == 0) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Mjesta cavala"));
-    snprintf(redak2, sizeof(redak2), "%d mjesta [SEL]", brojMjestaZaCavleUredjivanje);
+    snprintf(redak2, sizeof(redak2), "%d mjesta fiksno", brojMjestaZaCavleUredjivanje);
   } else if (faza_postavki_cavala == 1) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Broj zvona"));
-    snprintf(redak2, sizeof(redak2), "%d zvona [SEL]", brojZvonaUredjivanje);
-  } else if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 5) {
+    snprintf(redak2, sizeof(redak2), "%d zvona fiksno", brojZvonaUredjivanje);
+  } else if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 3) {
     const int indeks = faza_postavki_cavala - 2;
     snprintf(redak1, sizeof(redak1), "RD zvono %d", indeks + 1);
     snprintf(redak2, sizeof(redak2), "cavao:%02d [SEL]", cavliRadniUredjivanje[indeks]);
-  } else if (faza_postavki_cavala >= 6 && faza_postavki_cavala <= 9) {
-    const int indeks = faza_postavki_cavala - 6;
+  } else if (faza_postavki_cavala >= 4 && faza_postavki_cavala <= 5) {
+    const int indeks = faza_postavki_cavala - 4;
     snprintf(redak1, sizeof(redak1), "NED zvono %d", indeks + 1);
     snprintf(redak2, sizeof(redak2), "cavao:%02d [SEL]", cavliNedjeljaUredjivanje[indeks]);
-  } else if (faza_postavki_cavala == 10) {
+  } else if (faza_postavki_cavala == 6) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Slavljenje cav"));
     snprintf(redak2, sizeof(redak2), "SL:%02d [SEL]", cavaoSlavljenjaUredjivanje);
-  } else if (faza_postavki_cavala == 11) {
+  } else if (faza_postavki_cavala == 7) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Mrtvacko cav"));
     snprintf(redak2, sizeof(redak2), "MRT:%02d [SEL]", cavaoMrtvackogUredjivanje);
-  } else if (faza_postavki_cavala == 12) {
+  } else if (faza_postavki_cavala == 8) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono RD 1-4m"));
     snprintf(redak2, sizeof(redak2), "RD:%d min [SEL]", trajanjeZvonaRdMin);
-  } else if (faza_postavki_cavala == 13) {
+  } else if (faza_postavki_cavala == 9) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono NED 1-4"));
     snprintf(redak2, sizeof(redak2), "NED:%d min [SEL]", trajanjeZvonaNedMin);
-  } else if (faza_postavki_cavala == 14) {
+  } else if (faza_postavki_cavala == 10) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Slavljenje 1-4"));
     snprintf(redak2, sizeof(redak2), "SL:%d min [SEL]", trajanjeSlavljenjaMin);
   } else {
@@ -614,9 +730,12 @@ static void prikaziWiFiConfig() {
       snprintf(redak2, sizeof(redak2), "P%02d OK  SEL", wifiKursor + 1);
     }
   } else if (wifiStrana == 0) {
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi aktivan"));
+    snprintf(redak2, sizeof(redak2), "%s [SEL]", wifiOmogucenUredjivanje ? "ON" : "OFF");
+  } else if (wifiStrana == 1) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi SSID"));
     snprintf(redak2, sizeof(redak2), "%.16s", wifiSsidUredjivanje);
-  } else if (wifiStrana == 1) {
+  } else if (wifiStrana == 2) {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi Lozinka"));
     const size_t duljina = strlen(wifiLozinkaUredjivanje);
     int maska = static_cast<int>(duljina);
@@ -630,72 +749,6 @@ static void prikaziWiFiConfig() {
     redak2[16] = '\0';
   } else {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi spremanje"));
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("SEL=Spremi ESP"));
-  }
-
-  redak1[sizeof(redak1) - 1] = '\0';
-  redak2[sizeof(redak2) - 1] = '\0';
-  prikaziPoruku(redak1, redak2);
-}
-
-static void prikaziMQTTConfig() {
-  char redak1[17];
-  char redak2[17];
-
-  if (mqttUredjivanjeAktivno) {
-    const char* oznakaPolja = (mqttPolje == 0) ? "BROKER" : ((mqttPolje == 1) ? "USER" : "PASS");
-    const char* izvor = dohvatiMQTTBufferZaUredjivanje();
-    const int maxDuljina = dohvatiMQTTMaxDuljinu();
-    if (mqttKursor < 0) mqttKursor = 0;
-    if (mqttKursor >= maxDuljina) mqttKursor = maxDuljina - 1;
-
-    int pocetak = mqttKursor - 5;
-    if (pocetak < 0) pocetak = 0;
-    if (pocetak > maxDuljina - 10) pocetak = maxDuljina - 10;
-    if (pocetak < 0) pocetak = 0;
-
-    char pregled[11];
-    for (int i = 0; i < 10; ++i) {
-      const int indeks = pocetak + i;
-      char znak = izvor[indeks];
-      if (znak == '\0') {
-        znak = '_';
-      } else if (mqttPolje == 2) {
-        znak = '*';
-      }
-      pregled[i] = znak;
-    }
-    pregled[10] = '\0';
-
-    snprintf(redak1, sizeof(redak1), "%s:%-10s", oznakaPolja, pregled);
-    const char aktivniZnak = izvor[mqttKursor] == '\0' ? '_' : izvor[mqttKursor];
-    snprintf(redak2, sizeof(redak2), "P%02d %c L/R U/D", mqttKursor + 1, aktivniZnak);
-  } else if (mqttStrana == 0) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT aktivan"));
-    snprintf(redak2, sizeof(redak2), "%s [SEL]", mqttOmogucenUredjivanje ? "ON" : "OFF");
-  } else if (mqttStrana == 1) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT Broker"));
-    snprintf(redak2, sizeof(redak2), "%.16s", mqttBrokerUredjivanje);
-  } else if (mqttStrana == 2) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT Port"));
-    snprintf(redak2, sizeof(redak2), "%u L/R10 U/D1", mqttPortUredjivanje);
-  } else if (mqttStrana == 3) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT User"));
-    snprintf(redak2, sizeof(redak2), "%.16s", mqttKorisnikUredjivanje);
-  } else if (mqttStrana == 4) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT Lozinka"));
-    const size_t duljina = strlen(mqttLozinkaUredjivanje);
-    int maska = static_cast<int>(duljina);
-    if (maska > 16) maska = 16;
-    for (int i = 0; i < maska; ++i) {
-      redak2[i] = '*';
-    }
-    for (int i = maska; i < 16; ++i) {
-      redak2[i] = ' ';
-    }
-    redak2[16] = '\0';
-  } else {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MQTT spremanje"));
     kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("SEL=Spremi ESP"));
   }
 
@@ -755,12 +808,17 @@ static void prikaziInfoDisplay() {
              jeRtcSqwAktivan() ? 'O' : 'F');
     snprintf(redak2, sizeof(redak2), "Izvor:%s", dohvatiOznakuIzvoraVremena());
   } else if (infoStrana == 1) {
-    int memorKazMin = dohvatiMemoriraneKazaljkeMinuta();
-    int satKaz = memorKazMin / 60;
-    int minKaz = memorKazMin % 60;
+    if (imaKazaljkeSata()) {
+      int memorKazMin = dohvatiMemoriraneKazaljkeMinuta();
+      int satKaz = memorKazMin / 60;
+      int minKaz = memorKazMin % 60;
 
-    snprintf(redak1, sizeof(redak1), "Kaz:%d:%02d", satKaz, minKaz);
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[LEFT/RIGHT]"));
+      snprintf(redak1, sizeof(redak1), "Kaz:%d:%02d", satKaz, minKaz);
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("[LEFT/RIGHT]"));
+    } else {
+      kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Kazaljke"));
+      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("NEMA [L/R]"));
+    }
   } else {
     int pozPloca = dohvatiPozicijuPloce();
 
@@ -788,23 +846,6 @@ static void prikaziKonfirmaciju() {
   prikaziPoruku(redak1, redak2);
 }
 
-static void prikaziUnos_Lozinke() {
-  char redak1[17];
-  char redak2[17];
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Lozinka:"));
-
-  for (int i = 0; i < 8; i++) {
-    if (unesenaLozinka[i] == '\0') {
-      redak2[i] = '_';
-    } else {
-      redak2[i] = '*';
-    }
-  }
-  redak2[8] = '\0';
-
-  prikaziPoruku(redak1, redak2);
-}
-
 // ==================== KEY PROCESSING ====================
 
 static void obradiKlucGlavniMeni(KeyEvent event) {
@@ -817,28 +858,14 @@ static void obradiKlucGlavniMeni(KeyEvent event) {
       break;
     case KEY_SELECT:
       if (odabraniIndex == 0) {
-        u_korekciji_ruku = true;
-        faza_korekcije = 0;
-        DateTime sada = dohvatiTrenutnoVrijeme();
-        korektniSat = sada.hour();
-        korektnaMinuta = sada.minute();
-        trenutnoStanje = MENU_STATE_HAND_CORRECTION;
-        posaljiPCLog(F("Ulazak u korekciju ruku"));
-      } else if (odabraniIndex == 1) {
         odabraniIndex = 0;
         trenutnoStanje = MENU_STATE_SETTINGS;
         posaljiPCLog(F("Ulazak u postavke"));
-      } else if (odabraniIndex == 2) {
+      } else if (odabraniIndex == 1) {
         trenutnoStanje = MENU_STATE_INFO_DISPLAY;
         infoStrana = 0;
         posaljiPCLog(F("Ulazak u informacije"));
-      } else if (odabraniIndex == 3) {
-        trenutnoStanje = MENU_STATE_WIFI_CONFIG;
-        wifiStrana = 0;
-        wifiUredjivanjeAktivno = false;
-        ucitajWiFiUredjivanjeIzPostavki();
-        posaljiPCLog(F("Ulazak u WiFi"));
-      } else if (odabraniIndex == 4) {
+      } else if (odabraniIndex == 2) {
         povratakNaGlavniPrikaz();
       }
       break;
@@ -860,61 +887,321 @@ static void obradiKlucPostavke(KeyEvent event) {
       break;
     case KEY_SELECT:
       if (odabraniIndex == 0) {
-        DateTime sada = dohvatiTrenutnoVrijeme();
-        privremeniSat = sada.hour();
-        privremenaMinuta = sada.minute();
-        privremenaSekuned = sada.second();
-        faza_vremena = 0;
-        potvrdiVrijeme = true;
-        trenutnoStanje = MENU_STATE_TIME_ADJUST;
-        posaljiPCLog(F("Ulazak u prilagodbu vremena"));
-      } else if (odabraniIndex == 1) {
         odabraniIndex = 0;
-        trenutnoStanje = MENU_STATE_MODE_SELECT;
-        posaljiPCLog(F("Ulazak u izbor moda"));
+        trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
+        posaljiPCLog(F("Ulazak u postavke maticnog sata"));
+      } else if (odabraniIndex == 1) {
+        odabraniIndexKazaljke = 0;
+        trenutnoStanje = MENU_STATE_HAND_SETTINGS;
+        posaljiPCLog(F("Ulazak u postavke kazaljki"));
       } else if (odabraniIndex == 2) {
-        tihiSatOd = dohvatiTihiPeriodOdSata();
-        tihiSatDo = dohvatiTihiPeriodDoSata();
-        faza_tihih_sati = 0;
-        trenutnoStanje = MENU_STATE_QUIET_HOURS;
-        posaljiPCLog(F("Ulazak u podesavanje tihih sati"));
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_PLATE_SETTINGS;
+        posaljiPCLog(F("Ulazak u postavke okretne ploce"));
       } else if (odabraniIndex == 3) {
-        ucitajPostavkeCavalaZaUredjivanje();
-        faza_postavki_cavala = 0;
-        trenutnoStanje = MENU_STATE_NAIL_SETTINGS;
-        posaljiPCLog(F("Ulazak u postavke cavala"));
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_NETWORK_SETTINGS;
+        posaljiPCLog(F("Ulazak u mrezne postavke"));
       } else if (odabraniIndex == 4) {
-        const uint8_t noviMod = (dohvatiModSlavljenja() == 1) ? 2 : 1;
-        postaviModSlavljenja(noviMod);
-        char log[48];
-        snprintf(log, sizeof(log), "Izbornik: mod slavljenja postavljen na %u", noviMod);
-        posaljiPCLog(log);
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_SYSTEM_SETTINGS;
+        posaljiPCLog(F("Ulazak u sustavske postavke"));
       } else if (odabraniIndex == 5) {
-        trenutnoStanje = MENU_STATE_SYNC_CONFIG;
-        sinkStrana = 0;
-        sinkUredjivanjeAktivno = false;
-        ucitajSinkUredjivanjeIzPostavki();
-        posaljiPCLog(F("Ulazak u sinkronizacijske postavke"));
-      } else if (odabraniIndex == 6) {
-        bool novoStanje = !jeLCDPozadinskoOsvjetljenjeUkljuceno();
-        postaviLCDPozadinskoOsvjetljenje(novoStanje);
-        primijeniLCDPozadinskoOsvjetljenje(novoStanje);
-        posaljiPCLog(novoStanje ? F("Izbornik: LCD osvjetljenje postavljeno na ON")
-                                : F("Izbornik: LCD osvjetljenje postavljeno na OFF"));
-      } else if (odabraniIndex == 7) {
-        trenutnoStanje = MENU_STATE_MQTT_CONFIG;
-        mqttStrana = 0;
-        mqttUredjivanjeAktivno = false;
-        ucitajMQTTUredjivanjeIzPostavki();
-        posaljiPCLog(F("Ulazak u MQTT postavke"));
-      } else if (odabraniIndex == 8) {
-        odabraniIndex = 1;
+        odabraniIndex = 0;
         trenutnoStanje = MENU_STATE_MAIN_MENU;
       }
       break;
     case KEY_BACK:
-      odabraniIndex = 1;
+      odabraniIndex = 0;
       trenutnoStanje = MENU_STATE_MAIN_MENU;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucMaticniSat(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      odabraniIndex = (odabraniIndex - 1 + BROJ_STAVKI_MATICNOG_SATA) % BROJ_STAVKI_MATICNOG_SATA;
+      break;
+    case KEY_DOWN:
+      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_MATICNOG_SATA;
+      break;
+    case KEY_SELECT:
+      if (odabraniIndex == 0) {
+        const DateTime sada = dohvatiTrenutnoVrijeme();
+        privremeniSat = sada.hour();
+        privremenaMinuta = sada.minute();
+        faza_vremena = 0;
+        trenutnoStanje = MENU_STATE_TIME_ADJUST;
+      } else if (odabraniIndex == 1) {
+        dcfStrana = 0;
+        dcfOmogucenUredjivanje = jeDCFOmogucen();
+        trenutnoStanje = MENU_STATE_DCF_CONFIG;
+      } else if (odabraniIndex == 2) {
+        ntpStrana = 0;
+        ntpOmogucenUredjivanje = jeNTPOmogucen();
+        sinkUredjivanjeAktivno = false;
+        ucitajSinkUredjivanjeIzPostavki();
+        trenutnoStanje = MENU_STATE_NTP_CONFIG;
+      } else {
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 0;
+      trenutnoStanje = MENU_STATE_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucDcfConfig(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+    case KEY_DOWN:
+      if (dcfStrana == 0) {
+        dcfOmogucenUredjivanje = !dcfOmogucenUredjivanje;
+        postaviSinkronizacijskePostavke(dohvatiNTPServer(), dcfOmogucenUredjivanje);
+        inicijalizirajDCF();
+      }
+      break;
+    case KEY_LEFT:
+      dcfStrana = 0;
+      break;
+    case KEY_RIGHT:
+      if (dcfOmogucenUredjivanje) {
+        dcfStrana = 1;
+      }
+      break;
+    case KEY_SELECT:
+      if (dcfStrana == 0) {
+        dcfOmogucenUredjivanje = !dcfOmogucenUredjivanje;
+        postaviSinkronizacijskePostavke(dohvatiNTPServer(), dcfOmogucenUredjivanje);
+        inicijalizirajDCF();
+      } else {
+        pokreniRucniDCFPrijem();
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 1;
+      trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucNtpConfig(KeyEvent event) {
+  if (sinkUredjivanjeAktivno) {
+    const int brojZnakova = dohvatiBrojZnakovaZaUredjivanje();
+    const int maxDuljina = dohvatiSinkMaxDuljinu();
+
+    if (event == KEY_LEFT || event == KEY_RIGHT) {
+      const int trenutniIndeks = pronadiIndeksZnaka(ntpServerUredjivanje[sinkKursor]);
+      int noviIndeks = trenutniIndeks;
+      if (event == KEY_LEFT) {
+        noviIndeks = (trenutniIndeks - 1 + brojZnakova) % brojZnakova;
+      } else {
+        noviIndeks = (trenutniIndeks + 1) % brojZnakova;
+      }
+      ntpServerUredjivanje[sinkKursor] = dohvatiZnakZaUredjivanje(noviIndeks);
+      if (sinkKursor + 1 < maxDuljina && ntpServerUredjivanje[sinkKursor + 1] == '\0') {
+        ntpServerUredjivanje[sinkKursor + 1] = '\0';
+      }
+    } else if (event == KEY_UP) {
+      if (sinkKursor > 0) {
+        sinkKursor--;
+      }
+    } else if (event == KEY_DOWN) {
+      if (sinkKursor < (maxDuljina - 1)) {
+        sinkKursor++;
+        if (ntpServerUredjivanje[sinkKursor] == '\0') {
+          ntpServerUredjivanje[sinkKursor] = ' ';
+          ntpServerUredjivanje[sinkKursor + 1] = '\0';
+        }
+      }
+    } else if (event == KEY_SELECT) {
+      while (strlen(ntpServerUredjivanje) > 0 && ntpServerUredjivanje[strlen(ntpServerUredjivanje) - 1] == ' ') {
+        ntpServerUredjivanje[strlen(ntpServerUredjivanje) - 1] = '\0';
+      }
+      postaviSinkronizacijskePostavke(ntpServerUredjivanje, jeDCFOmogucen());
+      posaljiNTPPostavkeESP();
+      sinkUredjivanjeAktivno = false;
+    } else if (event == KEY_BACK) {
+      sinkUredjivanjeAktivno = false;
+    }
+    return;
+  }
+
+  switch (event) {
+    case KEY_UP:
+    case KEY_DOWN:
+      if (ntpStrana == 0) {
+        ntpOmogucenUredjivanje = !ntpOmogucenUredjivanje;
+        postaviNTPOmogucen(ntpOmogucenUredjivanje);
+      }
+      break;
+    case KEY_LEFT:
+      if (ntpStrana > 0) {
+        ntpStrana--;
+      }
+      break;
+    case KEY_RIGHT:
+      if (ntpOmogucenUredjivanje && ntpStrana < 2) {
+        ntpStrana++;
+      }
+      break;
+    case KEY_SELECT:
+      if (ntpStrana == 0) {
+        ntpOmogucenUredjivanje = !ntpOmogucenUredjivanje;
+        postaviNTPOmogucen(ntpOmogucenUredjivanje);
+      } else if (ntpStrana == 1) {
+        posaljiNTPZahtjevESP();
+      } else {
+        pokreniSinkUredjivanje();
+      }
+      break;
+    case KEY_BACK:
+      ntpStrana = 0;
+      sinkUredjivanjeAktivno = false;
+      odabraniIndex = 2;
+      trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucPloce(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      odabraniIndex = (odabraniIndex - 1 + BROJ_STAVKI_PLOCE) % BROJ_STAVKI_PLOCE;
+      break;
+    case KEY_DOWN:
+      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_PLOCE;
+      break;
+    case KEY_SELECT:
+      if (odabraniIndex == 0) {
+        const bool novoStanje = !jePlocaKonfigurirana();
+        postaviKonfiguracijuPloce(novoStanje, dohvatiPocetakPloceMinute(), dohvatiKrajPloceMinute());
+      } else if (odabraniIndex == 1) {
+        const int pozicija = constrain(dohvatiPozicijuPloce(), 0, 63);
+        plocaSatUredjivanje = 5 + (pozicija / 4);
+        plocaMinutaUredjivanje = (pozicija % 4) * 15;
+        plocaAktivnaUredjivanje = jePlocaKonfigurirana();
+        faza_ploce = 0;
+        trenutnoStanje = MENU_STATE_PLATE_ADJUST;
+      } else {
+        odabraniIndex = 2;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 2;
+      trenutnoStanje = MENU_STATE_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucNamjestanjaPloce(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      if (faza_ploce == 0) {
+        plocaSatUredjivanje = (plocaSatUredjivanje >= 20) ? 5 : (plocaSatUredjivanje + 1);
+      } else if (faza_ploce == 1) {
+        plocaMinutaUredjivanje = (plocaMinutaUredjivanje + 15) % 60;
+      }
+      break;
+    case KEY_DOWN:
+      if (faza_ploce == 0) {
+        plocaSatUredjivanje = (plocaSatUredjivanje <= 5) ? 20 : (plocaSatUredjivanje - 1);
+      } else if (faza_ploce == 1) {
+        plocaMinutaUredjivanje = (plocaMinutaUredjivanje + 45) % 60;
+      }
+      break;
+    case KEY_LEFT:
+      if (faza_ploce > 0) {
+        faza_ploce--;
+      }
+      break;
+    case KEY_RIGHT:
+      if (faza_ploce < 2) {
+        faza_ploce++;
+      }
+      break;
+    case KEY_SELECT:
+      if (faza_ploce < 2) {
+        faza_ploce++;
+      } else {
+        const int pozicija = (plocaSatUredjivanje - 5) * 4 + (plocaMinutaUredjivanje / 15);
+        postaviTrenutniPolozajPloce(constrain(pozicija, 0, 63));
+        oznaciPlocuKaoSinkroniziranu();
+        odabraniIndex = 1;
+        trenutnoStanje = MENU_STATE_PLATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 1;
+      trenutnoStanje = MENU_STATE_PLATE_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucMreza(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      odabraniIndex = (odabraniIndex - 1 + BROJ_STAVKI_MREZE) % BROJ_STAVKI_MREZE;
+      break;
+    case KEY_DOWN:
+      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_MREZE;
+      break;
+    case KEY_SELECT:
+      if (odabraniIndex == 0) {
+        trenutnoStanje = MENU_STATE_WIFI_CONFIG;
+        wifiStrana = 0;
+        wifiUredjivanjeAktivno = false;
+        ucitajWiFiUredjivanjeIzPostavki();
+      } else {
+        odabraniIndex = 3;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 3;
+      trenutnoStanje = MENU_STATE_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
+static void obradiKlucSustav(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+    case KEY_DOWN:
+      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_SUSTAVA;
+      break;
+    case KEY_SELECT:
+      if (odabraniIndex == 0) {
+        const bool novoStanje = !jeLCDPozadinskoOsvjetljenjeUkljuceno();
+        postaviLCDPozadinskoOsvjetljenje(novoStanje);
+        primijeniLCDPozadinskoOsvjetljenje(novoStanje);
+      } else {
+        odabraniIndex = 4;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 4;
+      trenutnoStanje = MENU_STATE_SETTINGS;
       break;
     default:
       break;
@@ -957,23 +1244,19 @@ static void obradiKlucTihiSati(KeyEvent event) {
 static void obradiKlucPostavkeCavala(KeyEvent event) {
   switch (event) {
     case KEY_UP:
-      if (faza_postavki_cavala == 0) {
-        brojMjestaZaCavleUredjivanje = (brojMjestaZaCavleUredjivanje >= 10) ? 5 : (brojMjestaZaCavleUredjivanje + 1);
-      } else if (faza_postavki_cavala == 1) {
-        brojZvonaUredjivanje = (brojZvonaUredjivanje >= 4) ? 1 : (brojZvonaUredjivanje + 1);
-      } else if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 5) {
+      if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 3) {
         prilagodiVrijednostCavla(&cavliRadniUredjivanje[faza_postavki_cavala - 2], 1);
-      } else if (faza_postavki_cavala >= 6 && faza_postavki_cavala <= 9) {
-        prilagodiVrijednostCavla(&cavliNedjeljaUredjivanje[faza_postavki_cavala - 6], 1);
-      } else if (faza_postavki_cavala == 10) {
+      } else if (faza_postavki_cavala >= 4 && faza_postavki_cavala <= 5) {
+        prilagodiVrijednostCavla(&cavliNedjeljaUredjivanje[faza_postavki_cavala - 4], 1);
+      } else if (faza_postavki_cavala == 6) {
         prilagodiVrijednostCavla(&cavaoSlavljenjaUredjivanje, 1);
-      } else if (faza_postavki_cavala == 11) {
+      } else if (faza_postavki_cavala == 7) {
         prilagodiVrijednostCavla(&cavaoMrtvackogUredjivanje, 1);
-      } else if (faza_postavki_cavala == 12) {
+      } else if (faza_postavki_cavala == 8) {
         trajanjeZvonaRdMin = (trajanjeZvonaRdMin % 4) + 1;
-      } else if (faza_postavki_cavala == 13) {
+      } else if (faza_postavki_cavala == 9) {
         trajanjeZvonaNedMin = (trajanjeZvonaNedMin % 4) + 1;
-      } else if (faza_postavki_cavala == 14) {
+      } else if (faza_postavki_cavala == 10) {
         trajanjeSlavljenjaMin = (trajanjeSlavljenjaMin % 4) + 1;
       } else {
         slavljenjePrijeZvonjenja = !slavljenjePrijeZvonjenja;
@@ -981,23 +1264,19 @@ static void obradiKlucPostavkeCavala(KeyEvent event) {
       sanitizirajRasporedCavalaUredjivanje();
       break;
     case KEY_DOWN:
-      if (faza_postavki_cavala == 0) {
-        brojMjestaZaCavleUredjivanje = (brojMjestaZaCavleUredjivanje <= 5) ? 10 : (brojMjestaZaCavleUredjivanje - 1);
-      } else if (faza_postavki_cavala == 1) {
-        brojZvonaUredjivanje = (brojZvonaUredjivanje <= 1) ? 4 : (brojZvonaUredjivanje - 1);
-      } else if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 5) {
+      if (faza_postavki_cavala >= 2 && faza_postavki_cavala <= 3) {
         prilagodiVrijednostCavla(&cavliRadniUredjivanje[faza_postavki_cavala - 2], -1);
-      } else if (faza_postavki_cavala >= 6 && faza_postavki_cavala <= 9) {
-        prilagodiVrijednostCavla(&cavliNedjeljaUredjivanje[faza_postavki_cavala - 6], -1);
-      } else if (faza_postavki_cavala == 10) {
+      } else if (faza_postavki_cavala >= 4 && faza_postavki_cavala <= 5) {
+        prilagodiVrijednostCavla(&cavliNedjeljaUredjivanje[faza_postavki_cavala - 4], -1);
+      } else if (faza_postavki_cavala == 6) {
         prilagodiVrijednostCavla(&cavaoSlavljenjaUredjivanje, -1);
-      } else if (faza_postavki_cavala == 11) {
+      } else if (faza_postavki_cavala == 7) {
         prilagodiVrijednostCavla(&cavaoMrtvackogUredjivanje, -1);
-      } else if (faza_postavki_cavala == 12) {
+      } else if (faza_postavki_cavala == 8) {
         trajanjeZvonaRdMin = (trajanjeZvonaRdMin - 2 + 4) % 4 + 1;
-      } else if (faza_postavki_cavala == 13) {
+      } else if (faza_postavki_cavala == 9) {
         trajanjeZvonaNedMin = (trajanjeZvonaNedMin - 2 + 4) % 4 + 1;
-      } else if (faza_postavki_cavala == 14) {
+      } else if (faza_postavki_cavala == 10) {
         trajanjeSlavljenjaMin = (trajanjeSlavljenjaMin - 2 + 4) % 4 + 1;
       } else {
         slavljenjePrijeZvonjenja = !slavljenjePrijeZvonjenja;
@@ -1005,7 +1284,7 @@ static void obradiKlucPostavkeCavala(KeyEvent event) {
       sanitizirajRasporedCavalaUredjivanje();
       break;
     case KEY_SELECT:
-      if (faza_postavki_cavala < 15) {
+      if (faza_postavki_cavala < 11) {
         faza_postavki_cavala++;
       } else {
         otvoriKonfirmaciju(PSTR("Spremi cavle?"), potvrdiSpremanjePostavkiCavala, MENU_STATE_NAIL_SETTINGS);
@@ -1021,38 +1300,64 @@ static void obradiKlucPostavkeCavala(KeyEvent event) {
   }
 }
 
+static void obradiKlucPostavkeKazaljki(KeyEvent event) {
+  switch (event) {
+    case KEY_UP:
+      odabraniIndexKazaljke =
+          (odabraniIndexKazaljke - 1 + BROJ_STAVKI_KAZALJKI) % BROJ_STAVKI_KAZALJKI;
+      break;
+    case KEY_DOWN:
+      odabraniIndexKazaljke = (odabraniIndexKazaljke + 1) % BROJ_STAVKI_KAZALJKI;
+      break;
+    case KEY_SELECT:
+      if (odabraniIndexKazaljke == 0) {
+        pokreniNamjestanjeKazaljki(MENU_STATE_HAND_SETTINGS);
+      } else if (odabraniIndexKazaljke == 1) {
+        bool novoStanje = !imaKazaljkeSata();
+        postaviImaKazaljkeSata(novoStanje);
+        posaljiPCLog(novoStanje ? F("Izbornik: kazaljke postavljene na ON")
+                                : F("Izbornik: kazaljke postavljene na OFF"));
+      } else {
+        odabraniIndex = 1;
+        trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_BACK:
+      odabraniIndex = 1;
+      trenutnoStanje = MENU_STATE_SETTINGS;
+      break;
+    default:
+      break;
+  }
+}
+
 static void obradiKlucKorekcija(KeyEvent event) {
   switch (event) {
     case KEY_UP:
       if (faza_korekcije == 0) {
-        korektniSat = (korektniSat + 1) % 12;
-      } else if (faza_korekcije == 1) {
+        korektniSat = (korektniSat >= 12) ? 1 : (korektniSat + 1);
+      } else {
         korektnaMinuta = (korektnaMinuta + 1) % 60;
       }
       break;
     case KEY_DOWN:
       if (faza_korekcije == 0) {
-        korektniSat = (korektniSat - 1 + 12) % 12;
-      } else if (faza_korekcije == 1) {
+        korektniSat = (korektniSat <= 1) ? 12 : (korektniSat - 1);
+      } else {
         korektnaMinuta = (korektnaMinuta - 1 + 60) % 60;
       }
       break;
+    case KEY_LEFT:
+      faza_korekcije = 0;
+      break;
+    case KEY_RIGHT:
+      faza_korekcije = 1;
+      break;
     case KEY_SELECT:
-      if (faza_korekcije < 1) {
-        faza_korekcije++;
-      } else {
-        // Primijeni korekciju kroz istu dinamicku putanju kao NTP/manual sinkronizacija.
-        postaviRucnuPozicijuKazaljki(korektniSat, korektnaMinuta);
-
-        char log[40];
-        snprintf(log, sizeof(log), "Korekcija ruku: %d:%02d", korektniSat, korektnaMinuta);
-        posaljiPCLog(log);
-
-        povratakNaGlavniPrikaz();
-      }
+      zavrsiNamjestanjeKazaljki(true);
       break;
     case KEY_BACK:
-      povratakNaGlavniPrikaz();
+      zavrsiNamjestanjeKazaljki(false);
       break;
     default:
       break;
@@ -1066,10 +1371,6 @@ static void obradiKlucPrilagodbanjeVremena(KeyEvent event) {
         privremeniSat = (privremeniSat + 1) % 24;
       } else if (faza_vremena == 1) {
         privremenaMinuta = (privremenaMinuta + 1) % 60;
-      } else if (faza_vremena == 2) {
-        privremenaSekuned = (privremenaSekuned + 1) % 60;
-      } else {
-        potvrdiVrijeme = true;
       }
       break;
     case KEY_DOWN:
@@ -1077,44 +1378,36 @@ static void obradiKlucPrilagodbanjeVremena(KeyEvent event) {
         privremeniSat = (privremeniSat - 1 + 24) % 24;
       } else if (faza_vremena == 1) {
         privremenaMinuta = (privremenaMinuta - 1 + 60) % 60;
-      } else if (faza_vremena == 2) {
-        privremenaSekuned = (privremenaSekuned - 1 + 60) % 60;
-      } else {
-        potvrdiVrijeme = false;
       }
       break;
     case KEY_LEFT:
-      if (faza_vremena == 3) {
-        potvrdiVrijeme = true;
+      if (faza_vremena > 0) {
+        faza_vremena--;
       }
       break;
     case KEY_RIGHT:
-      if (faza_vremena == 3) {
-        potvrdiVrijeme = false;
+      if (faza_vremena < 2) {
+        faza_vremena++;
       }
       break;
     case KEY_SELECT:
       if (faza_vremena < 2) {
         faza_vremena++;
-      } else if (faza_vremena == 2) {
-        faza_vremena = 3;
-        potvrdiVrijeme = true;
-      } else if (potvrdiVrijeme) {
+      } else {
         const DateTime sada = dohvatiTrenutnoVrijeme();
         azurirajVrijemeRucno(DateTime(
           sada.year(), sada.month(), sada.day(),
-          privremeniSat, privremenaMinuta, privremenaSekuned));
-        povratakNaGlavniPrikaz();
-      } else {
-        povratakNaGlavniPrikaz();
+          privremeniSat, privremenaMinuta, 0));
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
       }
       break;
     case KEY_BACK:
-      if (faza_vremena == 3) {
-        faza_vremena = 2;
-        potvrdiVrijeme = true;
+      if (faza_vremena > 0) {
+        faza_vremena--;
       } else {
-        povratakNaGlavniPrikaz();
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
       }
       break;
     default:
@@ -1162,7 +1455,7 @@ static void obradiKlucInfo(KeyEvent event) {
       break;
     case KEY_BACK:
       infoStrana = 0;
-      odabraniIndex = 2;
+      odabraniIndex = 1;
       trenutnoStanje = MENU_STATE_MAIN_MENU;
       break;
     default:
@@ -1193,59 +1486,6 @@ static void obradiKlucKonfirmacija(KeyEvent event) {
   }
 }
 
-static void obradiKlucLozinka(KeyEvent event) {
-  switch (event) {
-    case KEY_UP:
-      if (pozicija_lozinke < 8 && unesenaLozinka[pozicija_lozinke] == '\0') {
-        unesenaLozinka[pozicija_lozinke] = '0';
-      } else if (unesenaLozinka[pozicija_lozinke] != '\0') {
-        unesenaLozinka[pozicija_lozinke]++;
-        if (unesenaLozinka[pozicija_lozinke] > '9') {
-          unesenaLozinka[pozicija_lozinke] = '0';
-        }
-      }
-      break;
-    case KEY_DOWN:
-      if (pozicija_lozinke < 8 && unesenaLozinka[pozicija_lozinke] != '\0') {
-        unesenaLozinka[pozicija_lozinke]--;
-        if (unesenaLozinka[pozicija_lozinke] < '0') {
-          unesenaLozinka[pozicija_lozinke] = '9';
-        }
-      }
-      break;
-    case KEY_RIGHT:
-      if (pozicija_lozinke < 7) {
-        pozicija_lozinke++;
-      }
-      break;
-    case KEY_LEFT:
-      if (pozicija_lozinke > 0) {
-        pozicija_lozinke--;
-      }
-      break;
-    case KEY_SELECT:
-      if (strcmp(unesenaLozinka, dohvatiWifiLozinku()) == 0) {
-        posaljiPCLog(F("Lozinka OK - admin pristup"));
-        u_modu_lozinke = false;
-        memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
-        povratakNaGlavniPrikaz();
-      } else {
-        posaljiPCLog(F("Neispravna lozinka"));
-        memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
-        pozicija_lozinke = 0;
-      }
-      break;
-    case KEY_BACK:
-      memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
-      pozicija_lozinke = 0;
-      u_modu_lozinke = false;
-      povratakNaGlavniPrikaz();
-      break;
-    default:
-      break;
-  }
-}
-
 // ==================== PUBLIC API ====================
 
 void inicijalizirajMenuSistem() {
@@ -1256,30 +1496,30 @@ void inicijalizirajMenuSistem() {
   funkcijaNaDA = NULL;
   stanjePovratkaKonfirmacije = MENU_STATE_DISPLAY_TIME;
   porukaZaKonfirmaciju[0] = '\0';
-  memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
-  pozicija_lozinke = 0;
   u_korekciji_ruku = false;
-  u_modu_lozinke = false;
   infoStrana = 0;
   wifiStrana = 0;
   wifiUredjivanjeAktivno = false;
+  wifiOmogucenUredjivanje = jeWiFiOmogucen();
   wifiPolje = 0;
   wifiKursor = 0;
   wifiOdabirZnaka = 0;
-  mqttStrana = 0;
-  mqttUredjivanjeAktivno = false;
-  mqttPolje = 0;
-  mqttKursor = 0;
-  mqttOmogucenUredjivanje = jeMQTTOmogucen();
-  mqttPortUredjivanje = dohvatiMQTTPort();
   sinkStrana = 0;
   sinkUredjivanjeAktivno = false;
   sinkKursor = 0;
   dcfOmogucenUredjivanje = jeDCFOmogucen();
+  ntpOmogucenUredjivanje = jeNTPOmogucen();
+  dcfStrana = 0;
+  ntpStrana = 0;
+  plocaAktivnaUredjivanje = jePlocaKonfigurirana();
+  plocaSatUredjivanje = 5 + (constrain(dohvatiPozicijuPloce(), 0, 63) / 4);
+  plocaMinutaUredjivanje = (constrain(dohvatiPozicijuPloce(), 0, 63) % 4) * 15;
+  faza_ploce = 0;
   memset(&mrezniUredjivanje, 0, sizeof(mrezniUredjivanje));
   ucitajPostavkeCavalaZaUredjivanje();
   faza_postavki_cavala = 0;
-  potvrdiVrijeme = true;
+  odabraniIndexKazaljke = 0;
+  stanjePovratkaKorekcijeRuku = MENU_STATE_MAIN_MENU;
 
   otkrijI2CAdrese();
 
@@ -1320,6 +1560,38 @@ void obradiKluc(KeyEvent event) {
       obradiKlucPostavke(event);
       break;
 
+    case MENU_STATE_CLOCK_SETTINGS:
+      obradiKlucMaticniSat(event);
+      break;
+
+    case MENU_STATE_DCF_CONFIG:
+      obradiKlucDcfConfig(event);
+      break;
+
+    case MENU_STATE_NTP_CONFIG:
+      obradiKlucNtpConfig(event);
+      break;
+
+    case MENU_STATE_HAND_SETTINGS:
+      obradiKlucPostavkeKazaljki(event);
+      break;
+
+    case MENU_STATE_PLATE_SETTINGS:
+      obradiKlucPloce(event);
+      break;
+
+    case MENU_STATE_PLATE_ADJUST:
+      obradiKlucNamjestanjaPloce(event);
+      break;
+
+    case MENU_STATE_NETWORK_SETTINGS:
+      obradiKlucMreza(event);
+      break;
+
+    case MENU_STATE_SYSTEM_SETTINGS:
+      obradiKlucSustav(event);
+      break;
+
     case MENU_STATE_HAND_CORRECTION:
       obradiKlucKorekcija(event);
       break;
@@ -1346,10 +1618,6 @@ void obradiKluc(KeyEvent event) {
 
     case MENU_STATE_CONFIRMATION:
       obradiKlucKonfirmacija(event);
-      break;
-
-    case MENU_STATE_PASSWORD_ENTRY:
-      obradiKlucLozinka(event);
       break;
 
     case MENU_STATE_WIFI_CONFIG:
@@ -1404,10 +1672,16 @@ void obradiKluc(KeyEvent event) {
         wifiStrana = (wifiStrana - 1 + BROJ_WIFI_STRANA) % BROJ_WIFI_STRANA;
       } else if (event == KEY_RIGHT) {
         wifiStrana = (wifiStrana + 1) % BROJ_WIFI_STRANA;
+      } else if (event == KEY_UP || event == KEY_DOWN) {
+        if (wifiStrana == 0) {
+          wifiOmogucenUredjivanje = !wifiOmogucenUredjivanje;
+        }
       } else if (event == KEY_SELECT) {
         if (wifiStrana == 0) {
-          pokreniWiFiUredjivanje(0);
+          wifiOmogucenUredjivanje = !wifiOmogucenUredjivanje;
         } else if (wifiStrana == 1) {
+          pokreniWiFiUredjivanje(0);
+        } else if (wifiStrana == 2) {
           pokreniWiFiUredjivanje(1);
         } else {
           otvoriKonfirmaciju(PSTR("Spremi WiFi?"), potvrdiSpremanjeWiFiPostavki, MENU_STATE_WIFI_CONFIG);
@@ -1415,96 +1689,8 @@ void obradiKluc(KeyEvent event) {
       } else if (event == KEY_BACK) {
         wifiStrana = 0;
         wifiUredjivanjeAktivno = false;
-        odabraniIndex = 3;
-        trenutnoStanje = MENU_STATE_MAIN_MENU;
-      }
-      break;
-
-    case MENU_STATE_MQTT_CONFIG:
-      if (mqttUredjivanjeAktivno) {
-        char* buffer = dohvatiMQTTBufferZaUredjivanje();
-        const int brojZnakova = dohvatiBrojZnakovaZaUredjivanje();
-        const int maxDuljina = dohvatiMQTTMaxDuljinu();
-
-        if (event == KEY_LEFT || event == KEY_RIGHT) {
-          const int trenutniIndeks = pronadiIndeksZnaka(buffer[mqttKursor]);
-          int noviIndeks = trenutniIndeks;
-          if (event == KEY_LEFT) {
-            noviIndeks = (trenutniIndeks - 1 + brojZnakova) % brojZnakova;
-          } else {
-            noviIndeks = (trenutniIndeks + 1) % brojZnakova;
-          }
-          buffer[mqttKursor] = dohvatiZnakZaUredjivanje(noviIndeks);
-          if (mqttKursor + 1 < maxDuljina && buffer[mqttKursor + 1] == '\0') {
-            buffer[mqttKursor + 1] = '\0';
-          }
-        } else if (event == KEY_UP) {
-          if (mqttKursor > 0) {
-            mqttKursor--;
-          }
-        } else if (event == KEY_DOWN) {
-          if (mqttKursor < (maxDuljina - 1)) {
-            mqttKursor++;
-            if (buffer[mqttKursor] == '\0') {
-              buffer[mqttKursor] = ' ';
-              buffer[mqttKursor + 1] = '\0';
-            }
-          }
-        } else if (event == KEY_SELECT) {
-          while (strlen(buffer) > 0 && buffer[strlen(buffer) - 1] == ' ') {
-            buffer[strlen(buffer) - 1] = '\0';
-          }
-          mqttUredjivanjeAktivno = false;
-        } else if (event == KEY_BACK) {
-          buffer[mqttKursor] = '\0';
-          while (mqttKursor > 0 && buffer[mqttKursor - 1] == '\0') {
-            mqttKursor--;
-          }
-          mqttUredjivanjeAktivno = false;
-        }
-      } else if (event == KEY_LEFT) {
-        if (mqttStrana == 2) {
-          mqttPortUredjivanje = (mqttPortUredjivanje > 10) ? static_cast<uint16_t>(mqttPortUredjivanje - 10) : 1;
-        } else {
-          mqttStrana = (mqttStrana - 1 + BROJ_MQTT_STRANA) % BROJ_MQTT_STRANA;
-        }
-      } else if (event == KEY_RIGHT) {
-        if (mqttStrana == 2) {
-          mqttPortUredjivanje = (mqttPortUredjivanje < 65525) ? static_cast<uint16_t>(mqttPortUredjivanje + 10) : 65535;
-        } else {
-          mqttStrana = (mqttStrana + 1) % BROJ_MQTT_STRANA;
-        }
-      } else if (event == KEY_UP) {
-        if (mqttStrana == 0) {
-          mqttOmogucenUredjivanje = !mqttOmogucenUredjivanje;
-        } else if (mqttStrana == 2 && mqttPortUredjivanje < 65535) {
-          mqttPortUredjivanje++;
-        }
-      } else if (event == KEY_DOWN) {
-        if (mqttStrana == 0) {
-          mqttOmogucenUredjivanje = !mqttOmogucenUredjivanje;
-        } else if (mqttStrana == 2 && mqttPortUredjivanje > 1) {
-          mqttPortUredjivanje--;
-        }
-      } else if (event == KEY_SELECT) {
-        if (mqttStrana == 0) {
-          mqttOmogucenUredjivanje = !mqttOmogucenUredjivanje;
-        } else if (mqttStrana == 1) {
-          pokreniMQTTUredjivanje(0);
-        } else if (mqttStrana == 2) {
-          mqttPortUredjivanje = (mqttPortUredjivanje == 0) ? 1883 : mqttPortUredjivanje;
-        } else if (mqttStrana == 3) {
-          pokreniMQTTUredjivanje(1);
-        } else if (mqttStrana == 4) {
-          pokreniMQTTUredjivanje(2);
-        } else {
-          otvoriKonfirmaciju(PSTR("Spremi MQTT?"), potvrdiSpremanjeMQTTPostavki, MENU_STATE_MQTT_CONFIG);
-        }
-      } else if (event == KEY_BACK) {
-        mqttStrana = 0;
-        mqttUredjivanjeAktivno = false;
-        odabraniIndex = 7;
-        trenutnoStanje = MENU_STATE_SETTINGS;
+        odabraniIndex = 0;
+        trenutnoStanje = MENU_STATE_NETWORK_SETTINGS;
       }
       break;
 
@@ -1590,25 +1776,30 @@ void povratakNaGlavniPrikaz() {
   trenutnoStanje = MENU_STATE_DISPLAY_TIME;
   odabraniIndex = 0;
   u_korekciji_ruku = false;
-  u_modu_lozinke = false;
+  odabraniIndexKazaljke = 0;
+  stanjePovratkaKorekcijeRuku = MENU_STATE_MAIN_MENU;
+  postaviRucnuBlokaduKazaljki(false);
   faza_vremena = 0;
-  potvrdiVrijeme = true;
+  dcfStrana = 0;
+  ntpStrana = 0;
   faza_tihih_sati = 0;
   faza_postavki_cavala = 0;
+  faza_ploce = 0;
   infoStrana = 0;
   wifiStrana = 0;
   wifiUredjivanjeAktivno = false;
+  wifiOmogucenUredjivanje = jeWiFiOmogucen();
   wifiPolje = 0;
   wifiKursor = 0;
   wifiOdabirZnaka = 0;
-  mqttStrana = 0;
-  mqttUredjivanjeAktivno = false;
-  mqttPolje = 0;
-  mqttKursor = 0;
   sinkStrana = 0;
   sinkUredjivanjeAktivno = false;
   sinkKursor = 0;
-  memset(unesenaLozinka, 0, sizeof(unesenaLozinka));
+  dcfOmogucenUredjivanje = jeDCFOmogucen();
+  ntpOmogucenUredjivanje = jeNTPOmogucen();
+  plocaAktivnaUredjivanje = jePlocaKonfigurirana();
+  plocaSatUredjivanje = 5 + (constrain(dohvatiPozicijuPloce(), 0, 63) / 4);
+  plocaMinutaUredjivanje = (constrain(dohvatiPozicijuPloce(), 0, 63) % 4) * 15;
   zadnjaAktivnost = millis();
   posaljiPCLog(F("Povratak na prikaz sata"));
 }
@@ -1623,6 +1814,30 @@ void osvjeziLCDZaMeni() {
       break;
     case MENU_STATE_SETTINGS:
       prikaziPostavkeMenu();
+      break;
+    case MENU_STATE_CLOCK_SETTINGS:
+      prikaziMaticniSatMenu();
+      break;
+    case MENU_STATE_DCF_CONFIG:
+      prikaziDcfConfig();
+      break;
+    case MENU_STATE_NTP_CONFIG:
+      prikaziNtpConfig();
+      break;
+    case MENU_STATE_HAND_SETTINGS:
+      prikaziKazaljkeMenu();
+      break;
+    case MENU_STATE_PLATE_SETTINGS:
+      prikaziPlocaMenu();
+      break;
+    case MENU_STATE_PLATE_ADJUST:
+      prikaziPodesavanjePloceNovo();
+      break;
+    case MENU_STATE_NETWORK_SETTINGS:
+      prikaziMrezuMenu();
+      break;
+    case MENU_STATE_SYSTEM_SETTINGS:
+      prikaziSustavMenu();
       break;
     case MENU_STATE_HAND_CORRECTION:
       prikaziKorekcijuRuku();
@@ -1645,14 +1860,8 @@ void osvjeziLCDZaMeni() {
     case MENU_STATE_CONFIRMATION:
       prikaziKonfirmaciju();
       break;
-    case MENU_STATE_PASSWORD_ENTRY:
-      prikaziUnos_Lozinke();
-      break;
     case MENU_STATE_WIFI_CONFIG:
       prikaziWiFiConfig();
-      break;
-    case MENU_STATE_MQTT_CONFIG:
-      prikaziMQTTConfig();
       break;
     case MENU_STATE_SYNC_CONFIG:
       prikaziSinkConfig();

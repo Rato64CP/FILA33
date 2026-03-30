@@ -1,6 +1,6 @@
-// lcd_display.cpp - Complete 2-line dynamic display system
-// Line 1: Time (HH:MM:SS) + Time Source (RTC/NTP/DCF) + R/N Day Indicator + WiFi W Status
-// Line 2: Date or activity message for the tower clock subsystems.
+// lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + status sinkronizacije + WiFi status
+// Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery).
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "time_glob.h"
+#include "dcf_sync.h"
+#include "otkucavanje.h"
 #include "zvonjenje.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
@@ -19,6 +21,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 static char line1_buffer[17];
 static unsigned long last_line1_refresh = 0;
+static uint32_t last_line1_rtc_tick = 0xFFFFFFFFUL;
+static uint32_t last_line1_dcf_visual_tick = 0xFFFFFFFFUL;
 
 // N = normalan rad, R = korekcija, E = greska/recovery
 static char status_oznaka = 'N';
@@ -26,13 +30,12 @@ static char wifi_status = ' ';
 
 static char line2_buffer[17];
 static unsigned long last_line2_refresh = 0;
+static bool rtc_battery_warning_active = false;
 
 static enum {
   ACTIVITY_NONE = 0,
   ACTIVITY_BELL1,
   ACTIVITY_BELL2,
-  ACTIVITY_BELL3,
-  ACTIVITY_BELL4,
   ACTIVITY_HAMMER1,
   ACTIVITY_HAMMER2,
   ACTIVITY_ERROR,
@@ -66,15 +69,13 @@ static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
 };
 static const char LCD_PORUKA_BELL1[] PROGMEM = "Bell 1 ringing  ";
 static const char LCD_PORUKA_BELL2[] PROGMEM = "Bell 2 ringing  ";
-static const char LCD_PORUKA_BELL3[] PROGMEM = "Bell 3 ringing  ";
-static const char LCD_PORUKA_BELL4[] PROGMEM = "Bell 4 ringing  ";
-static const char LCD_PORUKA_CEKIC1[] PROGMEM = "Hammer 1 active ";
-static const char LCD_PORUKA_CEKIC2[] PROGMEM = "Hammer 2 active ";
-static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERROR: RTC batt ";
+static const char LCD_PORUKA_OTKUCAJ[] PROGMEM = "Otkucavanje...  ";
+static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERR:RTC baterija";
 static const char LCD_PORUKA_ERR_EEPROM[] PROGMEM = "ERROR: EEPROM   ";
 static const char LCD_PORUKA_ERR_I2C[] PROGMEM = "ERROR: I2C comm ";
 static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
 static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
+static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
@@ -86,7 +87,7 @@ static PGM_P dohvatiNazivDanaIzFlash(uint8_t danUTjednu) {
 }
 
 static char izracunajOznakuStanjaLCD() {
-  if (current_activity == ACTIVITY_ERROR || activity_is_error) {
+  if (rtc_battery_warning_active || current_activity == ACTIVITY_ERROR || activity_is_error) {
     return 'E';
   }
 
@@ -125,7 +126,7 @@ void inicijalizirajLCD() {
   activity_message[16] = '\0';
 
   lcd.setCursor(0, 0);
-  lcd.print(F("Toranj Sat v1.0"));
+  lcd.print(F("FILA 33 v.1.0"));
   lcd.setCursor(0, 1);
   lcd.print(F("Inicijalizacija"));
 
@@ -141,8 +142,16 @@ void inicijalizirajLCD() {
 static void build_line1() {
   DateTime now = dohvatiTrenutnoVrijeme();
   char source_str[4];
-  strncpy(source_str, dohvatiOznakuIzvoraVremena(), sizeof(source_str) - 1);
-  source_str[sizeof(source_str) - 1] = '\0';
+  if (jeDCFSinkronizacijaUTijeku()) {
+    strncpy(source_str, jeDCFImpulsAktivan() ? "---" : "   ", sizeof(source_str) - 1);
+    source_str[sizeof(source_str) - 1] = '\0';
+  } else if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    strncpy(source_str, "ERR", sizeof(source_str) - 1);
+    source_str[sizeof(source_str) - 1] = '\0';
+  } else {
+    strncpy(source_str, dohvatiOznakuIzvoraVremena(), sizeof(source_str) - 1);
+    source_str[sizeof(source_str) - 1] = '\0';
+  }
 
   status_oznaka = izracunajOznakuStanjaLCD();
   char oznaka_stanja = status_oznaka;
@@ -181,6 +190,20 @@ static void build_date_string() {
 }
 
 static void build_line2() {
+  if (rtc_battery_warning_active) {
+    kopirajTekstIzFlash(line2_buffer, sizeof(line2_buffer), LCD_PORUKA_BAT_RTC);
+    return;
+  }
+
+  if ((current_activity == ACTIVITY_HAMMER1 || current_activity == ACTIVITY_HAMMER2) &&
+      !jeOtkucavanjeUTijeku()) {
+    current_activity = ACTIVITY_NONE;
+    activity_timeout_ms = 0;
+    memset(activity_message, ' ', 16);
+    activity_message[16] = '\0';
+    activity_is_error = false;
+  }
+
   // Dinamicka poruka za slavljenje mora pratiti stvarno stanje cekica.
   if (current_activity == ACTIVITY_CELEBRATION && !jeSlavljenjeUTijeku()) {
     current_activity = ACTIVITY_NONE;
@@ -197,6 +220,11 @@ static void build_line2() {
     memset(activity_message, ' ', 16);
     activity_message[16] = '\0';
     activity_is_error = false;
+  }
+
+  if (current_activity == ACTIVITY_NONE && jeOtkucavanjeUTijeku()) {
+    kopirajTekstIzFlash(line2_buffer, sizeof(line2_buffer), LCD_PORUKA_OTKUCAJ);
+    return;
   }
 
   if (current_activity != ACTIVITY_NONE && activity_timeout_ms > 0) {
@@ -262,27 +290,17 @@ void signalizirajZvono_Ringing(uint8_t zvono) {
       current_activity = ACTIVITY_BELL2;
       set_activity_message(LCD_PORUKA_BELL2, 4000, false);
       break;
-    case 3:
-      current_activity = ACTIVITY_BELL3;
-      set_activity_message(LCD_PORUKA_BELL3, 4000, false);
-      break;
-    case 4:
-      current_activity = ACTIVITY_BELL4;
-      set_activity_message(LCD_PORUKA_BELL4, 4000, false);
-      break;
     default:
       break;
   }
 }
 
 void signalizirajHammer1_Active() {
-  current_activity = ACTIVITY_HAMMER1;
-  set_activity_message(LCD_PORUKA_CEKIC1, 3000, false);
+  last_line2_refresh = 0;
 }
 
 void signalizirajHammer2_Active() {
-  current_activity = ACTIVITY_HAMMER2;
-  set_activity_message(LCD_PORUKA_CEKIC2, 3000, false);
+  last_line2_refresh = 0;
 }
 
 void signalizirajError_RTC() {
@@ -303,6 +321,22 @@ void signalizirajError_I2C() {
   status_oznaka = 'E';
 }
 
+void signalizirajUpozorenjeRtcBaterije() {
+  rtc_battery_warning_active = true;
+  last_line2_refresh = 0;
+  status_oznaka = 'E';
+}
+
+void potvrdiUpozorenjeRtcBaterije() {
+  rtc_battery_warning_active = false;
+  last_line2_refresh = 0;
+  last_date_minute = -1;
+}
+
+bool jeUpozorenjeRtcBaterijeAktivno() {
+  return rtc_battery_warning_active;
+}
+
 void signalizirajCelebration_Mode() {
   current_activity = ACTIVITY_CELEBRATION;
   set_activity_message(LCD_PORUKA_SLAVLJENJE, 0, false);
@@ -314,9 +348,35 @@ void signalizirajFuneral_Mode() {
 }
 
 void prikaziSat() {
-  unsigned long now_ms = millis();
-  if (now_ms - last_line1_refresh >= 1000UL) {
+  const unsigned long now_ms = millis();
+  const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  const uint32_t dcfVisualTick = dohvatiDcfVizualniBrojac();
+  const bool dcfPrijemAktivan = jeDCFSinkronizacijaUTijeku();
+
+  bool trebaOsvjezitiRedak1 = false;
+  if (dcfVisualTick != last_line1_dcf_visual_tick) {
+    if (dcfVisualTick != last_line1_dcf_visual_tick) {
+      last_line1_dcf_visual_tick = dcfVisualTick;
+    }
     last_line1_refresh = now_ms;
+    trebaOsvjezitiRedak1 = true;
+  } else if (dcfPrijemAktivan) {
+    trebaOsvjezitiRedak1 = false;
+  } else if (jeRtcSqwAktivan()) {
+    if (rtcTick != last_line1_rtc_tick) {
+      last_line1_rtc_tick = rtcTick;
+      last_line1_dcf_visual_tick = dcfVisualTick;
+      last_line1_refresh = now_ms;
+      trebaOsvjezitiRedak1 = true;
+    }
+  } else if (last_line1_refresh == 0 || (now_ms - last_line1_refresh) >= 1000UL) {
+    last_line1_refresh = now_ms;
+    last_line1_rtc_tick = rtcTick;
+    last_line1_dcf_visual_tick = dcfVisualTick;
+    trebaOsvjezitiRedak1 = true;
+  }
+
+  if (trebaOsvjezitiRedak1) {
     build_line1();
     lcd.setCursor(0, 0);
     lcd.print(line1_buffer);

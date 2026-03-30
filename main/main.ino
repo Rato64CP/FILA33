@@ -62,6 +62,7 @@ void loop() {
   obradiESPSerijskuKomunikaciju();
   upravljajMenuSistemom();
   provjeriTipke();
+  postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
 
   upravljajZvonom();
   osvjeziMrtvackoThumbwheel();

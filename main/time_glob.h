@@ -19,6 +19,7 @@ void azurirajOznakuDana();
 bool jeRTCPouzdan();
 bool jeRtcSqwAktivan();
 bool fallbackImaPouzdanuReferencu();
+bool jeVrijemePotvrdjenoZaAutomatiku();
 
 DateTime getZadnjeSinkroniziranoVrijeme();
 void oznaciPovratakNaRTC();

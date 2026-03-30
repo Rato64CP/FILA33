@@ -30,19 +30,14 @@ uint32_t pocetakFazeTick = 0;
 int offsetMinuta = 14;
 int zadnjiSlotUlaza = -1;
 
-static const uint8_t BROJ_ULAZA_PLOCE = 10;
-static const uint8_t BROJ_ZVONA_MAX = 4;
+static const uint8_t BROJ_ULAZA_PLOCE = 5;
+static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t PIN_ULAZA_PLOCE[BROJ_ULAZA_PLOCE] = {
   PIN_ULAZA_PLOCE_1,
   PIN_ULAZA_PLOCE_2,
   PIN_ULAZA_PLOCE_3,
   PIN_ULAZA_PLOCE_4,
-  PIN_ULAZA_PLOCE_5,
-  PIN_ULAZA_PLOCE_6,
-  PIN_ULAZA_PLOCE_7,
-  PIN_ULAZA_PLOCE_8,
-  PIN_ULAZA_PLOCE_9,
-  PIN_ULAZA_PLOCE_10
+  PIN_ULAZA_PLOCE_5
 };
 
 enum PosebniAutomatskiNacin {
@@ -51,15 +46,23 @@ enum PosebniAutomatskiNacin {
   POSEBNI_NACIN_MRTVACKO = 2
 };
 
-bool autoZvonoAktivno[BROJ_ZVONA_MAX] = {false, false, false, false};
-bool autoZvonoZakazano[BROJ_ZVONA_MAX] = {false, false, false, false};
-unsigned long autoZvonoStart[BROJ_ZVONA_MAX] = {0, 0, 0, 0};
-unsigned long autoZvonoKraj[BROJ_ZVONA_MAX] = {0, 0, 0, 0};
+bool autoZvonoAktivno[BROJ_ZVONA_MAX] = {false, false};
+bool autoZvonoZakazano[BROJ_ZVONA_MAX] = {false, false};
+unsigned long autoZvonoStart[BROJ_ZVONA_MAX] = {0, 0};
+unsigned long autoZvonoKraj[BROJ_ZVONA_MAX] = {0, 0};
 PosebniAutomatskiNacin autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
 unsigned long autoPosebniStart = 0;
 unsigned long autoPosebniTrajanje = 0;
 PosebniAutomatskiNacin autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
 unsigned long autoPosebniKraj = 0;
+
+bool jeBootRecoveryAktivan() {
+  const uint8_t resetFlags = MCUSR;
+  const bool watchdogReset = (resetFlags & (1 << WDRF)) != 0;
+  const bool powerLossReset = (resetFlags & ((1 << BORF) | (1 << PORF))) != 0;
+  const bool vanjskiReset = (resetFlags & (1 << EXTRF)) != 0;
+  return watchdogReset || (powerLossReset && !vanjskiReset);
+}
 
 void resetirajAutomatskiPosebniNacin() {
   autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
@@ -113,6 +116,12 @@ int izracunajCiljnuPoziciju(const DateTime& now) {
 }
 
 void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
+    digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
+    return;
+  }
+
   if (stanje.plate_phase == FAZA_STABILNO) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
@@ -221,6 +230,23 @@ void azurirajAutomatskaZvonjenja(unsigned long sadaMs) {
       autoPosebniKraj = sadaMs + 1000UL;
     }
   }
+}
+
+void zaustaviAutomatikuPloceZbogNepotvrdenogVremena() {
+  for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    if (autoZvonoAktivno[i]) {
+      deaktivirajZvonjenje(i + 1);
+    }
+    autoZvonoAktivno[i] = false;
+    autoZvonoZakazano[i] = false;
+    autoZvonoStart[i] = 0;
+    autoZvonoKraj[i] = 0;
+  }
+
+  if (autoPosebniAktivniNacin != POSEBNI_NACIN_NONE) {
+    zaustaviPosebniNacin(autoPosebniAktivniNacin);
+  }
+  resetirajAutomatskiPosebniNacin();
 }
 
 void zakaziPosebniNacin(PosebniAutomatskiNacin nacin, unsigned long startMs, unsigned long trajanjeMs) {
@@ -391,6 +417,11 @@ void inicijalizirajPlocu() {
   offsetMinuta = constrain(offsetMinuta, 0, 14);
 
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+  if (jeBootRecoveryAktivan()) {
+    posaljiPCLog(F("Ploca: zadrzavam spremljeno stanje za boot recovery"));
+  } else {
+    posaljiPCLog(F("Ploca: zadrzavam spremljenu poziciju pri normalnom restartu"));
+  }
   aktivirajRelejePoFazi(stanje);
 
   pocetakFazeMs = millis();
@@ -410,6 +441,21 @@ void inicijalizirajPlocu() {
 }
 
 void upravljajPlocom() {
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+    if (stanje.plate_phase != FAZA_STABILNO) {
+      stanje.plate_phase = FAZA_STABILNO;
+      UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+      posaljiPCLog(F("Ploca: automatika blokirana dok vrijeme nije potvrdeno"));
+    }
+    zaustaviAutomatikuPloceZbogNepotvrdenogVremena();
+    zadnjiObradeniRtcTick = 0;
+    pocetakFazeTick = 0;
+    zadnjiSlotUlaza = -1;
+    aktivirajRelejePoFazi(stanje);
+    return;
+  }
+
   const DateTime now = dohvatiTrenutnoVrijeme();
   const unsigned long sadaMs = millis();
   azurirajAutomatskaZvonjenja(sadaMs);
@@ -456,6 +502,10 @@ int dohvatiOffsetMinuta() {
 }
 
 bool jePlocaUSinkronu() {
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    return false;
+  }
+
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   return stanje.plate_phase == FAZA_STABILNO &&
          stanje.plate_position == izracunajCiljnuPoziciju(dohvatiTrenutnoVrijeme());

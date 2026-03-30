@@ -2,6 +2,7 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <ESP8266WebServer.h>
+#include <EEPROM.h>
 #include <PubSubClient.h>
 #include <time.h>
 
@@ -14,12 +15,16 @@ String statickaIp = "192.168.1.200";
 String mreznaMaska = "255.255.255.0";
 String zadaniGateway = "192.168.1.1";
 bool primljenaWifiKonfiguracija = false;
+bool wifiOmogucen = true;
 
 // Parametri NTP klijenta za sinkronizaciju toranjskog sata.
 char ntpPosluzitelj[40] = "pool.ntp.org";
 static const long NTP_OFFSET_SEKUNDI = 0;
 static const unsigned long NTP_INTERVAL_MS = 60000;
 static const size_t SERIJSKI_BUFFER_MAX = 256;
+static const size_t WEB_LOZINKA_MAX = 33;
+static const size_t ESP_EEPROM_VELICINA = 96;
+static const uint16_t WEB_AUTH_POTPIS = 0x5741;
 
 // MQTT zadane vjerodajnice.
 // Mega ih po potrebi moze prepisati kroz MQTT:CONNECT naredbu.
@@ -40,6 +45,39 @@ WiFiClient mqttMrezniKlijent;
 PubSubClient mqttKlijent(mqttMrezniKlijent);
 
 String zadnjiOdgovorMega = "";
+String webLozinka = "cista2906";
+
+struct WebAuthConfig {
+  uint16_t potpis;
+  char lozinka[WEB_LOZINKA_MAX];
+};
+
+struct MegaStatus {
+  bool valjan = false;
+  String vrijeme = "";
+  String izvor = "";
+  bool vrijemePotvrdeno = false;
+  bool wifiSpojen = false;
+  bool mqttSpojen = false;
+  bool mqttOmogucen = false;
+  bool ntpOmogucen = false;
+  bool dcfOmogucen = false;
+  bool dcfUTijeku = false;
+  bool kazaljkeUSinkronu = false;
+  int pozicijaKazaljki = 0;
+  bool plocaUSinkronu = false;
+  int pozicijaPloce = 0;
+  bool slavljenje = false;
+  bool mrtvacko = false;
+  bool otkucavanje = false;
+  bool zvono1 = false;
+  bool zvono2 = false;
+  unsigned long zadnjeOsvjezenjeMs = 0;
+};
+
+MegaStatus megaStatus;
+unsigned long zadnjiStatusZahtjevMs = 0;
+static const unsigned long STATUS_INTERVAL_MS = 15000UL;
 
 // Statusne zastavice za faze rada.
 bool wifiIkadSpojen = false;
@@ -74,7 +112,8 @@ const char *DOZVOLJENE_NAREDBE[] = {
   "ZVONO1_ON", "ZVONO1_OFF", "ZVONO2_ON", "ZVONO2_OFF",
   "OTKUCAVANJE_ON", "OTKUCAVANJE_OFF",
   "SLAVLJENJE_ON", "SLAVLJENJE_OFF",
-  "MRTVACKO_ON", "MRTVACKO_OFF"
+  "MRTVACKO_ON", "MRTVACKO_OFF",
+  "DCF_START"
 };
 const size_t BROJ_NAREDBI = sizeof(DOZVOLJENE_NAREDBE) / sizeof(DOZVOLJENE_NAREDBE[0]);
 
@@ -108,17 +147,37 @@ bool spremiMQTTPretplatu(const String &tema);
 void ponovnoPretplatiMQTTTeme();
 bool parsirajMQTTConnectPayload(const String &payload, String &broker, uint16_t &port, String &korisnik, String &lozinka);
 String ocistiJednolinijskiTekst(const String &ulaz, size_t maxDuljina);
+void primijeniWiFiOmogucenost(bool omogucen);
+void zatraziStatusMegae(bool prisilno = false);
+void obradiStatusMegaLiniju(const String &linija);
+bool dohvatiPoljeStatusa(const String &linija, const String &kljuc, String &vrijednost);
+bool tekstUBool(const String &vrijednost);
+String kreirajJsonStatus();
+String generirajWebSucelje();
+void ucitajWebAutentikaciju();
+bool spremiWebAutentikaciju(const String &novaLozinka);
+bool osigurajWebAutorizaciju();
+bool spremiMQTTPostavkePrekoWeba(const String &broker,
+                                 uint16_t port,
+                                 const String &korisnik,
+                                 const String &lozinka,
+                                 bool omogucen);
 
 void setup() {
   Serial.begin(9600);
   delay(200);
+  EEPROM.begin(ESP_EEPROM_VELICINA);
+  ucitajWebAutentikaciju();
 
   Serial.println("ESP BOOT");
+  Serial.println("CFGREQ");
   Serial.println("FAZA: Povezivanje na WiFi");
 
   pokupiWifiKonfiguracijuIzSerijske();
-  if (!primljenaWifiKonfiguracija || WiFi.status() != WL_CONNECTED) {
+  if (wifiOmogucen && (!primljenaWifiKonfiguracija || WiFi.status() != WL_CONNECTED)) {
     poveziNaWiFi();
+  } else if (!wifiOmogucen) {
+    prijaviPromjenuWiFiStatusa();
   }
 
   Serial.println("FAZA: Pokretanje NTP klijenta");
@@ -130,29 +189,39 @@ void setup() {
   Serial.println("FAZA: Konfiguracija web posluzitelja");
   konfigurirajWebPosluzitelj();
 
+  Serial.println("CFGREQ");
   Serial.println("FAZA: INIT zavrsen, ulazak u loop()");
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    if (wifiIkadSpojen) {
-      Serial.println("FAZA: WiFi veza izgubljena, ponovno spajanje...");
-    } else {
-      Serial.println("FAZA: WiFi jos nije uspostavljen, pokusavam...");
+  obradiSerijskiUlaz();
+
+  if (wifiOmogucen) {
+    if (WiFi.status() != WL_CONNECTED) {
+      poveziNaWiFi();
     }
-    poveziNaWiFi();
+
+    osvjeziNTPSat();
+    posaljiNTPAkoTreba();
+    zatraziStatusMegae(false);
   }
 
-  osvjeziNTPSat();
-  obradiSerijskiUlaz();
   obradiMQTT();
-  posaljiNTPAkoTreba();
-
   webPosluzitelj.handleClient();
 }
 
+void zatraziStatusMegae(bool prisilno) {
+  unsigned long sada = millis();
+  if (!prisilno && (sada - zadnjiStatusZahtjevMs) < STATUS_INTERVAL_MS) {
+    return;
+  }
+
+  zadnjiStatusZahtjevMs = sada;
+  Serial.println("STATUS?");
+}
+
 void prijaviPromjenuWiFiStatusa() {
-  wl_status_t trenutniStatus = WiFi.status();
+  wl_status_t trenutniStatus = wifiOmogucen ? WiFi.status() : WL_DISCONNECTED;
   if (trenutniStatus == zadnjiPrijavljeniWiFiStatus) {
     return;
   }
@@ -180,8 +249,51 @@ unsigned long dohvatiWiFiOdgoduNovogPokusaja() {
   return WIFI_ODGODA_NAKON_TRECEG_MS;
 }
 
+void primijeniWiFiOmogucenost(bool omogucen) {
+  if (wifiOmogucen == omogucen) {
+    if (wifiOmogucen && WiFi.status() != WL_CONNECTED) {
+      poveziNaWiFi();
+    }
+    return;
+  }
+
+  wifiOmogucen = omogucen;
+  wifiPokusajUToku = false;
+  wifiPokusajPocetak = 0;
+  wifiSljedeciPokusajDozvoljen = 0;
+  wifiBrojPokusajaZaredom = 0;
+  wifiIkadSpojen = false;
+  ntpIkadPostavljen = false;
+  ntpPoslanNakonSpajanja = false;
+  zadnjiPoslaniNtpSatniKljuc = -1;
+
+  if (!wifiOmogucen) {
+    if (mqttKlijent.connected()) {
+      mqttKlijent.disconnect();
+    }
+    postaviMQTTStatus(false);
+    WiFi.disconnect();
+    delay(1);
+    WiFi.mode(WIFI_OFF);
+    prijaviPromjenuWiFiStatusa();
+    Serial.println("WIFI RX: WiFi onemogucen");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  prijaviPromjenuWiFiStatusa();
+  Serial.println("WIFI RX: WiFi omogucen");
+  poveziNaWiFi();
+}
+
 void poveziNaWiFi() {
   unsigned long sada = millis();
+
+  if (!wifiOmogucen) {
+    wifiPokusajUToku = false;
+    prijaviPromjenuWiFiStatusa();
+    return;
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
     if (wifiPokusajUToku) {
@@ -633,10 +745,51 @@ void obradiSerijskiUlaz() {
       prijemniBuffer.trim();
       if (prijemniBuffer.length() > 0) {
         zadnjiOdgovorMega = prijemniBuffer;
-        Serial.print("RX MEGA: ");
-        Serial.println(zadnjiOdgovorMega);
 
-        if (prijemniBuffer.startsWith("WIFI:")) {
+        if (prijemniBuffer.startsWith("STATUS:")) {
+          obradiStatusMegaLiniju(prijemniBuffer);
+        } else if (prijemniBuffer.startsWith("MQTTCFG:")) {
+          String payload = prijemniBuffer.substring(8);
+          String broker = "";
+          uint16_t port = MQTT_ZADANI_PORT;
+          String korisnik = "";
+          String lozinka = "";
+          bool omogucen = false;
+          int g1 = payload.indexOf('|');
+          int g2 = (g1 >= 0) ? payload.indexOf('|', g1 + 1) : -1;
+          int g3 = (g2 >= 0) ? payload.indexOf('|', g2 + 1) : -1;
+          if (g1 > 0 && g2 > g1 && g3 > g2) {
+            String enabledTekst = payload.substring(0, g1);
+            broker = payload.substring(g1 + 1, g2);
+            String portTekst = payload.substring(g2 + 1, g3);
+            korisnik = payload.substring(g3 + 1);
+            broker.trim();
+            korisnik.trim();
+            omogucen = (enabledTekst == "1");
+            long procitaniPort = portTekst.toInt();
+            if (procitaniPort > 0 && procitaniPort <= 65535) {
+              port = static_cast<uint16_t>(procitaniPort);
+            }
+            broker.toCharArray(mqttBrokerAdresa, MQTT_BROKER_MAX);
+            mqttBrokerPort = port;
+            korisnik.toCharArray(mqttKorisnik, MQTT_KORISNIK_MAX);
+            mqttKonfiguriran = broker.length() > 0;
+            if (!omogucen && mqttKlijent.connected()) {
+              mqttKlijent.disconnect();
+              postaviMQTTStatus(false);
+            }
+          }
+        } else if (prijemniBuffer.startsWith("WIFIEN:")) {
+          String payload = prijemniBuffer.substring(7);
+          payload.trim();
+
+          if (payload == "0" || payload == "1") {
+            primijeniWiFiOmogucenost(payload == "1");
+            Serial.println("ACK:WIFIEN");
+          } else {
+            Serial.println("ERR:WIFIEN");
+          }
+        } else if (prijemniBuffer.startsWith("WIFI:")) {
           String payload = prijemniBuffer.substring(5);
           bool uspjeh = false;
 
@@ -683,7 +836,12 @@ void obradiSerijskiUlaz() {
               ntpIkadPostavljen = false;
               ntpPoslanNakonSpajanja = false;
               zadnjiPoslaniNtpSatniKljuc = -1;
-              poveziNaWiFi();
+              if (wifiOmogucen) {
+                poveziNaWiFi();
+              } else {
+                prijaviPromjenuWiFiStatusa();
+                Serial.println("WIFI RX: konfiguracija spremljena, WiFi je trenutno iskljucen");
+              }
               uspjeh = true;
             } else {
               Serial.println("WIFI RX: neispravna duljina SSID/lozinke/DHCP oznake");
@@ -691,6 +849,20 @@ void obradiSerijskiUlaz() {
           }
 
           Serial.println(uspjeh ? "ACK:WIFI" : "ERR:WIFI");
+        } else if (prijemniBuffer == "NTPREQ:SYNC") {
+          osvjeziNTPSat();
+          if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("NTPLOG: rucni zahtjev odbijen jer WiFi nije spojen");
+            Serial.println("ERR:NTPREQ");
+          } else if (!ntpKlijent.isTimeSet()) {
+            Serial.println("NTPLOG: rucni zahtjev odbijen jer NTP jos nije spreman");
+            Serial.println("ERR:NTPREQ");
+          } else {
+            posaljiNTPPremaMegai();
+            ntpPoslanNakonSpajanja = true;
+            Serial.println("NTPLOG: rucni NTP zahtjev izvrsen");
+            Serial.println("ACK:NTPREQ");
+          }
         } else if (prijemniBuffer.startsWith("NTPCFG:")) {
           obradiNTPSerijskuNaredbu(prijemniBuffer);
         } else if (prijemniBuffer.startsWith("MQTT:")) {
@@ -795,6 +967,455 @@ String escapirajJsonString(const String &ulaz) {
   return izlaz;
 }
 
+bool dohvatiPoljeStatusa(const String &linija, const String &kljuc, String &vrijednost) {
+  String trazeno = kljuc + "=";
+  int pocetak = linija.indexOf(trazeno);
+  if (pocetak < 0) {
+    return false;
+  }
+
+  pocetak += trazeno.length();
+  int kraj = linija.indexOf('|', pocetak);
+  if (kraj < 0) {
+    kraj = linija.length();
+  }
+
+  vrijednost = linija.substring(pocetak, kraj);
+  vrijednost.trim();
+  return true;
+}
+
+bool tekstUBool(const String &vrijednost) {
+  return vrijednost == "1" || vrijednost.equalsIgnoreCase("true") || vrijednost.equalsIgnoreCase("da");
+}
+
+void ucitajWebAutentikaciju() {
+  WebAuthConfig cfg{};
+  EEPROM.get(0, cfg);
+
+  if (cfg.potpis == WEB_AUTH_POTPIS && cfg.lozinka[0] != '\0') {
+    cfg.lozinka[WEB_LOZINKA_MAX - 1] = '\0';
+    webLozinka = String(cfg.lozinka);
+    Serial.println("WEB AUTH: ucitana spremljena lozinka");
+    return;
+  }
+
+  webLozinka = "cista2906";
+  Serial.println("WEB AUTH: koristim zadanu lozinku");
+}
+
+bool spremiWebAutentikaciju(const String &novaLozinka) {
+  String ociscena = ocistiJednolinijskiTekst(novaLozinka, WEB_LOZINKA_MAX - 1);
+  ociscena.trim();
+  if (ociscena.length() < 4) {
+    return false;
+  }
+
+  WebAuthConfig cfg{};
+  cfg.potpis = WEB_AUTH_POTPIS;
+  ociscena.toCharArray(cfg.lozinka, sizeof(cfg.lozinka));
+  EEPROM.put(0, cfg);
+  if (!EEPROM.commit()) {
+    Serial.println("WEB AUTH: commit lozinke nije uspio");
+    return false;
+  }
+
+  webLozinka = ociscena;
+  Serial.println("WEB AUTH: spremljena nova lozinka");
+  return true;
+}
+
+bool osigurajWebAutorizaciju() {
+  if (webPosluzitelj.authenticate("admin", webLozinka.c_str())) {
+    return true;
+  }
+
+  webPosluzitelj.requestAuthentication(BASIC_AUTH, "Toranjski sat", "Unesite web lozinku");
+  return false;
+}
+
+bool spremiMQTTPostavkePrekoWeba(const String &broker,
+                                 uint16_t port,
+                                 const String &korisnik,
+                                 const String &lozinka,
+                                 bool omogucen) {
+  String cistiBroker = ocistiJednolinijskiTekst(broker, MQTT_BROKER_MAX - 1);
+  String cistiKorisnik = ocistiJednolinijskiTekst(korisnik, MQTT_KORISNIK_MAX - 1);
+  String cistaLozinka = ocistiJednolinijskiTekst(lozinka, MQTT_LOZINKA_MAX - 1);
+  cistiBroker.trim();
+  cistiKorisnik.trim();
+  cistaLozinka.trim();
+
+  if (cistiBroker.length() == 0 || cistiBroker.length() >= MQTT_BROKER_MAX) {
+    return false;
+  }
+  if (port == 0 || port > 65535) {
+    return false;
+  }
+  if (cistiKorisnik.length() >= MQTT_KORISNIK_MAX || cistaLozinka.length() >= MQTT_LOZINKA_MAX) {
+    return false;
+  }
+  if (cistiBroker.indexOf('|') >= 0 || cistiKorisnik.indexOf('|') >= 0 || cistaLozinka.indexOf('|') >= 0) {
+    return false;
+  }
+
+  cistiBroker.toCharArray(mqttBrokerAdresa, MQTT_BROKER_MAX);
+  mqttBrokerPort = port;
+  cistiKorisnik.toCharArray(mqttKorisnik, MQTT_KORISNIK_MAX);
+  if (cistaLozinka.length() > 0) {
+    cistaLozinka.toCharArray(mqttLozinka, MQTT_LOZINKA_MAX);
+  }
+  mqttKonfiguriran = true;
+
+  String naredba = "WEBMQTT:";
+  naredba += omogucen ? '1' : '0';
+  naredba += '|';
+  naredba += cistiBroker;
+  naredba += '|';
+  naredba += String(port);
+  naredba += '|';
+  naredba += cistiKorisnik;
+  naredba += '|';
+  naredba += cistaLozinka;
+  Serial.println(naredba);
+  return true;
+}
+
+void obradiStatusMegaLiniju(const String &linija) {
+  String payload = linija.substring(7);
+  String vrijednost = "";
+
+  if (dohvatiPoljeStatusa(payload, "time", vrijednost)) megaStatus.vrijeme = vrijednost;
+  if (dohvatiPoljeStatusa(payload, "src", vrijednost)) megaStatus.izvor = vrijednost;
+  if (dohvatiPoljeStatusa(payload, "ok", vrijednost)) megaStatus.vrijemePotvrdeno = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "wifi", vrijednost)) megaStatus.wifiSpojen = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "mq", vrijednost)) megaStatus.mqttSpojen = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "mqen", vrijednost)) megaStatus.mqttOmogucen = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "ntp", vrijednost)) megaStatus.ntpOmogucen = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "dcf", vrijednost)) megaStatus.dcfOmogucen = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "dcfr", vrijednost)) megaStatus.dcfUTijeku = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "hs", vrijednost)) megaStatus.kazaljkeUSinkronu = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "hp", vrijednost)) megaStatus.pozicijaKazaljki = vrijednost.toInt();
+  if (dohvatiPoljeStatusa(payload, "ps", vrijednost)) megaStatus.plocaUSinkronu = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "pp", vrijednost)) megaStatus.pozicijaPloce = vrijednost.toInt();
+  if (dohvatiPoljeStatusa(payload, "sl", vrijednost)) megaStatus.slavljenje = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "mr", vrijednost)) megaStatus.mrtvacko = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "ot", vrijednost)) megaStatus.otkucavanje = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "b1", vrijednost)) megaStatus.zvono1 = tekstUBool(vrijednost);
+  if (dohvatiPoljeStatusa(payload, "b2", vrijednost)) megaStatus.zvono2 = tekstUBool(vrijednost);
+
+  megaStatus.valjan = true;
+  megaStatus.zadnjeOsvjezenjeMs = millis();
+}
+
+String kreirajJsonStatus() {
+  String tijelo = "{";
+  tijelo += "\"wifi_ssid\":\"" + escapirajJsonString(WiFi.SSID()) + "\",";
+  tijelo += "\"wifi_ip\":\"" + WiFi.localIP().toString() + "\",";
+  tijelo += "\"wifi_connected\":";
+  tijelo += (WiFi.status() == WL_CONNECTED) ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"mqtt\":\"";
+  tijelo += (mqttKlijent.connected() ? "connected" : "disconnected");
+  tijelo += "\",";
+  tijelo += "\"mqtt_broker\":\"" + escapirajJsonString(String(mqttBrokerAdresa)) + "\",";
+  tijelo += "\"mqtt_port\":";
+  tijelo += mqttBrokerPort;
+  tijelo += ",";
+  tijelo += "\"mqtt_user\":\"" + escapirajJsonString(String(mqttKorisnik)) + "\",";
+  tijelo += "\"mqtt_configured\":";
+  tijelo += mqttKonfiguriran ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"ntp_server\":\"" + escapirajJsonString(String(ntpPosluzitelj)) + "\",";
+  tijelo += "\"zadnji_odgovor\":\"" + escapirajJsonString(zadnjiOdgovorMega) + "\",";
+  tijelo += "\"mega\":{";
+  tijelo += "\"valid\":";
+  tijelo += megaStatus.valjan ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"time\":\"" + escapirajJsonString(megaStatus.vrijeme) + "\",";
+  tijelo += "\"source\":\"" + escapirajJsonString(megaStatus.izvor) + "\",";
+  tijelo += "\"time_confirmed\":";
+  tijelo += megaStatus.vrijemePotvrdeno ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"wifi_connected\":";
+  tijelo += megaStatus.wifiSpojen ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"mqtt_connected\":";
+  tijelo += megaStatus.mqttSpojen ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"mqtt_enabled\":";
+  tijelo += megaStatus.mqttOmogucen ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"ntp_enabled\":";
+  tijelo += megaStatus.ntpOmogucen ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"dcf_enabled\":";
+  tijelo += megaStatus.dcfOmogucen ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"dcf_running\":";
+  tijelo += megaStatus.dcfUTijeku ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"hands_synced\":";
+  tijelo += megaStatus.kazaljkeUSinkronu ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"hands_position\":";
+  tijelo += megaStatus.pozicijaKazaljki;
+  tijelo += ",";
+  tijelo += "\"plate_synced\":";
+  tijelo += megaStatus.plocaUSinkronu ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"plate_position\":";
+  tijelo += megaStatus.pozicijaPloce;
+  tijelo += ",";
+  tijelo += "\"celebration\":";
+  tijelo += megaStatus.slavljenje ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"funeral\":";
+  tijelo += megaStatus.mrtvacko ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"striking\":";
+  tijelo += megaStatus.otkucavanje ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"bell1\":";
+  tijelo += megaStatus.zvono1 ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"bell2\":";
+  tijelo += megaStatus.zvono2 ? "true" : "false";
+  tijelo += ",";
+  tijelo += "\"age_ms\":";
+  tijelo += megaStatus.valjan ? (millis() - megaStatus.zadnjeOsvjezenjeMs) : 0;
+  tijelo += "}}";
+  return tijelo;
+}
+
+String generirajWebSucelje() {
+  return R"HTML(
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Toranjski sat</title>
+  <style>
+    :root { color-scheme: light; --bg:#f3efe6; --panel:#fffaf1; --line:#c8baa1; --text:#2c2418; --accent:#8d5b2a; --soft:#e7dcc8; }
+    body { margin:0; font-family: Georgia, "Times New Roman", serif; background:linear-gradient(180deg,#efe6d3,#f7f3ea); color:var(--text); }
+    .wrap { max-width:960px; margin:0 auto; padding:20px; }
+    h1,h2 { margin:0 0 12px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 10px 24px rgba(77,52,24,0.08); }
+    .kv { display:grid; grid-template-columns:1fr auto; gap:6px 12px; font-size:15px; }
+    .kv div:nth-child(odd) { color:#6a5842; }
+    .cmds { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+    button { border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text); font-weight:700; cursor:pointer; }
+    button:hover { background:var(--soft); }
+    button.active { background:var(--accent); color:#fffaf1; border-color:#6e451c; }
+    .wide { grid-column:1 / -1; }
+    .log { white-space:pre-wrap; min-height:24px; color:#5f4a32; }
+    .muted { color:#7a6a56; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Toranjski sat</h1>
+    <p class="muted">Status i rucne komande preko ESP8266</p>
+    <div class="grid">
+      <section class="panel">
+        <h2>Vrijeme</h2>
+        <div class="kv" id="vrijeme"></div>
+      </section>
+      <section class="panel">
+        <h2>Mreza</h2>
+        <div class="kv" id="mreza"></div>
+      </section>
+      <section class="panel">
+        <h2>MQTT</h2>
+        <div class="kv" id="mqtt"></div>
+      </section>
+      <section class="panel">
+        <h2>Pogon</h2>
+        <div class="kv" id="pogon"></div>
+      </section>
+      <section class="panel">
+        <h2>Zvona</h2>
+        <div class="kv" id="zvona"></div>
+      </section>
+      <section class="panel wide">
+        <h2>MQTT postavke</h2>
+        <div class="cmds">
+          <label style="display:flex;align-items:center;gap:8px;"><input id="mqttEnabled" type="checkbox"> MQTT aktivan</label>
+          <input id="mqttBroker" type="text" placeholder="Broker" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <input id="mqttPort" type="number" min="1" max="65535" placeholder="Port" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <input id="mqttUser" type="text" placeholder="User" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <input id="mqttPassword" type="password" placeholder="Nova lozinka (ostavi prazno za zadrzavanje)" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <button onclick="spremiMqtt()">Spremi MQTT</button>
+        </div>
+      </section>
+      <section class="panel wide">
+        <h2>Rucne komande</h2>
+        <div class="cmds">
+          <button onclick="posalji('NTP_SYNC')">Pokreni NTP</button>
+          <button onclick="posalji('DCF_START')">Pokreni DCF</button>
+          <button id="btnSlavljenje" onclick="toggleCmd('celebration')">Slavljenje</button>
+          <button id="btnMrtvacko" onclick="toggleCmd('funeral')">Mrtvacko</button>
+          <button id="btnZvono1" onclick="toggleCmd('bell1')">Zvono 1</button>
+          <button id="btnZvono2" onclick="toggleCmd('bell2')">Zvono 2</button>
+        </div>
+      </section>
+      <section class="panel wide">
+        <h2>Web lozinka</h2>
+        <div class="cmds">
+          <input id="novaLozinka" type="password" placeholder="Nova lozinka" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <input id="potvrdaLozinke" type="password" placeholder="Potvrda lozinke" style="border:1px solid var(--line); border-radius:10px; padding:12px 10px; background:#fff; color:var(--text);">
+          <button onclick="promijeniLozinku()">Promijeni lozinku</button>
+        </div>
+      </section>
+      <section class="panel wide">
+        <h2>Odgovor</h2>
+        <div id="odgovor" class="log">Cekam podatke...</div>
+      </section>
+    </div>
+  </div>
+  <script>
+    let zadnjiStatus = null;
+    function ozn(v) { return v ? 'DA' : 'NE'; }
+    function popuni(id, parovi) {
+      const el = document.getElementById(id);
+      el.innerHTML = parovi.map(([k,v]) => `<div>${k}</div><div>${v}</div>`).join('');
+    }
+    function postaviToggle(id, naziv, aktivno) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.toggle('active', !!aktivno);
+      btn.textContent = `${naziv}: ${aktivno ? 'UKLJUCENO' : 'ISKLJUCENO'}`;
+    }
+    async function ucitaj() {
+      const r = await fetch('/status', {cache:'no-store'});
+      const s = await r.json();
+      zadnjiStatus = s;
+      const m = s.mega || {};
+      popuni('vrijeme', [
+        ['Vrijeme', m.time || '-'],
+        ['Izvor', m.source || '-'],
+        ['Potvrdeno', ozn(!!m.time_confirmed)],
+        ['DCF u tijeku', ozn(!!m.dcf_running)]
+      ]);
+      popuni('mreza', [
+        ['ESP WiFi', ozn(!!s.wifi_connected)],
+        ['Mega WiFi', ozn(!!m.wifi_connected)],
+        ['MQTT', ozn(!!m.mqtt_connected)],
+        ['IP', s.wifi_ip || '-']
+      ]);
+      popuni('mqtt', [
+        ['Aktivan', ozn(!!m.mqtt_enabled)],
+        ['Broker', s.mqtt_broker || '-'],
+        ['Port', (s.mqtt_port !== undefined ? s.mqtt_port : '-')],
+        ['User', s.mqtt_user || '-']
+      ]);
+      popuni('pogon', [
+        ['Kazaljke sync', ozn(!!m.hands_synced)],
+        ['Kazaljke K-min', (m.hands_position !== undefined ? m.hands_position : '-')],
+        ['Ploca sync', ozn(!!m.plate_synced)],
+        ['Ploca pozicija', (m.plate_position !== undefined ? m.plate_position : '-')]
+      ]);
+      popuni('zvona', [
+        ['Slavljenje', ozn(!!m.celebration)],
+        ['Mrtvacko', ozn(!!m.funeral)],
+        ['Otkucavanje', ozn(!!m.striking)],
+        ['Zvono1/Zvono2', `${ozn(!!m.bell1)} / ${ozn(!!m.bell2)}`]
+      ]);
+      postaviToggle('btnSlavljenje', 'Slavljenje', !!m.celebration);
+      postaviToggle('btnMrtvacko', 'Mrtvacko', !!m.funeral);
+      postaviToggle('btnZvono1', 'Zvono 1', !!m.bell1);
+      postaviToggle('btnZvono2', 'Zvono 2', !!m.bell2);
+      document.getElementById('mqttEnabled').checked = !!m.mqtt_enabled;
+      const mqttPoljaAktivna = document.activeElement &&
+        ['mqttBroker', 'mqttPort', 'mqttUser', 'mqttPassword'].includes(document.activeElement.id);
+      if (!mqttPoljaAktivna) {
+        document.getElementById('mqttBroker').value = s.mqtt_broker || '';
+        document.getElementById('mqttPort').value = (s.mqtt_port !== undefined ? s.mqtt_port : 1883);
+        document.getElementById('mqttUser').value = s.mqtt_user || '';
+      }
+      document.getElementById('odgovor').textContent =
+        `Zadnji odgovor: ${s.zadnji_odgovor || '-'}\nStanje staro: ${m.age_ms !== undefined ? m.age_ms : 0} ms`;
+    }
+    function komandaZaToggle(vrsta) {
+      const m = (zadnjiStatus && zadnjiStatus.mega) ? zadnjiStatus.mega : {};
+      if (vrsta === 'celebration') return m.celebration ? 'SLAVLJENJE_OFF' : 'SLAVLJENJE_ON';
+      if (vrsta === 'funeral') return m.funeral ? 'MRTVACKO_OFF' : 'MRTVACKO_ON';
+      if (vrsta === 'bell1') return m.bell1 ? 'ZVONO1_OFF' : 'ZVONO1_ON';
+      if (vrsta === 'bell2') return m.bell2 ? 'ZVONO2_OFF' : 'ZVONO2_ON';
+      return null;
+    }
+    async function toggleCmd(vrsta) {
+      const cmd = komandaZaToggle(vrsta);
+      if (!cmd) {
+        document.getElementById('odgovor').textContent = 'Status jos nije ucitan.';
+        return;
+      }
+      await posalji(cmd);
+    }
+    async function posalji(cmd) {
+      const r = await fetch('/cmd?value=' + encodeURIComponent(cmd), {cache:'no-store'});
+      const t = await r.text();
+      document.getElementById('odgovor').textContent = t;
+      setTimeout(ucitaj, 300);
+    }
+    async function promijeniLozinku() {
+      const nova = document.getElementById('novaLozinka').value;
+      const potvrda = document.getElementById('potvrdaLozinke').value;
+      if (!nova || nova.length < 4) {
+        document.getElementById('odgovor').textContent = 'Nova lozinka mora imati barem 4 znaka.';
+        return;
+      }
+      if (nova !== potvrda) {
+        document.getElementById('odgovor').textContent = 'Lozinke se ne podudaraju.';
+        return;
+      }
+      const body = new URLSearchParams({ password: nova });
+      const r = await fetch('/password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body
+      });
+      const t = await r.text();
+      document.getElementById('odgovor').textContent = t;
+      document.getElementById('novaLozinka').value = '';
+      document.getElementById('potvrdaLozinke').value = '';
+    }
+    async function spremiMqtt() {
+      const body = new URLSearchParams({
+        enabled: document.getElementById('mqttEnabled').checked ? '1' : '0',
+        broker: document.getElementById('mqttBroker').value,
+        port: document.getElementById('mqttPort').value || '1883',
+        user: document.getElementById('mqttUser').value,
+        password: document.getElementById('mqttPassword').value
+      });
+      const broker = document.getElementById('mqttBroker').value;
+      const port = document.getElementById('mqttPort').value || '1883';
+      const user = document.getElementById('mqttUser').value;
+      const password = document.getElementById('mqttPassword').value;
+      if (broker.includes('|') || user.includes('|') || password.includes('|')) {
+        document.getElementById('odgovor').textContent = 'MQTT polja ne smiju sadrzavati znak |';
+        return;
+      }
+      const r = await fetch('/mqtt-save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body
+      });
+      const t = await r.text();
+      document.getElementById('odgovor').textContent = t;
+      document.getElementById('mqttPassword').value = '';
+      setTimeout(ucitaj, 500);
+    }
+    ucitaj();
+    setInterval(ucitaj, 15000);
+  </script>
+</body>
+</html>
+)HTML";
+}
+
 void obradiNTPSerijskuNaredbu(const String &linija) {
   String server = ocistiJednolinijskiTekst(linija.substring(7), sizeof(ntpPosluzitelj) - 1);
   server.trim();
@@ -817,28 +1438,57 @@ void obradiNTPSerijskuNaredbu(const String &linija) {
 }
 
 void konfigurirajWebPosluzitelj() {
+  Serial.println("WEB: Registriram / rutu");
+  webPosluzitelj.on("/", []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    webPosluzitelj.send(200, "text/html; charset=utf-8", generirajWebSucelje());
+  });
+
   Serial.println("WEB: Registriram /status rutu");
   webPosluzitelj.on("/status", []() {
-    String tijelo = "{\"wifi\":\"" + escapirajJsonString(WiFi.SSID()) + "\",";
-    tijelo += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-    tijelo += "\"mqtt\":\"";
-    tijelo += (mqttKlijent.connected() ? "connected" : "disconnected");
-    tijelo += "\",";
-    tijelo += "\"ntp_server\":\"" + escapirajJsonString(String(ntpPosluzitelj)) + "\",";
-    tijelo += "\"zadnji_odgovor\":\"" + escapirajJsonString(zadnjiOdgovorMega) + "\"}";
-    webPosluzitelj.send(200, "application/json", tijelo);
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    zatraziStatusMegae(true);
+    webPosluzitelj.send(200, "application/json", kreirajJsonStatus());
   });
 
   Serial.println("WEB: Registriram /cmd rutu");
   webPosluzitelj.on("/cmd", []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
     if (!webPosluzitelj.hasArg("value")) {
       webPosluzitelj.send(400, "text/plain", "Nedostaje argument value");
       return;
     }
 
     String naredba = webPosluzitelj.arg("value");
-    Serial.print("WEB CMD: stigla naredba ");
-    Serial.println(naredba);
+
+    if (naredba.equalsIgnoreCase("NTP_SYNC")) {
+      osvjeziNTPSat();
+      if (WiFi.status() != WL_CONNECTED) {
+        webPosluzitelj.send(503, "text/plain", "WiFi nije spojen pa NTP nije dostupan");
+        return;
+      }
+      if (!ntpKlijent.isTimeSet()) {
+        webPosluzitelj.send(503, "text/plain", "NTP jos nije spreman na ESP8266");
+        return;
+      }
+
+      posaljiNTPPremaMegai();
+      ntpPoslanNakonSpajanja = true;
+      webPosluzitelj.send(200, "text/plain", "NTP vrijeme poslano Megi");
+      return;
+    }
+
+    if (naredba.equalsIgnoreCase("STATUS_REFRESH")) {
+      zatraziStatusMegae(true);
+      webPosluzitelj.send(200, "text/plain", "Zatrazeno novo stanje toranjskog sata");
+      return;
+    }
 
     if (!jeNaredbaDozvoljena(naredba)) {
       Serial.println("WEB CMD: naredba nije dozvoljena");
@@ -847,7 +1497,75 @@ void konfigurirajWebPosluzitelj() {
     }
 
     saljiNaredbuMegai(naredba);
-    webPosluzitelj.send(200, "text/plain", "Naredba poslana");
+    zatraziStatusMegae(true);
+    webPosluzitelj.send(200, "text/plain", "Naredba poslana toranjskom satu");
+  });
+
+  Serial.println("WEB: Registriram /password rutu");
+  webPosluzitelj.on("/password", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    if (!webPosluzitelj.hasArg("password")) {
+      webPosluzitelj.send(400, "text/plain", "Nedostaje nova lozinka");
+      return;
+    }
+
+    String novaLozinka = webPosluzitelj.arg("password");
+    novaLozinka = ocistiJednolinijskiTekst(novaLozinka, WEB_LOZINKA_MAX - 1);
+    novaLozinka.trim();
+    if (novaLozinka.length() < 4) {
+      webPosluzitelj.send(422, "text/plain", "Lozinka mora imati barem 4 znaka");
+      return;
+    }
+
+    if (!spremiWebAutentikaciju(novaLozinka)) {
+      webPosluzitelj.send(500, "text/plain", "Spremanje lozinke nije uspjelo");
+      return;
+    }
+
+    webPosluzitelj.send(200, "text/plain", "Lozinka je promijenjena. Pri sljedecem otvaranju koristi novu lozinku.");
+  });
+
+  Serial.println("WEB: Registriram /mqtt-save rutu");
+  webPosluzitelj.on("/mqtt-save", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    if (!webPosluzitelj.hasArg("enabled") ||
+        !webPosluzitelj.hasArg("broker") ||
+        !webPosluzitelj.hasArg("port") ||
+        !webPosluzitelj.hasArg("user") ||
+        !webPosluzitelj.hasArg("password")) {
+      webPosluzitelj.send(400, "text/plain", "Nedostaju MQTT polja");
+      return;
+    }
+
+    const String enabledTekst = webPosluzitelj.arg("enabled");
+    const String broker = webPosluzitelj.arg("broker");
+    const String portTekst = webPosluzitelj.arg("port");
+    const String user = webPosluzitelj.arg("user");
+    const String password = webPosluzitelj.arg("password");
+    const long port = portTekst.toInt();
+    if (!(enabledTekst == "0" || enabledTekst == "1")) {
+      webPosluzitelj.send(422, "text/plain", "Neispravna MQTT zastavica aktivacije");
+      return;
+    }
+    if (port <= 0 || port > 65535) {
+      webPosluzitelj.send(422, "text/plain", "Neispravan MQTT port");
+      return;
+    }
+
+    if (!spremiMQTTPostavkePrekoWeba(broker,
+                                     static_cast<uint16_t>(port),
+                                     user,
+                                     password,
+                                     enabledTekst == "1")) {
+      webPosluzitelj.send(422, "text/plain", "MQTT postavke nisu valjane");
+      return;
+    }
+
+    webPosluzitelj.send(200, "text/plain", "MQTT postavke poslane toranjskom satu");
   });
 
   webPosluzitelj.onNotFound([]() {
@@ -860,8 +1578,6 @@ void konfigurirajWebPosluzitelj() {
 }
 
 void saljiNaredbuMegai(const String &naredba) {
-  Serial.print("SLANJE CMD: ");
-  Serial.println(naredba);
   Serial.print("CMD:");
   Serial.println(naredba);
 }

@@ -23,6 +23,7 @@
 namespace PowerRecoveryLayout {
 constexpr int BAZA_BOOT_FLAGS = EepromLayout::BAZA_BOOT_FLAGS;
 constexpr int SLOTOVI_BOOT_FLAGS = EepromLayout::SLOTOVI_BOOT_FLAGS;
+constexpr int BAZA_EEPROM_DIJAGNOSTIKA = EepromLayout::BAZA_EEPROM_DIJAGNOSTIKA;
 constexpr uint8_t HAND_NEAKTIVNO = 0;
 constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
 constexpr uint16_t BROJ_MINUTA_CIKLUS = 720;
@@ -160,6 +161,7 @@ void spremiKriticalnoStanje() {
   static unsigned long last_save = 0;
   static bool inicijaliziranSaveSlot = false;
   static uint8_t save_slot = 0;
+  static bool prijavljenaPauzaSpremanja = false;
   const unsigned long sada = millis();
   static const unsigned long SAVE_INTERVAL = 60000UL;
 
@@ -175,6 +177,16 @@ void spremiKriticalnoStanje() {
   if ((sada - last_save) < SAVE_INTERVAL) {
     return;
   }
+
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    if (!prijavljenaPauzaSpremanja) {
+      posaljiPCLog(F("Power Recovery: spremanje pauzirano dok vrijeme toranjskog sata nije potvrdeno"));
+      prijavljenaPauzaSpremanja = true;
+    }
+    return;
+  }
+
+  prijavljenaPauzaSpremanja = false;
   last_save = sada;
 
   SystemStateBackup backup;
@@ -195,7 +207,7 @@ void spremiKriticalnoStanje() {
 bool provjeriZdravostEEPROM() {
   uint32_t test_value = 0x12345678UL;
   uint32_t read_back = 0;
-  const int test_adresa = PowerRecoveryLayout::BAZA_BOOT_FLAGS;
+  const int test_adresa = PowerRecoveryLayout::BAZA_EEPROM_DIJAGNOSTIKA;
 
   if (!VanjskiEEPROM::zapisi(test_adresa, &test_value, sizeof(test_value))) {
     return false;

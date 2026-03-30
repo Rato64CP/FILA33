@@ -7,10 +7,10 @@ void inicijalizirajZvona();
 // Obrada zvona u glavnoj petlji
 void upravljajZvonom();
 
-// Rucno ili automatsko ukljucivanje pojedinog zvona 1-4
+// Rucno ili automatsko ukljucivanje pojedinog zvona 1-2
 void ukljuciZvono(int zvono);
 
-// Iskljucivanje pojedinog zvona 1-4
+// Iskljucivanje pojedinog zvona 1-2
 void iskljuciZvono(int zvono);
 
 // Upiti o stanju zvona
