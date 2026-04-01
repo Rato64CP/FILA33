@@ -123,6 +123,8 @@ struct SystemStateBackup {
   uint32_t hand_position_k_minuta;
   uint32_t plate_position;
   uint32_t offset_minuta;
+  // Legacy zapisi koriste RTC unix timestamp, a novi recovery zapisi
+  // monotono rastucu sekvencu radi pouzdanog odabira najnovijeg slota.
   uint32_t rtc_timestamp;
   uint16_t checksum;
 };

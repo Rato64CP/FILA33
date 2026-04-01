@@ -27,6 +27,8 @@ constexpr int BAZA_EEPROM_DIJAGNOSTIKA = EepromLayout::BAZA_EEPROM_DIJAGNOSTIKA;
 constexpr uint8_t HAND_NEAKTIVNO = 0;
 constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
 constexpr uint16_t BROJ_MINUTA_CIKLUS = 720;
+constexpr uint32_t LEGACY_MIN_UNIX_TIMESTAMP = 1000000000UL;
+constexpr uint32_t EEPROM_DIJAGNOSTICKI_POTPIS = 0x12345678UL;
 }
 
 // ==================== STATE VARIABLES ====================
@@ -37,6 +39,7 @@ static unsigned long boot_time = 0;
 static unsigned long last_state_save_time = 0;
 static uint32_t reset_counter = 0;
 static bool boot_recovery_odraden = false;
+static uint32_t save_sequence = 1;
 
 struct SystemStateBackup {
   uint32_t hand_position_k_minuta;
@@ -63,9 +66,14 @@ static bool jeStanjeValidno(const SystemStateBackup& stanje) {
   return stanje.checksum == izracunajChecksum(stanje);
 }
 
+static bool jeLegacyBackupPoVremenu(const SystemStateBackup& stanje) {
+  return stanje.rtc_timestamp >= PowerRecoveryLayout::LEGACY_MIN_UNIX_TIMESTAMP;
+}
+
 bool ucitajNajnovijiBackup(SystemStateBackup& backup, int* slotNajnoviji = nullptr) {
   bool pronadeno = false;
-  uint32_t najnovijiTimestamp = 0;
+  bool pronadenSekvencijskiBackup = false;
+  uint32_t najboljaVrijednost = 0;
   int najboljiSlot = -1;
 
   for (int slot = 0; slot < PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS; ++slot) {
@@ -75,9 +83,21 @@ bool ucitajNajnovijiBackup(SystemStateBackup& backup, int* slotNajnoviji = nullp
       continue;
     }
 
-    if (!pronadeno || kandidat.rtc_timestamp >= najnovijiTimestamp) {
+    const bool kandidatJeLegacy = jeLegacyBackupPoVremenu(kandidat);
+    if (kandidatJeLegacy && pronadenSekvencijskiBackup) {
+      continue;
+    }
+
+    if (!kandidatJeLegacy && !pronadenSekvencijskiBackup) {
+      pronadenSekvencijskiBackup = true;
+      pronadeno = false;
+      najboljaVrijednost = 0;
+      najboljiSlot = -1;
+    }
+
+    if (!pronadeno || kandidat.rtc_timestamp >= najboljaVrijednost) {
       backup = kandidat;
-      najnovijiTimestamp = kandidat.rtc_timestamp;
+      najboljaVrijednost = kandidat.rtc_timestamp;
       najboljiSlot = slot;
       pronadeno = true;
     }
@@ -119,7 +139,7 @@ void odradiBootRecovery() {
   if (stanjeUcitano) {
     String log = F("Power Recovery: Valid state loaded from slot ");
     log += ucitaniSlot;
-    log += F(" ts=");
+    log += jeLegacyBackupPoVremenu(backup) ? F(" ts=") : F(" seq=");
     log += backup.rtc_timestamp;
     posaljiPCLog(log);
   }
@@ -170,6 +190,9 @@ void spremiKriticalnoStanje() {
     int zadnjiSlot = -1;
     if (ucitajNajnovijiBackup(zadnjiBackup, &zadnjiSlot) && zadnjiSlot >= 0) {
       save_slot = static_cast<uint8_t>((zadnjiSlot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS);
+      if (!jeLegacyBackupPoVremenu(zadnjiBackup) && zadnjiBackup.rtc_timestamp > 0UL) {
+        save_sequence = zadnjiBackup.rtc_timestamp + 1UL;
+      }
     }
     inicijaliziranSaveSlot = true;
   }
@@ -193,21 +216,32 @@ void spremiKriticalnoStanje() {
   backup.hand_position_k_minuta = static_cast<uint32_t>(dohvatiMemoriraneKazaljkeMinuta());
   backup.plate_position = static_cast<uint32_t>(dohvatiPozicijuPloce());
   backup.offset_minuta = static_cast<uint32_t>(dohvatiOffsetMinuta());
-  backup.rtc_timestamp = dohvatiTrenutnoVrijeme().unixtime();
+  // Novi backup koristi monotono rastucu sekvencu kako recovery toranjskog sata
+  // ne bi ovisio o tome je li RTC/NTP vrijeme naknadno vraceno unatrag.
+  backup.rtc_timestamp = save_sequence;
   backup.checksum = izracunajChecksum(backup);
 
   const int adresa = PowerRecoveryLayout::BAZA_BOOT_FLAGS + save_slot * static_cast<int>(sizeof(SystemStateBackup));
 
   if (VanjskiEEPROM::zapisi(adresa, &backup, sizeof(SystemStateBackup))) {
     save_slot = (save_slot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS;
+    save_sequence = (save_sequence == 0xFFFFFFFFUL) ? 1UL : (save_sequence + 1UL);
     last_state_save_time = sada;
   }
 }
 
 bool provjeriZdravostEEPROM() {
-  uint32_t test_value = 0x12345678UL;
   uint32_t read_back = 0;
+  const uint32_t test_value = PowerRecoveryLayout::EEPROM_DIJAGNOSTICKI_POTPIS;
   const int test_adresa = PowerRecoveryLayout::BAZA_EEPROM_DIJAGNOSTIKA;
+
+  if (!VanjskiEEPROM::procitaj(test_adresa, &read_back, sizeof(read_back))) {
+    return false;
+  }
+
+  if (read_back == test_value) {
+    return true;
+  }
 
   if (!VanjskiEEPROM::zapisi(test_adresa, &test_value, sizeof(test_value))) {
     return false;

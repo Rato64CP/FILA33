@@ -10,6 +10,7 @@ void inicijalizirajLCD();
 void prikaziSat();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
 void postaviWiFiStatus(bool aktivan);
+void prikaziLokalnuWiFiIP(const char* ipAdresa);
 void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci);
 
 // Signalizacija statusa otkucavanja na LCD-u

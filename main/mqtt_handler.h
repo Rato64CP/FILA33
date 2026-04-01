@@ -1,33 +1,22 @@
-// mqtt_handler.h – Home Assistant MQTT integracija za toranjski sat
+// mqtt_handler.h - Pojednostavljena MQTT integracija za toranjski sat.
 #pragma once
 
 #include <Arduino.h>
 
-// Initialize MQTT handler for Home Assistant integration
+// Inicijalizacija MQTT sloja za 4 komandne teme.
 void inicijalizirajMQTT();
 
-// Main MQTT update loop (call from main loop)
+// Glavna MQTT obrada iz glavne petlje toranjskog sata.
 void upravljajMQTT();
 
-// Publish current system status to Home Assistant
-void objaviStatusMQTT();
-
-// Process received MQTT commands
+// Obrada primljene MQTT komande s ESP8266 mosta.
 void obradiMQTTKomandu(const String& tema, const String& poruka);
 
-// Publish entity state to Home Assistant
-void objavi(const char* tema, const char* vrijednost);
-void objavi(const String& tema, const String& vrijednost);
-
-// Subscribe to MQTT topic
-void pretplati(const char* tema);
-void pretplati(const String& tema);
-
-// Check MQTT connection status
+// Trenutni status MQTT veze prema brokeru.
 bool jeMQTTPovezan();
 
-// Reconnect to MQTT broker
+// Pokretanje reconnect pokušaja na spremljenu konfiguraciju na ESP-u.
 void reconnectMQTT();
 
-// Obrada linije s ESP-a koju je pročitao serijski sloj (Serial3 owner).
+// Obrada linije s ESP-a koju je procitao serijski sloj (Serial3 owner).
 void obradiMQTTLinijuIzESPa(const String& line);

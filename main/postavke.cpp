@@ -676,6 +676,10 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
     spremnik.trajanjeImpulsaCekicaMs = 150;
     trebaSpremiti = true;
   }
+  if (spremnik.trajanjeImpulsaCekicaMs > 150) {
+    spremnik.trajanjeImpulsaCekicaMs = 150;
+    trebaSpremiti = true;
+  }
   if (spremnik.pauzaIzmeduUdaraca < 100) {
     spremnik.pauzaIzmeduUdaraca = 400;
     trebaSpremiti = true;

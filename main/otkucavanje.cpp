@@ -19,6 +19,7 @@
 const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;
 const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;
 const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;  // 2 s izmedu satnih udaraca
+const unsigned long SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS = 150UL;
 
 // Slavljenje mod 1: tocan uzorak 1-2-2 s definiranim pauzama
 const unsigned long SLAVLJENJE_TRAJANJE_UDARCA_MS = 150UL;
@@ -98,25 +99,115 @@ static struct {
 
 static bool blokada_otkucavanja = false;
 static DateTime zadnje_izmjereno_vrijeme;
+static struct {
+  bool aktivan[2];
+  unsigned long vrijeme_aktivacije_ms[2];
+  unsigned long trajanje_ms[2];
+} sigurnost_cekica = {
+  { false, false },
+  { 0UL, 0UL },
+  { 0UL, 0UL }
+};
 
 // ==================== HELPER FUNCTIONS ====================
 
-static void aktivirajCekic_Internal(int pin) {
-  if (pin == PIN_CEKIC_MUSKI || pin == PIN_CEKIC_ZENSKI) {
-    digitalWrite(pin, HIGH);
+static int dohvatiIndeksCekicaZaPin(int pin) {
+  if (pin == PIN_CEKIC_MUSKI) {
+    return 0;
   }
+  if (pin == PIN_CEKIC_ZENSKI) {
+    return 1;
+  }
+  return -1;
+}
+
+static unsigned long normalizirajSigurnoTrajanjeCekicaMs(unsigned long trazenoTrajanjeMs) {
+  if (trazenoTrajanjeMs == 0UL) {
+    trazenoTrajanjeMs = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
+  }
+  if (trazenoTrajanjeMs > SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS) {
+    trazenoTrajanjeMs = SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS;
+  }
+  return trazenoTrajanjeMs;
+}
+
+static unsigned long dohvatiTrajanjeZaAktivnoOtkucavanjeMs() {
+  if (otkucavanje.vrsta == OTKUCAVANJE_SATI) {
+    return TRAJANJE_IMPULSA_CEKICA_DEFAULT;
+  }
+  return normalizirajSigurnoTrajanjeCekicaMs(dohvatiTrajanjeImpulsaCekica());
+}
+
+static bool jeCekicSigurnosnoAktivan(int pin) {
+  const int indeks = dohvatiIndeksCekicaZaPin(pin);
+  return (indeks >= 0) ? sigurnost_cekica.aktivan[indeks] : false;
+}
+
+static void aktivirajCekic_Internal(int pin, unsigned long trazenoTrajanjeMs) {
+  const int indeks = dohvatiIndeksCekicaZaPin(pin);
+  if (indeks < 0) {
+    return;
+  }
+
+  digitalWrite(pin, HIGH);
+  sigurnost_cekica.aktivan[indeks] = true;
+  sigurnost_cekica.vrijeme_aktivacije_ms[indeks] = millis();
+  sigurnost_cekica.trajanje_ms[indeks] = normalizirajSigurnoTrajanjeCekicaMs(trazenoTrajanjeMs);
 }
 
 static void deaktivirajCekic_Internal(int pin) {
-  if (pin == PIN_CEKIC_MUSKI || pin == PIN_CEKIC_ZENSKI) {
-    digitalWrite(pin, LOW);
+  const int indeks = dohvatiIndeksCekicaZaPin(pin);
+  if (indeks < 0) {
+    return;
   }
+
+  digitalWrite(pin, LOW);
+  sigurnost_cekica.aktivan[indeks] = false;
+  sigurnost_cekica.vrijeme_aktivacije_ms[indeks] = 0UL;
+  sigurnost_cekica.trajanje_ms[indeks] = 0UL;
 }
 
 // Sigurnosno gasenje oba cekica
 static void deaktivirajObaCekica_Internal() {
   deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
   deaktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+}
+
+static void primijeniSigurnosniLimitCekica(unsigned long sadaMs) {
+  for (int indeks = 0; indeks < 2; ++indeks) {
+    if (!sigurnost_cekica.aktivan[indeks]) {
+      continue;
+    }
+
+    const unsigned long proteklo = sadaMs - sigurnost_cekica.vrijeme_aktivacije_ms[indeks];
+    if (proteklo < sigurnost_cekica.trajanje_ms[indeks]) {
+      continue;
+    }
+
+    if (indeks == 0) {
+      deaktivirajCekic_Internal(PIN_CEKIC_MUSKI);
+    } else {
+      deaktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+    }
+  }
+
+  if (otkucavanje.cekic_aktivan && !jeCekicSigurnosnoAktivan(otkucavanje.aktivni_pin)) {
+    otkucavanje.cekic_aktivan = false;
+    otkucavanje.vrijeme_zadnje_aktivacije = sadaMs;
+  }
+
+  if (slavljenje.cekic_aktivan && !jeCekicSigurnosnoAktivan(slavljenje.aktivni_pin)) {
+    slavljenje.cekic_aktivan = false;
+    slavljenje.aktivni_pin = -1;
+    slavljenje.vrijeme_koraka_ms = sadaMs;
+  }
+
+  if (mrtvacko.cekici_aktivni &&
+      !jeCekicSigurnosnoAktivan(PIN_CEKIC_MUSKI) &&
+      !jeCekicSigurnosnoAktivan(PIN_CEKIC_ZENSKI)) {
+    mrtvacko.cekici_aktivni = false;
+    mrtvacko.vrijeme_faze_ms = sadaMs;
+  }
 }
 
 static int dohvatiPinSlavljenjaZaKorak(uint8_t mod, int korak) {
@@ -179,7 +270,7 @@ static void pokreniSljedeciUdarac() {
     return;
   }
 
-  aktivirajCekic_Internal(otkucavanje.aktivni_pin);
+  aktivirajCekic_Internal(otkucavanje.aktivni_pin, dohvatiTrajanjeZaAktivnoOtkucavanjeMs());
   otkucavanje.cekic_aktivan = true;
   otkucavanje.vrijeme_zadnje_aktivacije = millis();
   otkucavanje.preostali_udarci--;
@@ -266,7 +357,7 @@ void zapocniSlavljenje() {
   slavljenje.vrijeme_koraka_ms = sadaMs;
   slavljenje.cekic_aktivan = true;
   slavljenje.aktivni_pin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
-  aktivirajCekic_Internal(slavljenje.aktivni_pin);
+  aktivirajCekic_Internal(slavljenje.aktivni_pin, SLAVLJENJE_TRAJANJE_UDARCA_MS);
 
   String log = F("Slavljenje: pokrenuto (mod ");
   log += modSlavljenja;
@@ -314,7 +405,7 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
     slavljenje.trenutni_korak = (slavljenje.trenutni_korak + 1) % brojKoraka;
     const int sljedeci_pin =
         dohvatiPinSlavljenjaZaKorak(slavljenje.aktivni_mod, slavljenje.trenutni_korak);
-    aktivirajCekic_Internal(sljedeci_pin);
+    aktivirajCekic_Internal(sljedeci_pin, SLAVLJENJE_TRAJANJE_UDARCA_MS);
     slavljenje.aktivni_pin = sljedeci_pin;
     slavljenje.cekic_aktivan = true;
     slavljenje.vrijeme_koraka_ms = sadaMs;
@@ -347,8 +438,8 @@ void zapocniMrtvacko() {
   mrtvacko.auto_stop_nakon_ms = mrtvacko.auto_stop_ukljucen
       ? static_cast<unsigned long>(trajanjeMin) * 60000UL
       : 0UL;
-  aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
-  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+  aktivirajCekic_Internal(PIN_CEKIC_MUSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
+  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
 
   String log = F("Mrtvacko: pokrenuto (oba cekica 150ms / pauza 10s");
   if (mrtvacko.auto_stop_ukljucen) {
@@ -408,8 +499,8 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
   }
 
   if (proteklo >= MRTVACKO_PAUZA_MS) {
-    aktivirajCekic_Internal(PIN_CEKIC_MUSKI);
-    aktivirajCekic_Internal(PIN_CEKIC_ZENSKI);
+    aktivirajCekic_Internal(PIN_CEKIC_MUSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
+    aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
     mrtvacko.cekici_aktivni = true;
     mrtvacko.vrijeme_faze_ms = sadaMs;
   }
@@ -488,6 +579,12 @@ void inicijalizirajOtkucavanje() {
   mrtvacko.auto_stop_ukljucen = false;
   mrtvacko.auto_stop_nakon_ms = 0;
   mrtvacko.zadano_trajanje_min = 0;
+  sigurnost_cekica.aktivan[0] = false;
+  sigurnost_cekica.aktivan[1] = false;
+  sigurnost_cekica.vrijeme_aktivacije_ms[0] = 0UL;
+  sigurnost_cekica.vrijeme_aktivacije_ms[1] = 0UL;
+  sigurnost_cekica.trajanje_ms[0] = 0UL;
+  sigurnost_cekica.trajanje_ms[1] = 0UL;
 
   zadnje_izmjereno_vrijeme = dohvatiTrenutnoVrijeme();
   blokada_otkucavanja = false;
@@ -498,6 +595,9 @@ void inicijalizirajOtkucavanje() {
 void upravljajOtkucavanjem() {
   unsigned long sadaMs = millis();
   DateTime sada = dohvatiTrenutnoVrijeme();
+
+  // Tvrdi softverski limit: nijedan cekic ne smije ostati aktivan dulje od dozvoljenog impulsa.
+  primijeniSigurnosniLimitCekica(sadaMs);
 
   provjeriDugmeSlavljenja();
   provjeriDugmeMrtvackog();

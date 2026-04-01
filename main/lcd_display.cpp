@@ -31,6 +31,10 @@ static char wifi_status = ' ';
 static char line2_buffer[17];
 static unsigned long last_line2_refresh = 0;
 static bool rtc_battery_warning_active = false;
+static bool wifi_ip_prikaz_aktivan = false;
+static unsigned long wifi_ip_prikaz_pocetak_ms = 0;
+static char wifi_ip_poruka[17];
+static const unsigned long WIFI_IP_PRIKAZ_TRAJANJE_MS = 5000UL;
 
 static enum {
   ACTIVITY_NONE = 0,
@@ -124,6 +128,7 @@ void inicijalizirajLCD() {
 
   memset(activity_message, ' ', sizeof(activity_message) - 1);
   activity_message[16] = '\0';
+  wifi_ip_poruka[0] = '\0';
 
   lcd.setCursor(0, 0);
   lcd.print(F("FILA 33 v.1.0"));
@@ -220,6 +225,17 @@ static void build_line2() {
     memset(activity_message, ' ', 16);
     activity_message[16] = '\0';
     activity_is_error = false;
+  }
+
+  if (wifi_ip_prikaz_aktivan) {
+    if ((millis() - wifi_ip_prikaz_pocetak_ms) >= WIFI_IP_PRIKAZ_TRAJANJE_MS) {
+      wifi_ip_prikaz_aktivan = false;
+      wifi_ip_poruka[0] = '\0';
+    } else if (current_activity != ACTIVITY_ERROR && !activity_is_error) {
+      strncpy(line2_buffer, wifi_ip_poruka, 16);
+      line2_buffer[16] = '\0';
+      return;
+    }
   }
 
   if (current_activity == ACTIVITY_NONE && jeOtkucavanjeUTijeku()) {
@@ -410,6 +426,25 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
 
 void postaviWiFiStatus(bool aktivan) {
   wifi_status = aktivan ? 'W' : ' ';
+}
+
+void prikaziLokalnuWiFiIP(const char* ipAdresa) {
+  if (ipAdresa == nullptr || ipAdresa[0] == '\0') {
+    return;
+  }
+
+  strncpy(wifi_ip_poruka, ipAdresa, sizeof(wifi_ip_poruka) - 1);
+  wifi_ip_poruka[sizeof(wifi_ip_poruka) - 1] = '\0';
+
+  const int duljina = strlen(wifi_ip_poruka);
+  for (int i = duljina; i < 16; ++i) {
+    wifi_ip_poruka[i] = ' ';
+  }
+  wifi_ip_poruka[16] = '\0';
+
+  wifi_ip_prikaz_aktivan = true;
+  wifi_ip_prikaz_pocetak_ms = millis();
+  last_line2_refresh = 0;
 }
 
 void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci) {

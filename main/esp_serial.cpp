@@ -28,103 +28,83 @@ static bool mqttBrokerNijeKonfiguriranPrijavljen = false;
 static bool ntpCekanjePrijavljeno = false;
 static bool wifiPovezanNaESP = false;
 
+static bool jeValjanaIPv4AdresaZaLCD(const char* tekst) {
+  if (tekst == nullptr || tekst[0] == '\0') {
+    return false;
+  }
+
+  uint8_t brojSegmenata = 0;
+  const char* pokazivac = tekst;
+
+  while (*pokazivac != '\0') {
+    if (brojSegmenata >= 4 || !isDigit(*pokazivac)) {
+      return false;
+    }
+
+    int segment = 0;
+    uint8_t brojZnamenki = 0;
+    while (isDigit(*pokazivac)) {
+      segment = segment * 10 + (*pokazivac - '0');
+      if (segment > 255) {
+        return false;
+      }
+      ++pokazivac;
+      ++brojZnamenki;
+      if (brojZnamenki > 3) {
+        return false;
+      }
+    }
+
+    if (brojZnamenki == 0) {
+      return false;
+    }
+
+    ++brojSegmenata;
+    if (*pokazivac == '.') {
+      ++pokazivac;
+      if (*pokazivac == '\0') {
+        return false;
+      }
+    } else if (*pokazivac != '\0') {
+      return false;
+    }
+  }
+
+  return brojSegmenata == 4;
+}
+
 void posaljiESPKomandu(const char* komanda);
 void posaljiESPKomandu(const String& komanda);
 
-static bool parsirajWebMQTTPayload(const char* payload,
-                                   bool& omogucen,
-                                   String& broker,
-                                   uint16_t& port,
-                                   String& korisnik,
-                                   String& lozinka) {
+static bool parsirajWebMQTTOmogucenost(const char* payload, bool& omogucen) {
   if (payload == nullptr) {
     return false;
   }
 
   String tekst = String(payload);
-  const int g1 = tekst.indexOf('|');
-  const int g2 = (g1 >= 0) ? tekst.indexOf('|', g1 + 1) : -1;
-  const int g3 = (g2 >= 0) ? tekst.indexOf('|', g2 + 1) : -1;
-  const int g4 = (g3 >= 0) ? tekst.indexOf('|', g3 + 1) : -1;
-  if (g1 <= 0 || g2 <= g1 || g3 <= g2 || g4 <= g3) {
+  tekst.trim();
+  if (!(tekst == "0" || tekst == "1")) {
     return false;
   }
 
-  const String omogucenTekst = tekst.substring(0, g1);
-  broker = tekst.substring(g1 + 1, g2);
-  const String portTekst = tekst.substring(g2 + 1, g3);
-  korisnik = tekst.substring(g3 + 1, g4);
-  lozinka = tekst.substring(g4 + 1);
-
-  broker.trim();
-  korisnik.trim();
-  lozinka.trim();
-
-  if (!(omogucenTekst == "0" || omogucenTekst == "1")) {
-    return false;
-  }
-  omogucen = (omogucenTekst == "1");
-
-  if (broker.length() == 0 || broker.length() >= 40) {
-    return false;
-  }
-  if (korisnik.length() >= 33 || lozinka.length() >= 33) {
-    return false;
-  }
-
-  const long procitaniPort = portTekst.toInt();
-  if (procitaniPort <= 0 || procitaniPort > 65535) {
-    return false;
-  }
-  port = static_cast<uint16_t>(procitaniPort);
+  omogucen = (tekst == "1");
   return true;
 }
 
-static void primijeniWebMQTTKonfiguraciju(const char* payload) {
+static void primijeniWebMQTTOmogucenost(const char* payload) {
   bool omogucen = false;
-  uint16_t port = 1883;
-  String broker = "";
-  String korisnik = "";
-  String lozinka = "";
 
-  if (!parsirajWebMQTTPayload(payload, omogucen, broker, port, korisnik, lozinka)) {
-    espSerijskiPort.println(F("ERR:WEBMQTT"));
-    posaljiPCLog(F("WEB MQTT: neispravan payload iz ESP-a"));
+  if (!parsirajWebMQTTOmogucenost(payload, omogucen)) {
+    espSerijskiPort.println(F("ERR:WEBMQTTEN"));
+    posaljiPCLog(F("WEB MQTT: neispravna zastavica ukljucenja iz ESP-a"));
     return;
   }
 
-  if (lozinka.length() == 0) {
-    lozinka = String(dohvatiMQTTLozinku());
-  }
-
   postaviMQTTOmogucen(omogucen);
-  postaviMQTTPodatke(broker.c_str(), port, korisnik.c_str(), lozinka.c_str());
-  posaljiMQTTPostavkeESP();
-
-  if (omogucen) {
-    char komanda[160];
-    snprintf(komanda,
-             sizeof(komanda),
-             "MQTT:CONNECT|%s|%u|%s|%s",
-             dohvatiMQTTBroker(),
-             dohvatiMQTTPort(),
-             dohvatiMQTTKorisnika(),
-             dohvatiMQTTLozinku());
-    posaljiESPKomandu(komanda);
-  } else {
-    posaljiESPKomandu("MQTT:DISCONNECT");
-  }
-
-  espSerijskiPort.println(F("ACK:WEBMQTT"));
-  char log[128];
-  snprintf(log,
-           sizeof(log),
-           "WEB MQTT: spremljeno %s @%s:%u korisnik=%s",
-           omogucen ? "ON" : "OFF",
-           dohvatiMQTTBroker(),
-           dohvatiMQTTPort(),
-           dohvatiMQTTKorisnika());
-  posaljiPCLog(log);
+  espSerijskiPort.println(F("ACK:WEBMQTTEN"));
+  posaljiPCLog(omogucen
+                   ? F("WEB MQTT: ukljucen, ESP koristi vlastitu spremljenu konfiguraciju")
+                   : F("WEB MQTT: iskljucen"));
 }
 
 static void posaljiStatusESPU() {
@@ -209,7 +189,7 @@ static bool jePrepoznataESPLinija(const char* linija) {
          strcmp(linija, "CFGREQ") == 0 ||
          strncmp(linija, "STATUS:", 7) == 0 ||
          strcmp(linija, "STATUS?") == 0 ||
-         strncmp(linija, "WEBMQTT:", 8) == 0 ||
+         strncmp(linija, "WEBMQTTEN:", 10) == 0 ||
          strncmp(linija, "NTP:", 4) == 0 ||
          strncmp(linija, "CMD:", 4) == 0 ||
          strncmp(linija, "MQTTLOG:", 8) == 0 ||
@@ -271,7 +251,6 @@ static void posaljiKonfiguracijuESPuNakonZahtjeva() {
   posaljiWifiPostavkeESP();
   posaljiWiFiStatusESP();
   posaljiNTPPostavkeESP();
-  posaljiMQTTPostavkeESP();
   posaljiPCLog(F("ESP zatrazio osvjezavanje konfiguracije"));
 }
 
@@ -285,7 +264,6 @@ void inicijalizirajESP() {
   posaljiWifiPostavkeESP();
   posaljiWiFiStatusESP();
   posaljiNTPPostavkeESP();
-  posaljiMQTTPostavkeESP();
 }
 
 void posaljiWifiPostavkeESP() {
@@ -323,16 +301,10 @@ void posaljiNTPPostavkeESP() {
 }
 
 void posaljiMQTTPostavkeESP() {
-  char komanda[128];
-  snprintf(komanda,
-           sizeof(komanda),
-           "MQTTCFG:%d|%s|%u|%s",
-           jeMQTTOmogucen() ? 1 : 0,
-           dohvatiMQTTBroker(),
-           dohvatiMQTTPort(),
-           dohvatiMQTTKorisnika());
+  char komanda[16];
+  snprintf(komanda, sizeof(komanda), "MQTTCFG:%d|ESP", jeMQTTOmogucen() ? 1 : 0);
   espSerijskiPort.println(komanda);
-  posaljiPCLog(F("Poslane MQTT postavke ESP-u za web prikaz"));
+  posaljiPCLog(F("Poslana MQTT zastavica ESP-u"));
 }
 
 void posaljiNTPZahtjevESP() {
@@ -342,6 +314,7 @@ void posaljiNTPZahtjevESP() {
 
 void posaljiESPKomandu(const char* komanda) {
   if (strncmp(komanda, "MQTT:CONNECT|", 13) == 0 ||
+      strcmp(komanda, "MQTT:CONNECT_SAVED") == 0 ||
       strcmp(komanda, "MQTT:DISCONNECT") == 0) {
     mqttBrokerNijeKonfiguriranPrijavljen = false;
   }
@@ -452,6 +425,21 @@ static void obradiESPRedak() {
     return;
   }
 
+  if (strncmp(ulazniBuffer, "WIFI:LOCAL_IP:", 14) == 0) {
+    const char* ipAdresa = ulazniBuffer + 14;
+    if (jeValjanaIPv4AdresaZaLCD(ipAdresa)) {
+      prikaziLokalnuWiFiIP(ipAdresa);
+
+      char log[64];
+      snprintf(log, sizeof(log), "ESP WiFi lokalna IP: %s", ipAdresa);
+      posaljiPCLog(log);
+    } else {
+      logirajLinijuESP("ESP WiFi: neispravna lokalna IP iz ESP-a: ", ipAdresa);
+    }
+    resetirajUlazniBuffer();
+    return;
+  }
+
   if (strncmp(ulazniBuffer, "WIFI:", 5) == 0) {
     obradiWiFiLogLinijuESP(ulazniBuffer);
     resetirajUlazniBuffer();
@@ -475,8 +463,8 @@ static void obradiESPRedak() {
     return;
   }
 
-  if (strncmp(ulazniBuffer, "WEBMQTT:", 8) == 0) {
-    primijeniWebMQTTKonfiguraciju(ulazniBuffer + 8);
+  if (strncmp(ulazniBuffer, "WEBMQTTEN:", 10) == 0) {
+    primijeniWebMQTTOmogucenost(ulazniBuffer + 10);
     resetirajUlazniBuffer();
     return;
   }
@@ -527,6 +515,12 @@ static void obradiESPRedak() {
     else if (strcmp(komanda, "ZVONO1_OFF") == 0)      iskljuciZvono(1);
     else if (strcmp(komanda, "ZVONO2_ON") == 0)       ukljuciZvono(2);
     else if (strcmp(komanda, "ZVONO2_OFF") == 0)      iskljuciZvono(2);
+    else if (strcmp(komanda, "GASI_SVE") == 0) {
+      iskljuciZvono(1);
+      iskljuciZvono(2);
+      zaustaviSlavljenje();
+      zaustaviMrtvacko();
+    }
     else if (strcmp(komanda, "OTKUCAVANJE_OFF") == 0) postaviBlokaduOtkucavanja(true);
     else if (strcmp(komanda, "OTKUCAVANJE_ON") == 0)  postaviBlokaduOtkucavanja(false);
     else if (strcmp(komanda, "SLAVLJENJE_ON") == 0)   zapocniSlavljenje();
