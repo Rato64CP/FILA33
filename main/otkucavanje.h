@@ -7,10 +7,10 @@ void inicijalizirajOtkucavanje();
 // Upravljanje otkucavanjem u loop-u
 void upravljajOtkucavanjem();
 
-// Otkucaj broj za puni sat (Bell 1)
+// Otkucaj broj udara na cekicu 1
 void otkucajSate(int broj);
 
-// Otkucaj jedan udarac za pola sata (Bell 2)
+// Otkucaj jedan ili vise udara na cekicu 2
 void otkucajPolasata();
 
 // Blokira ili dozvoljava otkucavanje

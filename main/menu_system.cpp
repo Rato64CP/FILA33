@@ -54,15 +54,17 @@ static const char* const stavkePostavki[] PROGMEM = {
   TEKST_POSTAVKE_POVRATAK
 };
 
-static const int BROJ_STAVKI_MATICNOG_SATA = 4;
+static const int BROJ_STAVKI_MATICNOG_SATA = 5;
 static const char TEKST_MATICNI_RUCNO[] PROGMEM = "Rucno namjesti";
 static const char TEKST_MATICNI_DCF[] PROGMEM = "DCF postavke";
 static const char TEKST_MATICNI_NTP[] PROGMEM = "NTP postavke";
+static const char TEKST_MATICNI_OTKUCAJ[] PROGMEM = "Mod otkuc.";
 static const char TEKST_MATICNI_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeMaticnogSata[] PROGMEM = {
   TEKST_MATICNI_RUCNO,
   TEKST_MATICNI_DCF,
   TEKST_MATICNI_NTP,
+  TEKST_MATICNI_OTKUCAJ,
   TEKST_MATICNI_POVRATAK
 };
 
@@ -103,12 +105,12 @@ static const char* const stavkeSustava[] PROGMEM = {
 };
 
 static const int BROJ_STAVKI_MODA = 3;
-static const char TEKST_MOD_NORMALNO[] PROGMEM = "Normalno";
-static const char TEKST_MOD_SLAVLJENJE[] PROGMEM = "Slavljenje";
+static const char TEKST_MOD_OPCIJA1[] PROGMEM = "1 Klasika";
+static const char TEKST_MOD_OPCIJA2[] PROGMEM = "2 Kvartalno";
 static const char TEKST_MOD_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeModa[] PROGMEM = {
-  TEKST_MOD_NORMALNO,
-  TEKST_MOD_SLAVLJENJE,
+  TEKST_MOD_OPCIJA1,
+  TEKST_MOD_OPCIJA2,
   TEKST_MOD_POVRATAK
 };
 
@@ -586,7 +588,7 @@ static void prikaziKazaljkeMenu() {
 static void prikaziIzbiraModaZvona() {
   char redak1[17];
   char redak2[17];
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MOD ZVONA"));
+  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MOD OTKUC."));
   char stavka[15];
   ucitajTekstIzProgmem(stavkeModa, odabraniIndex, stavka, sizeof(stavka));
   snprintf(redak2, sizeof(redak2), "> %s", stavka);
@@ -945,6 +947,10 @@ static void obradiKlucMaticniSat(KeyEvent event) {
         sinkUredjivanjeAktivno = false;
         ucitajSinkUredjivanjeIzPostavki();
         trenutnoStanje = MENU_STATE_NTP_CONFIG;
+      } else if (odabraniIndex == 3) {
+        odabraniIndex = constrain(static_cast<int>(dohvatiModOtkucavanja()), 1, 2) - 1;
+        trenutnoStanje = MENU_STATE_MODE_SELECT;
+        posaljiPCLog(F("Ulazak u odabir moda otkucavanja"));
       } else {
         odabraniIndex = 0;
         trenutnoStanje = MENU_STATE_SETTINGS;
@@ -1425,20 +1431,22 @@ static void obradiKlucModeSelect(KeyEvent event) {
       break;
     case KEY_SELECT:
       if (odabraniIndex == 0) {
-        posaljiPCLog(F("Mod: Normalno"));
+        postaviModOtkucavanja(1);
+        posaljiPCLog(F("Mod otkucavanja: odabrana opcija 1"));
       } else if (odabraniIndex == 1) {
-        zapocniSlavljenje();
-        posaljiPCLog(F("Mod: Slavljenje"));
+        postaviModOtkucavanja(2);
+        posaljiPCLog(F("Mod otkucavanja: odabrana opcija 2"));
       } else {
-        odabraniIndex = 1;
-        trenutnoStanje = MENU_STATE_SETTINGS;
+        odabraniIndex = 3;
+        trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
         break;
       }
-      povratakNaGlavniPrikaz();
+      odabraniIndex = 3;
+      trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
       break;
     case KEY_BACK:
-      odabraniIndex = 1;
-      trenutnoStanje = MENU_STATE_SETTINGS;
+      odabraniIndex = 3;
+      trenutnoStanje = MENU_STATE_CLOCK_SETTINGS;
       break;
     default:
       break;

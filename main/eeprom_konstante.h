@@ -94,6 +94,7 @@ struct PostavkeSpremnik {
   bool mqttOmogucen;
   bool lcdPozadinskoOsvjetljenje;
   uint8_t modSlavljenja;
+  uint8_t modOtkucavanja;
   char statickaIp[16];
   char mreznaMaska[16];
   char zadaniGateway[16];
@@ -109,7 +110,7 @@ struct PostavkeSpremnik {
 };
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
-constexpr uint8_t POSTAVKE_VERZIJA = 10;
+constexpr uint8_t POSTAVKE_VERZIJA = 11;
 
 constexpr int BAZA_POSTAVKE =
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);
