@@ -236,6 +236,24 @@ static void postaviVrijemePotvrdjenoZaAutomatiku(bool potvrdeno, const __FlashSt
   }
 }
 
+static DateTime izracunajDatumUskrsa(int godina) {
+  const int a = godina % 19;
+  const int b = godina / 100;
+  const int c = godina % 100;
+  const int d = b / 4;
+  const int e = b % 4;
+  const int f = (b + 8) / 25;
+  const int g = (b - f + 1) / 3;
+  const int h = (19 * a + b - d - g + 15) % 30;
+  const int i = c / 4;
+  const int k = c % 4;
+  const int l = (32 + (2 * e) + (2 * i) - h - k) % 7;
+  const int m = (a + (11 * h) + (22 * l)) / 451;
+  const int mjesec = (h + l - (7 * m) + 114) / 31;
+  const int dan = ((h + l - (7 * m) + 114) % 31) + 1;
+  return DateTime(godina, mjesec, dan, 0, 0, 0);
+}
+
 // -------------------- JAVNE FUNKCIJE --------------------
 
 void inicijalizirajRTC() {
@@ -488,6 +506,19 @@ bool fallbackImaPouzdanuReferencu() {
 
 bool jeVrijemePotvrdjenoZaAutomatiku() {
   return vrijemePotvrdjenoZaAutomatiku;
+}
+
+bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme) {
+  if (vrijeme.unixtime() == 0) {
+    return false;
+  }
+
+  const DateTime uskrs = izracunajDatumUskrsa(vrijeme.year());
+  const DateTime pocetakTisine(uskrs.unixtime() - (3UL * 86400UL) + (19UL * 3600UL));
+  const DateTime krajTisine(uskrs.unixtime() - 86400UL + (22UL * 3600UL));
+  const uint32_t sada = vrijeme.unixtime();
+
+  return sada >= pocetakTisine.unixtime() && sada < krajTisine.unixtime();
 }
 
 DateTime getZadnjeSinkroniziranoVrijeme() {

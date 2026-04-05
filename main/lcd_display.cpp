@@ -1,6 +1,6 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
-// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + status sinkronizacije + WiFi status
-// Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery).
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + status sinkronizacije + uskrsna blokada
+// Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery) + WiFi oznaka na 16. znaku.
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -24,12 +24,12 @@ static unsigned long last_line1_refresh = 0;
 static uint32_t last_line1_rtc_tick = 0xFFFFFFFFUL;
 static uint32_t last_line1_dcf_visual_tick = 0xFFFFFFFFUL;
 
-// N = normalan rad, R = korekcija, E = greska/recovery
-static char status_oznaka = 'N';
 static char wifi_status = ' ';
 
 static char line2_buffer[17];
 static unsigned long last_line2_refresh = 0;
+static int last_date_minute = -1;
+static bool otkucavanje_poruka_aktivna = false;
 static bool rtc_battery_warning_active = false;
 static bool wifi_ip_prikaz_aktivan = false;
 static unsigned long wifi_ip_prikaz_pocetak_ms = 0;
@@ -40,8 +40,6 @@ static enum {
   ACTIVITY_NONE = 0,
   ACTIVITY_BELL1,
   ACTIVITY_BELL2,
-  ACTIVITY_HAMMER1,
-  ACTIVITY_HAMMER2,
   ACTIVITY_ERROR,
   ACTIVITY_CELEBRATION,
   ACTIVITY_FUNERAL
@@ -73,6 +71,7 @@ static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
 };
 static const char LCD_PORUKA_BELL1[] PROGMEM = "Bell 1 ringing  ";
 static const char LCD_PORUKA_BELL2[] PROGMEM = "Bell 2 ringing  ";
+static const char LCD_PORUKA_OBA_ZVONA[] PROGMEM = "Zvone oba zvona";
 static const char LCD_PORUKA_OTKUCAJ[] PROGMEM = "Otkucavanje...  ";
 static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERR:RTC baterija";
 static const char LCD_PORUKA_ERR_EEPROM[] PROGMEM = "ERROR: EEPROM   ";
@@ -84,6 +83,27 @@ static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
   odrediste[velicina - 1] = '\0';
+}
+
+static void pripremiDrugiRedakSaWiFiOznakom(const char* tekst) {
+  memset(line2_buffer, ' ', 16);
+
+  if (tekst != nullptr) {
+    strncpy(line2_buffer, tekst, 15);
+  }
+
+  line2_buffer[15] = wifi_status;
+  line2_buffer[16] = '\0';
+}
+
+static void ocistiAktivnostDrugogRetka() {
+  current_activity = ACTIVITY_NONE;
+  activity_timeout_ms = 0;
+  memset(activity_message, ' ', 16);
+  activity_message[16] = '\0';
+  activity_is_error = false;
+  otkucavanje_poruka_aktivna = false;
+  last_date_minute = -1;
 }
 
 static PGM_P dohvatiNazivDanaIzFlash(uint8_t danUTjednu) {
@@ -102,8 +122,6 @@ static char izracunajOznakuStanjaLCD() {
 
   return 'N';
 }
-
-static int last_date_minute = -1;
 
 void inicijalizirajLCD() {
   Wire.begin();
@@ -142,6 +160,7 @@ void inicijalizirajLCD() {
   last_line2_refresh = 0;
   last_blink_toggle = 0;
   current_activity = ACTIVITY_NONE;
+  otkucavanje_poruka_aktivna = false;
 }
 
 static void build_line1() {
@@ -158,15 +177,15 @@ static void build_line1() {
     source_str[sizeof(source_str) - 1] = '\0';
   }
 
-  status_oznaka = izracunajOznakuStanjaLCD();
-  char oznaka_stanja = status_oznaka;
+  const char oznaka_stanja = izracunajOznakuStanjaLCD();
+  const char* zavrsneOznake = jeUskrsnaTisinaAktivna(now) ? "NE" : "  ";
 
   snprintf(line1_buffer, sizeof(line1_buffer),
-           "%02d:%02d:%02d %s %c %c",
+           "%02d:%02d:%02d %s %c%s",
            now.hour(), now.minute(), now.second(),
            source_str,
            oznaka_stanja,
-           wifi_status);
+           zavrsneOznake);
   line1_buffer[16] = '\0';
 }
 
@@ -176,55 +195,65 @@ static void build_date_string() {
   if (day_of_week > 6) day_of_week = 0;
 
   char day_name[4];
+  char datum_poruka[16];
   kopirajTekstIzFlash(day_name, sizeof(day_name), dohvatiNazivDanaIzFlash(day_of_week));
 
-  snprintf(line2_buffer, sizeof(line2_buffer),
+  snprintf(datum_poruka, sizeof(datum_poruka),
            "%s %02d.%02d.%04d",
            day_name,
            now.day(),
            now.month(),
            now.year());
-
-  int len = strlen(line2_buffer);
-  for (int i = len; i < 16; i++) {
-    line2_buffer[i] = ' ';
-  }
-  line2_buffer[16] = '\0';
+  pripremiDrugiRedakSaWiFiOznakom(datum_poruka);
 
   last_date_minute = now.minute();
 }
 
 static void build_line2() {
   if (rtc_battery_warning_active) {
-    kopirajTekstIzFlash(line2_buffer, sizeof(line2_buffer), LCD_PORUKA_BAT_RTC);
+    char poruka[17];
+    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BAT_RTC);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
     return;
   }
 
-  if ((current_activity == ACTIVITY_HAMMER1 || current_activity == ACTIVITY_HAMMER2) &&
-      !jeOtkucavanjeUTijeku()) {
-    current_activity = ACTIVITY_NONE;
-    activity_timeout_ms = 0;
-    memset(activity_message, ' ', 16);
-    activity_message[16] = '\0';
-    activity_is_error = false;
+  const bool zvono1Aktivno = jeZvonoAktivno(1);
+  const bool zvono2Aktivno = jeZvonoAktivno(2);
+
+  // Prikaz zvona mora pratiti stvarno stanje releja toranjskog sata.
+  if (current_activity == ACTIVITY_BELL1 || current_activity == ACTIVITY_BELL2 ||
+      zvono1Aktivno || zvono2Aktivno) {
+    char poruka[17];
+
+    if (zvono1Aktivno && zvono2Aktivno) {
+      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_OBA_ZVONA);
+      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      return;
+    }
+
+    if (zvono1Aktivno) {
+      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BELL1);
+      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      return;
+    }
+
+    if (zvono2Aktivno) {
+      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BELL2);
+      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      return;
+    }
+
+    ocistiAktivnostDrugogRetka();
   }
 
   // Dinamicka poruka za slavljenje mora pratiti stvarno stanje cekica.
   if (current_activity == ACTIVITY_CELEBRATION && !jeSlavljenjeUTijeku()) {
-    current_activity = ACTIVITY_NONE;
-    activity_timeout_ms = 0;
-    memset(activity_message, ' ', 16);
-    activity_message[16] = '\0';
-    activity_is_error = false;
+    ocistiAktivnostDrugogRetka();
   }
 
   // Dinamicka poruka za mrtvacko zvono mora nestati cim se nacin rada ugasi.
   if (current_activity == ACTIVITY_FUNERAL && !jeMrtvackoUTijeku()) {
-    current_activity = ACTIVITY_NONE;
-    activity_timeout_ms = 0;
-    memset(activity_message, ' ', 16);
-    activity_message[16] = '\0';
-    activity_is_error = false;
+    ocistiAktivnostDrugogRetka();
   }
 
   if (wifi_ip_prikaz_aktivan) {
@@ -232,24 +261,29 @@ static void build_line2() {
       wifi_ip_prikaz_aktivan = false;
       wifi_ip_poruka[0] = '\0';
     } else if (current_activity != ACTIVITY_ERROR && !activity_is_error) {
-      strncpy(line2_buffer, wifi_ip_poruka, 16);
-      line2_buffer[16] = '\0';
+      pripremiDrugiRedakSaWiFiOznakom(wifi_ip_poruka);
+      otkucavanje_poruka_aktivna = false;
       return;
     }
   }
 
   if (current_activity == ACTIVITY_NONE && jeOtkucavanjeUTijeku()) {
-    kopirajTekstIzFlash(line2_buffer, sizeof(line2_buffer), LCD_PORUKA_OTKUCAJ);
+    char poruka[17];
+    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_OTKUCAJ);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    otkucavanje_poruka_aktivna = true;
     return;
+  }
+
+  if (current_activity == ACTIVITY_NONE && otkucavanje_poruka_aktivna && !jeOtkucavanjeUTijeku()) {
+    otkucavanje_poruka_aktivna = false;
+    last_date_minute = -1;
   }
 
   if (current_activity != ACTIVITY_NONE && activity_timeout_ms > 0) {
     unsigned long elapsed = millis() - activity_start_time;
     if (elapsed >= activity_timeout_ms) {
-      current_activity = ACTIVITY_NONE;
-      memset(activity_message, ' ', 16);
-      activity_message[16] = '\0';
-      activity_is_error = false;
+      ocistiAktivnostDrugogRetka();
     }
   }
 
@@ -262,16 +296,14 @@ static void build_line2() {
       }
 
       if (blink_visible) {
-        strncpy(line2_buffer, activity_message, 16);
-        line2_buffer[16] = '\0';
+        pripremiDrugiRedakSaWiFiOznakom(activity_message);
       } else {
-        memset(line2_buffer, ' ', 16);
-        line2_buffer[16] = '\0';
+        pripremiDrugiRedakSaWiFiOznakom("");
       }
     } else {
-      strncpy(line2_buffer, activity_message, 16);
-      line2_buffer[16] = '\0';
+      pripremiDrugiRedakSaWiFiOznakom(activity_message);
     }
+    otkucavanje_poruka_aktivna = false;
   } else {
     DateTime now = dohvatiTrenutnoVrijeme();
     if (now.minute() != last_date_minute) {
@@ -322,25 +354,21 @@ void signalizirajHammer2_Active() {
 void signalizirajError_RTC() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message(LCD_PORUKA_ERR_RTC, 0, true);
-  status_oznaka = 'E';
 }
 
 void signalizirajError_EEPROM() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message(LCD_PORUKA_ERR_EEPROM, 0, true);
-  status_oznaka = 'E';
 }
 
 void signalizirajError_I2C() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message(LCD_PORUKA_ERR_I2C, 0, true);
-  status_oznaka = 'E';
 }
 
 void signalizirajUpozorenjeRtcBaterije() {
   rtc_battery_warning_active = true;
   last_line2_refresh = 0;
-  status_oznaka = 'E';
 }
 
 void potvrdiUpozorenjeRtcBaterije() {
@@ -426,6 +454,10 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
 
 void postaviWiFiStatus(bool aktivan) {
   wifi_status = aktivan ? 'W' : ' ';
+  // Prisili ponovno slaganje drugog retka kako bi se WiFi oznaka odmah
+  // pojavila ili nestala uz datum toranjskog sata, bez cekanja nove minute.
+  last_date_minute = -1;
+  last_line2_refresh = 0;
 }
 
 void prikaziLokalnuWiFiIP(const char* ipAdresa) {

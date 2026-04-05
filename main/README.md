@@ -90,15 +90,14 @@ korekcija kazaljki
 
 🖥️ LCD prikaz
 Linija 1
-HH:MM:SS SRC S W
+HH:MM:SS SRC S
 SRC = RTC / NTP / DCF
 S = status toranjskog sata
 N = normalno
 R = korekcija kazaljki ili okretne ploce
 E = greska / recovery
-W = WiFi status
 Linija 2
-normalno: datum
+normalno: datum (dd.mm.gggg) + W na 16. znaku kad je WiFi spojen
 aktivnost: poruke (zvono, korekcija, sync)
 greške: blink
 

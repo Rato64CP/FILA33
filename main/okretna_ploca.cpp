@@ -249,6 +249,23 @@ void zaustaviAutomatikuPloceZbogNepotvrdenogVremena() {
   resetirajAutomatskiPosebniNacin();
 }
 
+void zaustaviAutomatikuPloceZbogUskrsneTisine() {
+  for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    if (autoZvonoAktivno[i] || autoZvonoZakazano[i]) {
+      deaktivirajZvonjenje(i + 1);
+    }
+    autoZvonoAktivno[i] = false;
+    autoZvonoZakazano[i] = false;
+    autoZvonoStart[i] = 0;
+    autoZvonoKraj[i] = 0;
+  }
+
+  if (autoPosebniAktivniNacin != POSEBNI_NACIN_NONE) {
+    zaustaviPosebniNacin(autoPosebniAktivniNacin);
+  }
+  resetirajAutomatskiPosebniNacin();
+}
+
 void zakaziPosebniNacin(PosebniAutomatskiNacin nacin, unsigned long startMs, unsigned long trajanjeMs) {
   if (nacin == POSEBNI_NACIN_NONE) {
     return;
@@ -441,6 +458,8 @@ void inicijalizirajPlocu() {
 }
 
 void upravljajPlocom() {
+  static bool prethodnaUskrsnaTisinaAktivna = false;
+
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
     if (stanje.plate_phase != FAZA_STABILNO) {
@@ -458,9 +477,24 @@ void upravljajPlocom() {
 
   const DateTime now = dohvatiTrenutnoVrijeme();
   const unsigned long sadaMs = millis();
+  const bool uskrsnaTisinaAktivna = jeUskrsnaTisinaAktivna(now);
+
+  if (uskrsnaTisinaAktivna) {
+    if (!prethodnaUskrsnaTisinaAktivna) {
+      posaljiPCLog(F("Ploca: uskrsna tisina aktivna, cavao-zvonjenja i posebni nacini su blokirani"));
+    }
+    zaustaviAutomatikuPloceZbogUskrsneTisine();
+  } else if (prethodnaUskrsnaTisinaAktivna) {
+    posaljiPCLog(F("Ploca: uskrsna tisina zavrsena, cavao-zvonjenja su ponovno dozvoljena"));
+  }
+  prethodnaUskrsnaTisinaAktivna = uskrsnaTisinaAktivna;
+
   azurirajAutomatskaZvonjenja(sadaMs);
 
-  if (jePlocaKonfigurirana() && now.minute() % 15 == 0 && now.second() >= 30) {
+  if (!uskrsnaTisinaAktivna &&
+      jePlocaKonfigurirana() &&
+      now.minute() % 15 == 0 &&
+      now.second() >= 30) {
     int slot = now.hour() * 4 + (now.minute() / 15);
     if (slot != zadnjiSlotUlaza) {
       zadnjiSlotUlaza = slot;

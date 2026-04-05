@@ -618,6 +618,7 @@ void inicijalizirajOtkucavanje() {
 void upravljajOtkucavanjem() {
   unsigned long sadaMs = millis();
   DateTime sada = dohvatiTrenutnoVrijeme();
+  const bool uskrsnaTisinaAktivna = jeUskrsnaTisinaAktivna(sada);
 
   // Tvrdi softverski limit: nijedan cekic ne smije ostati aktivan dulje od dozvoljenog impulsa.
   primijeniSigurnosniLimitCekica(sadaMs);
@@ -641,6 +642,11 @@ void upravljajOtkucavanjem() {
     }
   }
 
+  if (uskrsnaTisinaAktivna && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
+    ponistiAktivnoOtkucavanje(true, F("uskrsna tisina aktivna"));
+    return;
+  }
+
   if (otkucavanje.vrsta == OTKUCAVANJE_NONE) {
     static int zadnja_minuta = -1;
     if (sada.minute() != zadnja_minuta) {
@@ -655,6 +661,8 @@ void upravljajOtkucavanjem() {
           if (sada.minute() == 0 || sada.minute() == 15 || sada.minute() == 30 || sada.minute() == 45) {
             if (!otkucavanjeDozvoljenoUSatu) {
               posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan raspona rada"));
+            } else if (uskrsnaTisinaAktivna) {
+              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: uskrsna tisina"));
             } else if (tihiSatiAktivni) {
               posaljiPCLog(F("Kvartalno otkucavanje preskoceno: tihi sati"));
             } else if (sada.minute() == 0) {
@@ -695,14 +703,18 @@ void upravljajOtkucavanjem() {
           int broj = sada.hour() % 12;
           if (broj == 0) broj = 12;
 
-          if (otkucavanjeDozvoljenoUSatu && !tihiSatiAktivni) {
+          if (otkucavanjeDozvoljenoUSatu && !tihiSatiAktivni && !uskrsnaTisinaAktivna) {
             otkucajSate(broj);
+          } else if (uskrsnaTisinaAktivna) {
+            posaljiPCLog(F("Satno otkucavanje preskoceno: uskrsna tisina"));
           } else if (tihiSatiAktivni) {
             posaljiPCLog(F("Satno otkucavanje preskoceno: tihi sati"));
           }
         } else if (sada.minute() == 30) {
-          if (otkucavanjeDozvoljenoUSatu && !tihiSatiAktivni) {
+          if (otkucavanjeDozvoljenoUSatu && !tihiSatiAktivni && !uskrsnaTisinaAktivna) {
             otkucajPolasata();
+          } else if (uskrsnaTisinaAktivna) {
+            posaljiPCLog(F("Polusatno otkucavanje preskoceno: uskrsna tisina"));
           } else if (tihiSatiAktivni) {
             posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi sati"));
           }

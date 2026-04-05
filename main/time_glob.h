@@ -20,6 +20,7 @@ bool jeRTCPouzdan();
 bool jeRtcSqwAktivan();
 bool fallbackImaPouzdanuReferencu();
 bool jeVrijemePotvrdjenoZaAutomatiku();
+bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
 
 DateTime getZadnjeSinkroniziranoVrijeme();
 void oznaciPovratakNaRTC();

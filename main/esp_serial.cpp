@@ -427,6 +427,12 @@ static void obradiESPRedak() {
 
   if (strncmp(ulazniBuffer, "WIFI:LOCAL_IP:", 14) == 0) {
     const char* ipAdresa = ulazniBuffer + 14;
+    if (!wifiPovezanNaESP) {
+      wifiPovezanNaESP = true;
+      postaviWiFiStatus(true);
+      posaljiPCLog(F("ESP WiFi status: spojeno (potvrda preko lokalne IP)"));
+    }
+
     if (jeValjanaIPv4AdresaZaLCD(ipAdresa)) {
       prikaziLokalnuWiFiIP(ipAdresa);
 
@@ -480,6 +486,12 @@ static void obradiESPRedak() {
 
     DateTime ntpVrijeme;
     if (parsirajISOVrijeme(iso, ntpVrijeme)) {
+      if (!wifiPovezanNaESP) {
+        wifiPovezanNaESP = true;
+        postaviWiFiStatus(true);
+        posaljiPCLog(F("ESP WiFi status: spojeno (potvrda preko NTP sinkronizacije)"));
+      }
+
       if (jeNTPOmogucen()) {
         azurirajVrijemeIzNTP(ntpVrijeme);
         zatraziPoravnanjeTaktaKazaljki();

@@ -125,7 +125,6 @@ static MenuState stanjePovratkaKonfirmacije = MENU_STATE_DISPLAY_TIME;
 
 static int korektnaMinuta = 0;
 static int korektniSat = 12;
-static bool u_korekciji_ruku = false;
 static int faza_korekcije = 0; // 0 = hours, 1 = minutes
 static int odabraniIndexKazaljke = 0;
 static MenuState stanjePovratkaKorekcijeRuku = MENU_STATE_MAIN_MENU;
@@ -147,7 +146,6 @@ static bool ntpOmogucenUredjivanje = true;
 static int plocaSatUredjivanje = 5;
 static int plocaMinutaUredjivanje = 0;
 static int faza_ploce = 0; // 0 = sat, 1 = minuta, 2 = spremi
-static bool plocaAktivnaUredjivanje = true;
 
 // ==================== QUIET HOURS ADJUSTMENT ====================
 
@@ -190,8 +188,6 @@ static MrezniUredjivanje mrezniUredjivanje = {};
 #define wifiLozinkaUredjivanje mrezniUredjivanje.wifi.lozinka
 static const char WIFI_SKUP_ZNAKOVA[] PROGMEM =
   " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.,!@#";
-static int sinkStrana = 0;
-static const int BROJ_SINK_STRANA = 3;
 static bool sinkUredjivanjeAktivno = false;
 static int sinkKursor = 0;
 static bool dcfOmogucenUredjivanje = true;
@@ -269,7 +265,6 @@ static void pokreniNamjestanjeKazaljki(MenuState povratnoStanje) {
   korektniSat = pretvoriMinuteUKazaljkeSat12h(memoriraneMinute);
   korektnaMinuta = ((memoriraneMinute % 60) + 60) % 60;
   faza_korekcije = 0;
-  u_korekciji_ruku = true;
   stanjePovratkaKorekcijeRuku = povratnoStanje;
   postaviRucnuBlokaduKazaljki(true);
   trenutnoStanje = MENU_STATE_HAND_CORRECTION;
@@ -289,7 +284,6 @@ static void zavrsiNamjestanjeKazaljki(bool potvrdiPromjenu) {
   }
 
   postaviRucnuBlokaduKazaljki(false);
-  u_korekciji_ruku = false;
   faza_korekcije = 0;
   trenutnoStanje = potvrdiPromjenu ? MENU_STATE_DISPLAY_TIME : stanjePovratkaKorekcijeRuku;
 }
@@ -452,14 +446,6 @@ static void potvrdiSpremanjeWiFiPostavki() {
   posaljiWifiPostavkeESP();
   posaljiWiFiStatusESP();
   posaljiPCLog(F("WiFi: spremljene postavke, status i poslano ESP-u"));
-  povratakNaGlavniPrikaz();
-}
-
-static void potvrdiSpremanjeSinkPostavki() {
-  postaviSinkronizacijskePostavke(ntpServerUredjivanje, dcfOmogucenUredjivanje);
-  inicijalizirajDCF();
-  posaljiNTPPostavkeESP();
-  posaljiPCLog(F("Sinkronizacija: spremljene NTP i DCF postavke"));
   povratakNaGlavniPrikaz();
 }
 
@@ -751,47 +737,6 @@ static void prikaziWiFiConfig() {
     redak2[16] = '\0';
   } else {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi spremanje"));
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("SEL=Spremi ESP"));
-  }
-
-  redak1[sizeof(redak1) - 1] = '\0';
-  redak2[sizeof(redak2) - 1] = '\0';
-  prikaziPoruku(redak1, redak2);
-}
-
-static void prikaziSinkConfig() {
-  char redak1[17];
-  char redak2[17];
-
-  if (sinkUredjivanjeAktivno) {
-    const int maxDuljina = dohvatiSinkMaxDuljinu();
-    if (sinkKursor < 0) sinkKursor = 0;
-    if (sinkKursor >= maxDuljina) sinkKursor = maxDuljina - 1;
-
-    int pocetak = sinkKursor - 5;
-    if (pocetak < 0) pocetak = 0;
-    if (pocetak > maxDuljina - 10) pocetak = maxDuljina - 10;
-    if (pocetak < 0) pocetak = 0;
-
-    char pregled[11];
-    for (int i = 0; i < 10; ++i) {
-      const int indeks = pocetak + i;
-      char znak = ntpServerUredjivanje[indeks];
-      pregled[i] = (znak == '\0') ? '_' : znak;
-    }
-    pregled[10] = '\0';
-
-    snprintf(redak1, sizeof(redak1), "NTP:%-10s", pregled);
-    const char aktivniZnak = ntpServerUredjivanje[sinkKursor] == '\0' ? '_' : ntpServerUredjivanje[sinkKursor];
-    snprintf(redak2, sizeof(redak2), "P%02d %c L/R U/D", sinkKursor + 1, aktivniZnak);
-  } else if (sinkStrana == 0) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("DCF antena"));
-    snprintf(redak2, sizeof(redak2), "%s [SEL]", dcfOmogucenUredjivanje ? "ON" : "OFF");
-  } else if (sinkStrana == 1) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("NTP server"));
-    snprintf(redak2, sizeof(redak2), "%.16s", ntpServerUredjivanje);
-  } else {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Sink spremanje"));
     kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("SEL=Spremi ESP"));
   }
 
@@ -1098,7 +1043,6 @@ static void obradiKlucPloce(KeyEvent event) {
         const int pozicija = constrain(dohvatiPozicijuPloce(), 0, 63);
         plocaSatUredjivanje = 5 + (pozicija / 4);
         plocaMinutaUredjivanje = (pozicija % 4) * 15;
-        plocaAktivnaUredjivanje = jePlocaKonfigurirana();
         faza_ploce = 0;
         trenutnoStanje = MENU_STATE_PLATE_ADJUST;
       } else {
@@ -1504,7 +1448,6 @@ void inicijalizirajMenuSistem() {
   funkcijaNaDA = NULL;
   stanjePovratkaKonfirmacije = MENU_STATE_DISPLAY_TIME;
   porukaZaKonfirmaciju[0] = '\0';
-  u_korekciji_ruku = false;
   infoStrana = 0;
   wifiStrana = 0;
   wifiUredjivanjeAktivno = false;
@@ -1512,14 +1455,12 @@ void inicijalizirajMenuSistem() {
   wifiPolje = 0;
   wifiKursor = 0;
   wifiOdabirZnaka = 0;
-  sinkStrana = 0;
   sinkUredjivanjeAktivno = false;
   sinkKursor = 0;
   dcfOmogucenUredjivanje = jeDCFOmogucen();
   ntpOmogucenUredjivanje = jeNTPOmogucen();
   dcfStrana = 0;
   ntpStrana = 0;
-  plocaAktivnaUredjivanje = jePlocaKonfigurirana();
   plocaSatUredjivanje = 5 + (constrain(dohvatiPozicijuPloce(), 0, 63) / 4);
   plocaMinutaUredjivanje = (constrain(dohvatiPozicijuPloce(), 0, 63) % 4) * 15;
   faza_ploce = 0;
@@ -1702,71 +1643,6 @@ void obradiKluc(KeyEvent event) {
       }
       break;
 
-    case MENU_STATE_SYNC_CONFIG:
-      if (sinkUredjivanjeAktivno) {
-        const int brojZnakova = dohvatiBrojZnakovaZaUredjivanje();
-        const int maxDuljina = dohvatiSinkMaxDuljinu();
-
-        if (event == KEY_LEFT || event == KEY_RIGHT) {
-          const int trenutniIndeks = pronadiIndeksZnaka(ntpServerUredjivanje[sinkKursor]);
-          int noviIndeks = trenutniIndeks;
-          if (event == KEY_LEFT) {
-            noviIndeks = (trenutniIndeks - 1 + brojZnakova) % brojZnakova;
-          } else {
-            noviIndeks = (trenutniIndeks + 1) % brojZnakova;
-          }
-          ntpServerUredjivanje[sinkKursor] = dohvatiZnakZaUredjivanje(noviIndeks);
-          if (sinkKursor + 1 < maxDuljina && ntpServerUredjivanje[sinkKursor + 1] == '\0') {
-            ntpServerUredjivanje[sinkKursor + 1] = '\0';
-          }
-        } else if (event == KEY_UP) {
-          if (sinkKursor > 0) {
-            sinkKursor--;
-          }
-        } else if (event == KEY_DOWN) {
-          if (sinkKursor < (maxDuljina - 1)) {
-            sinkKursor++;
-            if (ntpServerUredjivanje[sinkKursor] == '\0') {
-              ntpServerUredjivanje[sinkKursor] = ' ';
-              ntpServerUredjivanje[sinkKursor + 1] = '\0';
-            }
-          }
-        } else if (event == KEY_SELECT) {
-          while (strlen(ntpServerUredjivanje) > 0 && ntpServerUredjivanje[strlen(ntpServerUredjivanje) - 1] == ' ') {
-            ntpServerUredjivanje[strlen(ntpServerUredjivanje) - 1] = '\0';
-          }
-          sinkUredjivanjeAktivno = false;
-        } else if (event == KEY_BACK) {
-          ntpServerUredjivanje[sinkKursor] = '\0';
-          while (sinkKursor > 0 && ntpServerUredjivanje[sinkKursor - 1] == '\0') {
-            sinkKursor--;
-          }
-          sinkUredjivanjeAktivno = false;
-        }
-      } else if (event == KEY_LEFT) {
-        sinkStrana = (sinkStrana - 1 + BROJ_SINK_STRANA) % BROJ_SINK_STRANA;
-      } else if (event == KEY_RIGHT) {
-        sinkStrana = (sinkStrana + 1) % BROJ_SINK_STRANA;
-      } else if (event == KEY_UP || event == KEY_DOWN) {
-        if (sinkStrana == 0) {
-          dcfOmogucenUredjivanje = !dcfOmogucenUredjivanje;
-        }
-      } else if (event == KEY_SELECT) {
-        if (sinkStrana == 0) {
-          dcfOmogucenUredjivanje = !dcfOmogucenUredjivanje;
-        } else if (sinkStrana == 1) {
-          pokreniSinkUredjivanje();
-        } else {
-          otvoriKonfirmaciju(PSTR("Spremi sink?"), potvrdiSpremanjeSinkPostavki, MENU_STATE_SYNC_CONFIG);
-        }
-      } else if (event == KEY_BACK) {
-        sinkStrana = 0;
-        sinkUredjivanjeAktivno = false;
-        odabraniIndex = 5;
-        trenutnoStanje = MENU_STATE_SETTINGS;
-      }
-      break;
-
     default:
       break;
   }
@@ -1783,7 +1659,6 @@ void povratakNaGlavniPrikaz() {
   porukaZaKonfirmaciju[0] = '\0';
   trenutnoStanje = MENU_STATE_DISPLAY_TIME;
   odabraniIndex = 0;
-  u_korekciji_ruku = false;
   odabraniIndexKazaljke = 0;
   stanjePovratkaKorekcijeRuku = MENU_STATE_MAIN_MENU;
   postaviRucnuBlokaduKazaljki(false);
@@ -1800,12 +1675,10 @@ void povratakNaGlavniPrikaz() {
   wifiPolje = 0;
   wifiKursor = 0;
   wifiOdabirZnaka = 0;
-  sinkStrana = 0;
   sinkUredjivanjeAktivno = false;
   sinkKursor = 0;
   dcfOmogucenUredjivanje = jeDCFOmogucen();
   ntpOmogucenUredjivanje = jeNTPOmogucen();
-  plocaAktivnaUredjivanje = jePlocaKonfigurirana();
   plocaSatUredjivanje = 5 + (constrain(dohvatiPozicijuPloce(), 0, 63) / 4);
   plocaMinutaUredjivanje = (constrain(dohvatiPozicijuPloce(), 0, 63) % 4) * 15;
   zadnjaAktivnost = millis();
@@ -1870,9 +1743,6 @@ void osvjeziLCDZaMeni() {
       break;
     case MENU_STATE_WIFI_CONFIG:
       prikaziWiFiConfig();
-      break;
-    case MENU_STATE_SYNC_CONFIG:
-      prikaziSinkConfig();
       break;
     default:
       break;
