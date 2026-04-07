@@ -14,7 +14,7 @@
 - Posljedica: ista poslovna odluka (kada meni ističe) postoji na dva mjesta.
 
 ### `menu_system.cpp` ↔ `postavke.cpp`
-- `menu_system.cpp` čita/piše postavke kroz API (`dohvatiTihiPeriod...`, `postaviTihiPeriod...`, `jeMQTTOmogucen`, `postaviMQTTOmogucen`) što je ispravno; nema direktnog EEPROM koda.
+- `menu_system.cpp` čita/piše postavke kroz API (`dohvatiTihiPeriod...`, `postaviTihiPeriod...`, `jeWiFiOmogucen`, `postaviWiFiOmogucen`) što je ispravno; nema direktnog EEPROM koda.
 - Nema pune duplikacije persistence logike, ali postoji funkcionalno preklapanje u smislu da UI dio (`menu_system.cpp`) djelomično upravlja validacijskim tokom kroz faze unosa (vrijeme/tihi sati), dok stvarna validacija ostaje u `postavke.cpp`.
 
 ## 2) 🧩 Miješanje odgovornosti

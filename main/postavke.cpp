@@ -8,8 +8,20 @@
 #include "wear_leveling.h"
 #include "i2c_eeprom.h"
 #include "pc_serial.h"
+#include "postavke_migracije.h"
 
 namespace {
+
+constexpr int PLOCA_ZADANI_POCETAK_MINUTA = 5 * 60 + 14;
+constexpr int PLOCA_ZADANI_KRAJ_MINUTA = 20 * 60 + 59;
+constexpr int PLOCA_STARI_ZADANI_POCETAK_MINUTA = 10 * 60;
+constexpr int PLOCA_STARI_ZADANI_KRAJ_MINUTA = 20 * 60;
+constexpr int PLOCA_MINUTNI_BLOK = 15;
+constexpr int PLOCA_ZADNJA_CETVRT = 23 * 60 + 59;
+constexpr int32_t ZADANA_ZEMLJOPISNA_SIRINA_E5 = 4350000L;
+constexpr int32_t ZADANA_ZEMLJOPISNA_DUZINA_E5 = 1695000L;
+constexpr int16_t SUNCEVA_ODGODA_MIN = 180;
+constexpr uint8_t MASKA_SUNCEVIH_DOGADAJA = 0x07;
 
 struct RadnePostavke {
   int satOd;
@@ -31,144 +43,23 @@ struct RadnePostavke {
   uint8_t cavaoSlavljenje;
   uint8_t cavaoMrtvacko;
   bool koristiDhcp;
-  bool mqttOmogucen;
   bool lcdPozadinskoOsvjetljenje;
   uint8_t modSlavljenja;
   uint8_t modOtkucavanja;
-  uint16_t mqttPort;
   bool ntpOmogucen;
   bool dcfOmogucen;
   bool wifiOmogucen;
   bool imaKazaljke;
-};
-
-struct PostavkeSpremnikV8 {
-  uint16_t potpis;
-  uint8_t verzija;
-  int satOd;
-  int satDo;
-  int tihiSatiOd;
-  int tihiSatiDo;
-  int plocaPocetakMinuta;
-  int plocaKrajMinuta;
-  unsigned int trajanjeImpulsaCekicaMs;
-  unsigned int pauzaIzmeduUdaraca;
-  uint8_t trajanjeZvonjenjaRadniMin;
-  uint8_t trajanjeZvonjenjaNedjeljaMin;
-  uint8_t trajanjeSlavljenjaMin;
-  uint8_t slavljenjePrijeZvonjenja;
-  uint8_t brojZvona;
-  uint8_t brojMjestaZaCavle;
-  uint8_t cavliRadni[4];
-  uint8_t cavliNedjelja[4];
-  uint8_t cavaoSlavljenje;
-  uint8_t cavaoMrtvacko;
-  char pristupLozinka[9];
-  char wifiSsid[33];
-  char wifiLozinka[33];
-  bool koristiDhcp;
-  bool mqttOmogucen;
-  bool lcdPozadinskoOsvjetljenje;
-  uint8_t modSlavljenja;
-  char statickaIp[16];
-  char mreznaMaska[16];
-  char zadaniGateway[16];
-  char mqttBroker[40];
-  uint16_t mqttPort;
-  char mqttKorisnik[33];
-  char mqttLozinka[33];
-  char ntpServer[40];
-  bool dcfOmogucen;
-  uint16_t checksum;
-};
-
-struct PostavkeSpremnikV9 {
-  uint16_t potpis;
-  uint8_t verzija;
-  int satOd;
-  int satDo;
-  int tihiSatiOd;
-  int tihiSatiDo;
-  int plocaPocetakMinuta;
-  int plocaKrajMinuta;
-  unsigned int trajanjeImpulsaCekicaMs;
-  unsigned int pauzaIzmeduUdaraca;
-  uint8_t trajanjeZvonjenjaRadniMin;
-  uint8_t trajanjeZvonjenjaNedjeljaMin;
-  uint8_t trajanjeSlavljenjaMin;
-  uint8_t slavljenjePrijeZvonjenja;
-  uint8_t brojZvona;
-  uint8_t brojMjestaZaCavle;
-  uint8_t cavliRadni[4];
-  uint8_t cavliNedjelja[4];
-  uint8_t cavaoSlavljenje;
-  uint8_t cavaoMrtvacko;
-  char pristupLozinka[9];
-  char wifiSsid[33];
-  char wifiLozinka[33];
-  bool koristiDhcp;
-  bool mqttOmogucen;
-  bool lcdPozadinskoOsvjetljenje;
-  uint8_t modSlavljenja;
-  char statickaIp[16];
-  char mreznaMaska[16];
-  char zadaniGateway[16];
-  char mqttBroker[40];
-  uint16_t mqttPort;
-  char mqttKorisnik[33];
-  char mqttLozinka[33];
-  char ntpServer[40];
-  bool dcfOmogucen;
-  bool wifiOmogucen;
-  uint16_t checksum;
-};
-
-struct PostavkeSpremnikV10 {
-  uint16_t potpis;
-  uint8_t verzija;
-  int satOd;
-  int satDo;
-  int tihiSatiOd;
-  int tihiSatiDo;
-  int plocaPocetakMinuta;
-  int plocaKrajMinuta;
-  unsigned int trajanjeImpulsaCekicaMs;
-  unsigned int pauzaIzmeduUdaraca;
-  uint8_t trajanjeZvonjenjaRadniMin;
-  uint8_t trajanjeZvonjenjaNedjeljaMin;
-  uint8_t trajanjeSlavljenjaMin;
-  uint8_t slavljenjePrijeZvonjenja;
-  uint8_t brojZvona;
-  uint8_t brojMjestaZaCavle;
-  uint8_t cavliRadni[4];
-  uint8_t cavliNedjelja[4];
-  uint8_t cavaoSlavljenje;
-  uint8_t cavaoMrtvacko;
-  char pristupLozinka[9];
-  char wifiSsid[33];
-  char wifiLozinka[33];
-  bool koristiDhcp;
-  bool mqttOmogucen;
-  bool lcdPozadinskoOsvjetljenje;
-  uint8_t modSlavljenja;
-  char statickaIp[16];
-  char mreznaMaska[16];
-  char zadaniGateway[16];
-  char mqttBroker[40];
-  uint16_t mqttPort;
-  char mqttKorisnik[33];
-  char mqttLozinka[33];
-  char ntpServer[40];
-  bool dcfOmogucen;
-  bool wifiOmogucen;
-  bool imaKazaljke;
-  uint16_t checksum;
+  int32_t zemljopisnaSirinaE5;
+  int32_t zemljopisnaDuzinaE5;
+  uint8_t maskaSuncevihDogadaja;
+  uint8_t zvonaSuncevihDogadaja[SUNCEVI_DOGADAJ_BROJ];
+  int16_t odgodeSuncevihDogadajaMin[SUNCEVI_DOGADAJ_BROJ];
 };
 
 enum AktivnaMreznaSekcija {
   MREZNA_SEKCIJA_NISTA = 0,
   MREZNA_SEKCIJA_WIFI,
-  MREZNA_SEKCIJA_MQTT,
   MREZNA_SEKCIJA_SINKRONIZACIJA
 };
 
@@ -180,11 +71,6 @@ union MrezniCache {
     char mreznaMaska[16];
     char zadaniGateway[16];
   } wifi;
-  struct {
-    char mqttBroker[40];
-    char mqttKorisnik[33];
-    char mqttLozinka[33];
-  } mqtt;
   struct {
     char ntpServer[40];
   } sinkronizacija;
@@ -198,8 +84,8 @@ static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
     22,
     22,
     6,
-    600,
-    1200,
+    PLOCA_ZADANI_POCETAK_MINUTA,
+    PLOCA_ZADANI_KRAJ_MINUTA,
     150,
     400,
     2,
@@ -234,6 +120,20 @@ static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
     0
   };
   return zadane;
+}
+
+static EepromLayout::SunceviDogadajiSpremnik napraviZadaneSunceveDogadaje() {
+  EepromLayout::SunceviDogadajiSpremnik zadani = {
+    EepromLayout::SUNCEVI_DOGADAJI_POTPIS,
+    EepromLayout::SUNCEVI_DOGADAJI_VERZIJA,
+    0,
+    ZADANA_ZEMLJOPISNA_SIRINA_E5,
+    ZADANA_ZEMLJOPISNA_DUZINA_E5,
+    {1, 1, 1},
+    {0, 0, 0},
+    0
+  };
+  return zadani;
 }
 
 static RadnePostavke postavke = {};
@@ -289,6 +189,11 @@ static int kodirajPocetakPloceMinuta(int pocetakMinuta, bool aktivna) {
   return aktivna ? pocetakMinuta : -(pocetakMinuta + 1);
 }
 
+static int normalizirajMinutuPloceNaBlok(int minute) {
+  minute = constrain(minute, 0, PLOCA_ZADNJA_CETVRT);
+  return minute;
+}
+
 static uint8_t ogranicenoTrajanjeCavla(uint8_t trajanjeMin) {
   return constrain(trajanjeMin, 1, 4);
 }
@@ -303,6 +208,28 @@ static uint8_t ograniceniBrojMjestaZaCavle(uint8_t brojMjestaZaCavle) {
   return 5;
 }
 
+static bool jeValjanSuncevDogadaj(uint8_t dogadaj) {
+  return dogadaj < SUNCEVI_DOGADAJ_BROJ;
+}
+
+static uint8_t ogranicenoZvonoSuncevogDogadaja(uint8_t zvono) {
+  return (zvono >= 1 && zvono <= 2) ? zvono : 1;
+}
+
+static int16_t ogranicenaOdgodaSuncevogDogadajaMin(int odgodaMin) {
+  if (odgodaMin < -SUNCEVA_ODGODA_MIN) {
+    return -SUNCEVA_ODGODA_MIN;
+  }
+  if (odgodaMin > SUNCEVA_ODGODA_MIN) {
+    return SUNCEVA_ODGODA_MIN;
+  }
+  return static_cast<int16_t>(odgodaMin);
+}
+
+static uint8_t sanitizirajMaskuSuncevihDogadaja(uint8_t maska) {
+  return maska & MASKA_SUNCEVIH_DOGADAJA;
+}
+
 static uint8_t sanitizirajOznakuCavla(uint8_t cavao, uint8_t brojMjestaZaCavle) {
   if (cavao > brojMjestaZaCavle) {
     return 0;
@@ -310,8 +237,19 @@ static uint8_t sanitizirajOznakuCavla(uint8_t cavao, uint8_t brojMjestaZaCavle) 
   return cavao;
 }
 
+static uint8_t sanitizirajOznakuCavlaZvona(uint8_t cavao) {
+  if (cavao > 4) {
+    return 0;
+  }
+  return cavao;
+}
+
 static unsigned long minuteUMiliseconde(uint8_t minute) {
   return static_cast<unsigned long>(ogranicenoTrajanjeCavla(minute)) * 60000UL;
+}
+
+static uint8_t ogranicenaOdgodaSlavljenjaMin(uint8_t minute) {
+  return constrain(minute, 0, 10);
 }
 
 static uint16_t izracunajChecksumPostavki(const EepromLayout::PostavkeSpremnik& ulaz) {
@@ -327,41 +265,16 @@ static uint16_t izracunajChecksumPostavki(const EepromLayout::PostavkeSpremnik& 
   return suma;
 }
 
-static uint16_t izracunajChecksumPostavkiV8(const PostavkeSpremnikV8& ulaz) {
-  PostavkeSpremnikV8 kopija = ulaz;
+static uint16_t izracunajChecksumSuncevihDogadaja(
+    const EepromLayout::SunceviDogadajiSpremnik& ulaz) {
+  EepromLayout::SunceviDogadajiSpremnik kopija = ulaz;
   kopija.checksum = 0;
 
   const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
   uint16_t suma = 0;
-  for (size_t i = 0; i < sizeof(kopija); i++) {
+  for (size_t i = 0; i < sizeof(kopija); ++i) {
     suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
-    suma = static_cast<uint16_t>(suma + podaci[i] + 0x3D);
-  }
-  return suma;
-}
-
-static uint16_t izracunajChecksumPostavkiV9(const PostavkeSpremnikV9& ulaz) {
-  PostavkeSpremnikV9 kopija = ulaz;
-  kopija.checksum = 0;
-
-  const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
-  uint16_t suma = 0;
-  for (size_t i = 0; i < sizeof(kopija); i++) {
-    suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
-    suma = static_cast<uint16_t>(suma + podaci[i] + 0x3D);
-  }
-  return suma;
-}
-
-static uint16_t izracunajChecksumPostavkiV10(const PostavkeSpremnikV10& ulaz) {
-  PostavkeSpremnikV10 kopija = ulaz;
-  kopija.checksum = 0;
-
-  const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
-  uint16_t suma = 0;
-  for (size_t i = 0; i < sizeof(kopija); i++) {
-    suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
-    suma = static_cast<uint16_t>(suma + podaci[i] + 0x3D);
+    suma = static_cast<uint16_t>(suma + podaci[i] + 0x27);
   }
   return suma;
 }
@@ -554,226 +467,30 @@ static bool ucitajKompatibilanSpremnik(EepromLayout::PostavkeSpremnik& spremnik)
   return true;
 }
 
-static bool jeKompatibilanEEPROMZapisPostavkiV8(const PostavkeSpremnikV8& ucitano) {
-  if (ucitano.potpis != EepromLayout::POSTAVKE_POTPIS) {
-    return false;
-  }
-  if (ucitano.verzija != 8) {
-    return false;
-  }
-  return ucitano.checksum == izracunajChecksumPostavkiV8(ucitano);
-}
-
-static bool jeKompatibilanEEPROMZapisPostavkiV9(const PostavkeSpremnikV9& ucitano) {
-  if (ucitano.potpis != EepromLayout::POSTAVKE_POTPIS) {
-    return false;
-  }
-  if (ucitano.verzija != 9) {
-    return false;
-  }
-  return ucitano.checksum == izracunajChecksumPostavkiV9(ucitano);
-}
-
-static bool jeKompatibilanEEPROMZapisPostavkiV10(const PostavkeSpremnikV10& ucitano) {
-  if (ucitano.potpis != EepromLayout::POSTAVKE_POTPIS) {
-    return false;
-  }
-  if (ucitano.verzija != 10) {
-    return false;
-  }
-  return ucitano.checksum == izracunajChecksumPostavkiV10(ucitano);
-}
-
-static bool ucitajV8SpremnikSkeniranjem(PostavkeSpremnikV8& spremnik) {
-  for (int slot = EepromLayout::SLOTOVI_POSTAVKE - 1; slot >= 0; --slot) {
-    const int adresa =
-      EepromLayout::BAZA_POSTAVKE + slot * static_cast<int>(sizeof(PostavkeSpremnikV8));
-    PostavkeSpremnikV8 kandidat{};
-    if (!VanjskiEEPROM::procitaj(adresa, &kandidat, sizeof(kandidat))) {
-      continue;
-    }
-    if (jeKompatibilanEEPROMZapisPostavkiV8(kandidat)) {
-      spremnik = kandidat;
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool ucitajV9SpremnikSkeniranjem(PostavkeSpremnikV9& spremnik) {
-  for (int slot = EepromLayout::SLOTOVI_POSTAVKE - 1; slot >= 0; --slot) {
-    const int adresa =
-      EepromLayout::BAZA_POSTAVKE + slot * static_cast<int>(sizeof(PostavkeSpremnikV9));
-    PostavkeSpremnikV9 kandidat{};
-    if (!VanjskiEEPROM::procitaj(adresa, &kandidat, sizeof(kandidat))) {
-      continue;
-    }
-    if (jeKompatibilanEEPROMZapisPostavkiV9(kandidat)) {
-      spremnik = kandidat;
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool ucitajV10SpremnikSkeniranjem(PostavkeSpremnikV10& spremnik) {
-  for (int slot = EepromLayout::SLOTOVI_POSTAVKE - 1; slot >= 0; --slot) {
-    const int adresa =
-      EepromLayout::BAZA_POSTAVKE + slot * static_cast<int>(sizeof(PostavkeSpremnikV10));
-    PostavkeSpremnikV10 kandidat{};
-    if (!VanjskiEEPROM::procitaj(adresa, &kandidat, sizeof(kandidat))) {
-      continue;
-    }
-    if (jeKompatibilanEEPROMZapisPostavkiV10(kandidat)) {
-      spremnik = kandidat;
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool migrirajV8Spremnik(EepromLayout::PostavkeSpremnik& cilj) {
-  PostavkeSpremnikV8 staro{};
-  if (!ucitajV8SpremnikSkeniranjem(staro)) {
+static bool pokusajMigriratiStarijePostavke(
+    EepromLayout::PostavkeSpremnik& spremnik,
+    bool prekoZadaneKopije) {
+  const uint8_t verzijaIzvora =
+      pokusajMigriratiLegacySpremnikPostavki(spremnik, napraviZadanePostavke());
+  if (verzijaIzvora == 0) {
     return false;
   }
 
-  cilj = napraviZadanePostavke();
-  cilj.satOd = staro.satOd;
-  cilj.satDo = staro.satDo;
-  cilj.tihiSatiOd = staro.tihiSatiOd;
-  cilj.tihiSatiDo = staro.tihiSatiDo;
-  cilj.plocaPocetakMinuta = staro.plocaPocetakMinuta;
-  cilj.plocaKrajMinuta = staro.plocaKrajMinuta;
-  cilj.trajanjeImpulsaCekicaMs = staro.trajanjeImpulsaCekicaMs;
-  cilj.pauzaIzmeduUdaraca = staro.pauzaIzmeduUdaraca;
-  cilj.trajanjeZvonjenjaRadniMin = staro.trajanjeZvonjenjaRadniMin;
-  cilj.trajanjeZvonjenjaNedjeljaMin = staro.trajanjeZvonjenjaNedjeljaMin;
-  cilj.trajanjeSlavljenjaMin = staro.trajanjeSlavljenjaMin;
-  cilj.slavljenjePrijeZvonjenja = staro.slavljenjePrijeZvonjenja;
-  cilj.brojZvona = staro.brojZvona;
-  cilj.brojMjestaZaCavle = staro.brojMjestaZaCavle;
-  memcpy(cilj.cavliRadni, staro.cavliRadni, sizeof(cilj.cavliRadni));
-  memcpy(cilj.cavliNedjelja, staro.cavliNedjelja, sizeof(cilj.cavliNedjelja));
-  cilj.cavaoSlavljenje = staro.cavaoSlavljenje;
-  cilj.cavaoMrtvacko = staro.cavaoMrtvacko;
-  memcpy(cilj.pristupLozinka, staro.pristupLozinka, sizeof(cilj.pristupLozinka));
-  memcpy(cilj.wifiSsid, staro.wifiSsid, sizeof(cilj.wifiSsid));
-  memcpy(cilj.wifiLozinka, staro.wifiLozinka, sizeof(cilj.wifiLozinka));
-  cilj.koristiDhcp = staro.koristiDhcp;
-  cilj.mqttOmogucen = staro.mqttOmogucen;
-  cilj.lcdPozadinskoOsvjetljenje = staro.lcdPozadinskoOsvjetljenje;
-  cilj.modSlavljenja = staro.modSlavljenja;
-  memcpy(cilj.statickaIp, staro.statickaIp, sizeof(cilj.statickaIp));
-  memcpy(cilj.mreznaMaska, staro.mreznaMaska, sizeof(cilj.mreznaMaska));
-  memcpy(cilj.zadaniGateway, staro.zadaniGateway, sizeof(cilj.zadaniGateway));
-  memcpy(cilj.mqttBroker, staro.mqttBroker, sizeof(cilj.mqttBroker));
-  cilj.mqttPort = staro.mqttPort;
-  memcpy(cilj.mqttKorisnik, staro.mqttKorisnik, sizeof(cilj.mqttKorisnik));
-  memcpy(cilj.mqttLozinka, staro.mqttLozinka, sizeof(cilj.mqttLozinka));
-  memcpy(cilj.ntpServer, staro.ntpServer, sizeof(cilj.ntpServer));
-  cilj.dcfOmogucen = staro.dcfOmogucen;
-  cilj.wifiOmogucen = true;
-  cilj.imaKazaljke = true;
-  osigurajNullTerminiraneMreznePostavke(cilj);
-  cilj.pristupLozinka[sizeof(cilj.pristupLozinka) - 1] = '\0';
-  return true;
-}
-
-static bool migrirajV9Spremnik(EepromLayout::PostavkeSpremnik& cilj) {
-  PostavkeSpremnikV9 staro{};
-  if (!ucitajV9SpremnikSkeniranjem(staro)) {
-    return false;
+  char log[96];
+  if (prekoZadaneKopije) {
+    snprintf(log,
+             sizeof(log),
+             "Postavke: vracen stariji v%u zapis preko zadane v%u kopije",
+             static_cast<unsigned>(verzijaIzvora),
+             static_cast<unsigned>(EepromLayout::POSTAVKE_VERZIJA));
+  } else {
+    snprintf(log,
+             sizeof(log),
+             "Postavke: migrirane iz verzije %u na verziju %u",
+             static_cast<unsigned>(verzijaIzvora),
+             static_cast<unsigned>(EepromLayout::POSTAVKE_VERZIJA));
   }
-
-  cilj = napraviZadanePostavke();
-  cilj.satOd = staro.satOd;
-  cilj.satDo = staro.satDo;
-  cilj.tihiSatiOd = staro.tihiSatiOd;
-  cilj.tihiSatiDo = staro.tihiSatiDo;
-  cilj.plocaPocetakMinuta = staro.plocaPocetakMinuta;
-  cilj.plocaKrajMinuta = staro.plocaKrajMinuta;
-  cilj.trajanjeImpulsaCekicaMs = staro.trajanjeImpulsaCekicaMs;
-  cilj.pauzaIzmeduUdaraca = staro.pauzaIzmeduUdaraca;
-  cilj.trajanjeZvonjenjaRadniMin = staro.trajanjeZvonjenjaRadniMin;
-  cilj.trajanjeZvonjenjaNedjeljaMin = staro.trajanjeZvonjenjaNedjeljaMin;
-  cilj.trajanjeSlavljenjaMin = staro.trajanjeSlavljenjaMin;
-  cilj.slavljenjePrijeZvonjenja = staro.slavljenjePrijeZvonjenja;
-  cilj.brojZvona = staro.brojZvona;
-  cilj.brojMjestaZaCavle = staro.brojMjestaZaCavle;
-  memcpy(cilj.cavliRadni, staro.cavliRadni, sizeof(cilj.cavliRadni));
-  memcpy(cilj.cavliNedjelja, staro.cavliNedjelja, sizeof(cilj.cavliNedjelja));
-  cilj.cavaoSlavljenje = staro.cavaoSlavljenje;
-  cilj.cavaoMrtvacko = staro.cavaoMrtvacko;
-  memcpy(cilj.pristupLozinka, staro.pristupLozinka, sizeof(cilj.pristupLozinka));
-  memcpy(cilj.wifiSsid, staro.wifiSsid, sizeof(cilj.wifiSsid));
-  memcpy(cilj.wifiLozinka, staro.wifiLozinka, sizeof(cilj.wifiLozinka));
-  cilj.koristiDhcp = staro.koristiDhcp;
-  cilj.mqttOmogucen = staro.mqttOmogucen;
-  cilj.lcdPozadinskoOsvjetljenje = staro.lcdPozadinskoOsvjetljenje;
-  cilj.modSlavljenja = staro.modSlavljenja;
-  memcpy(cilj.statickaIp, staro.statickaIp, sizeof(cilj.statickaIp));
-  memcpy(cilj.mreznaMaska, staro.mreznaMaska, sizeof(cilj.mreznaMaska));
-  memcpy(cilj.zadaniGateway, staro.zadaniGateway, sizeof(cilj.zadaniGateway));
-  memcpy(cilj.mqttBroker, staro.mqttBroker, sizeof(cilj.mqttBroker));
-  cilj.mqttPort = staro.mqttPort;
-  memcpy(cilj.mqttKorisnik, staro.mqttKorisnik, sizeof(cilj.mqttKorisnik));
-  memcpy(cilj.mqttLozinka, staro.mqttLozinka, sizeof(cilj.mqttLozinka));
-  memcpy(cilj.ntpServer, staro.ntpServer, sizeof(cilj.ntpServer));
-  cilj.dcfOmogucen = staro.dcfOmogucen;
-  cilj.wifiOmogucen = staro.wifiOmogucen;
-  cilj.imaKazaljke = true;
-  osigurajNullTerminiraneMreznePostavke(cilj);
-  cilj.pristupLozinka[sizeof(cilj.pristupLozinka) - 1] = '\0';
-  return true;
-}
-
-static bool migrirajV10Spremnik(EepromLayout::PostavkeSpremnik& cilj) {
-  PostavkeSpremnikV10 staro{};
-  if (!ucitajV10SpremnikSkeniranjem(staro)) {
-    return false;
-  }
-
-  cilj = napraviZadanePostavke();
-  cilj.satOd = staro.satOd;
-  cilj.satDo = staro.satDo;
-  cilj.tihiSatiOd = staro.tihiSatiOd;
-  cilj.tihiSatiDo = staro.tihiSatiDo;
-  cilj.plocaPocetakMinuta = staro.plocaPocetakMinuta;
-  cilj.plocaKrajMinuta = staro.plocaKrajMinuta;
-  cilj.trajanjeImpulsaCekicaMs = staro.trajanjeImpulsaCekicaMs;
-  cilj.pauzaIzmeduUdaraca = staro.pauzaIzmeduUdaraca;
-  cilj.trajanjeZvonjenjaRadniMin = staro.trajanjeZvonjenjaRadniMin;
-  cilj.trajanjeZvonjenjaNedjeljaMin = staro.trajanjeZvonjenjaNedjeljaMin;
-  cilj.trajanjeSlavljenjaMin = staro.trajanjeSlavljenjaMin;
-  cilj.slavljenjePrijeZvonjenja = staro.slavljenjePrijeZvonjenja;
-  cilj.brojZvona = staro.brojZvona;
-  cilj.brojMjestaZaCavle = staro.brojMjestaZaCavle;
-  memcpy(cilj.cavliRadni, staro.cavliRadni, sizeof(cilj.cavliRadni));
-  memcpy(cilj.cavliNedjelja, staro.cavliNedjelja, sizeof(cilj.cavliNedjelja));
-  cilj.cavaoSlavljenje = staro.cavaoSlavljenje;
-  cilj.cavaoMrtvacko = staro.cavaoMrtvacko;
-  memcpy(cilj.pristupLozinka, staro.pristupLozinka, sizeof(cilj.pristupLozinka));
-  memcpy(cilj.wifiSsid, staro.wifiSsid, sizeof(cilj.wifiSsid));
-  memcpy(cilj.wifiLozinka, staro.wifiLozinka, sizeof(cilj.wifiLozinka));
-  cilj.koristiDhcp = staro.koristiDhcp;
-  cilj.mqttOmogucen = staro.mqttOmogucen;
-  cilj.lcdPozadinskoOsvjetljenje = staro.lcdPozadinskoOsvjetljenje;
-  cilj.modSlavljenja = staro.modSlavljenja;
-  cilj.modOtkucavanja = 2;
-  memcpy(cilj.statickaIp, staro.statickaIp, sizeof(cilj.statickaIp));
-  memcpy(cilj.mreznaMaska, staro.mreznaMaska, sizeof(cilj.mreznaMaska));
-  memcpy(cilj.zadaniGateway, staro.zadaniGateway, sizeof(cilj.zadaniGateway));
-  memcpy(cilj.mqttBroker, staro.mqttBroker, sizeof(cilj.mqttBroker));
-  cilj.mqttPort = staro.mqttPort;
-  memcpy(cilj.mqttKorisnik, staro.mqttKorisnik, sizeof(cilj.mqttKorisnik));
-  memcpy(cilj.mqttLozinka, staro.mqttLozinka, sizeof(cilj.mqttLozinka));
-  memcpy(cilj.ntpServer, staro.ntpServer, sizeof(cilj.ntpServer));
-  cilj.dcfOmogucen = staro.dcfOmogucen;
-  cilj.wifiOmogucen = staro.wifiOmogucen;
-  cilj.imaKazaljke = staro.imaKazaljke;
-  osigurajNullTerminiraneMreznePostavke(cilj);
-  cilj.pristupLozinka[sizeof(cilj.pristupLozinka) - 1] = '\0';
+  posaljiPCLog(log);
   return true;
 }
 
@@ -804,6 +521,42 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
     spremnik.tihiSatiDo = 6;
     trebaSpremiti = true;
   }
+  {
+    const bool plocaAktivna = spremnik.plocaPocetakMinuta >= 0;
+    int plocaPocetak = dekodirajPocetakPloceMinuta(spremnik.plocaPocetakMinuta);
+    int plocaKraj = spremnik.plocaKrajMinuta;
+
+    if (plocaPocetak < 0 || plocaPocetak > (23 * 60 + 59) ||
+        plocaKraj < 0 || plocaKraj > (23 * 60 + 59)) {
+      plocaPocetak = PLOCA_ZADANI_POCETAK_MINUTA;
+      plocaKraj = PLOCA_ZADANI_KRAJ_MINUTA;
+      spremnik.plocaPocetakMinuta = kodirajPocetakPloceMinuta(plocaPocetak, true);
+      spremnik.plocaKrajMinuta = plocaKraj;
+      trebaSpremiti = true;
+    } else {
+      if (plocaAktivna &&
+          plocaPocetak == PLOCA_STARI_ZADANI_POCETAK_MINUTA &&
+          plocaKraj == PLOCA_STARI_ZADANI_KRAJ_MINUTA) {
+        plocaPocetak = PLOCA_ZADANI_POCETAK_MINUTA;
+        plocaKraj = PLOCA_ZADANI_KRAJ_MINUTA;
+        trebaSpremiti = true;
+      }
+
+      const int normaliziraniPocetak = normalizirajMinutuPloceNaBlok(plocaPocetak);
+      int normaliziraniKraj = normalizirajMinutuPloceNaBlok(plocaKraj);
+      if (plocaAktivna && normaliziraniKraj <= normaliziraniPocetak) {
+        normaliziraniKraj = min(normaliziraniPocetak + PLOCA_MINUTNI_BLOK, PLOCA_ZADNJA_CETVRT);
+      }
+
+      const int kodiraniPocetak = kodirajPocetakPloceMinuta(normaliziraniPocetak, plocaAktivna);
+      if (spremnik.plocaPocetakMinuta != kodiraniPocetak ||
+          spremnik.plocaKrajMinuta != normaliziraniKraj) {
+        spremnik.plocaPocetakMinuta = kodiraniPocetak;
+        spremnik.plocaKrajMinuta = normaliziraniKraj;
+        trebaSpremiti = true;
+      }
+    }
+  }
   if (spremnik.trajanjeImpulsaCekicaMs < 50) {
     spremnik.trajanjeImpulsaCekicaMs = 150;
     trebaSpremiti = true;
@@ -828,7 +581,7 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
     spremnik.trajanjeSlavljenjaMin = 2;
     trebaSpremiti = true;
   }
-  if (spremnik.slavljenjePrijeZvonjenja > 1) {
+  if (spremnik.slavljenjePrijeZvonjenja > 10) {
     spremnik.slavljenjePrijeZvonjenja = 0;
     trebaSpremiti = true;
   }
@@ -842,29 +595,28 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
   }
 
   for (uint8_t i = 0; i < 4; i++) {
-    const uint8_t noviRadni = sanitizirajOznakuCavla(spremnik.cavliRadni[i], spremnik.brojMjestaZaCavle);
+    const uint8_t noviRadni = sanitizirajOznakuCavlaZvona(
+        sanitizirajOznakuCavla(spremnik.cavliRadni[i], spremnik.brojMjestaZaCavle));
     if (noviRadni != spremnik.cavliRadni[i]) {
       spremnik.cavliRadni[i] = noviRadni;
       trebaSpremiti = true;
     }
 
-    const uint8_t noviNedjelja =
-        sanitizirajOznakuCavla(spremnik.cavliNedjelja[i], spremnik.brojMjestaZaCavle);
+    const uint8_t noviNedjelja = sanitizirajOznakuCavlaZvona(
+        sanitizirajOznakuCavla(spremnik.cavliNedjelja[i], spremnik.brojMjestaZaCavle));
     if (noviNedjelja != spremnik.cavliNedjelja[i]) {
       spremnik.cavliNedjelja[i] = noviNedjelja;
       trebaSpremiti = true;
     }
   }
 
-  const uint8_t noviSlavljenje =
-      sanitizirajOznakuCavla(spremnik.cavaoSlavljenje, spremnik.brojMjestaZaCavle);
+  const uint8_t noviSlavljenje = 5;
   if (noviSlavljenje != spremnik.cavaoSlavljenje) {
     spremnik.cavaoSlavljenje = noviSlavljenje;
     trebaSpremiti = true;
   }
 
-  const uint8_t noviMrtvacko =
-      sanitizirajOznakuCavla(spremnik.cavaoMrtvacko, spremnik.brojMjestaZaCavle);
+  const uint8_t noviMrtvacko = 0;
   if (noviMrtvacko != spremnik.cavaoMrtvacko) {
     spremnik.cavaoMrtvacko = noviMrtvacko;
     trebaSpremiti = true;
@@ -908,11 +660,9 @@ static void ucitajRadnePostavkeIzSpremnika(const EepromLayout::PostavkeSpremnik&
   postavke.cavaoSlavljenje = spremnik.cavaoSlavljenje;
   postavke.cavaoMrtvacko = spremnik.cavaoMrtvacko;
   postavke.koristiDhcp = spremnik.koristiDhcp;
-  postavke.mqttOmogucen = spremnik.mqttOmogucen;
   postavke.lcdPozadinskoOsvjetljenje = spremnik.lcdPozadinskoOsvjetljenje;
   postavke.modSlavljenja = spremnik.modSlavljenja;
   postavke.modOtkucavanja = spremnik.modOtkucavanja;
-  postavke.mqttPort = spremnik.mqttPort;
   postavke.ntpOmogucen = procitajNtpOmogucenostIzTeksta(spremnik.ntpServer);
   postavke.dcfOmogucen = spremnik.dcfOmogucen;
   postavke.wifiOmogucen = spremnik.wifiOmogucen;
@@ -939,11 +689,9 @@ static void upisiRadnePostavkeUSpremnik(EepromLayout::PostavkeSpremnik& spremnik
   spremnik.cavaoSlavljenje = postavke.cavaoSlavljenje;
   spremnik.cavaoMrtvacko = postavke.cavaoMrtvacko;
   spremnik.koristiDhcp = postavke.koristiDhcp;
-  spremnik.mqttOmogucen = postavke.mqttOmogucen;
   spremnik.lcdPozadinskoOsvjetljenje = postavke.lcdPozadinskoOsvjetljenje;
   spremnik.modSlavljenja = postavke.modSlavljenja;
   spremnik.modOtkucavanja = postavke.modOtkucavanja;
-  spremnik.mqttPort = postavke.mqttPort;
   spremnik.dcfOmogucen = postavke.dcfOmogucen;
   spremnik.wifiOmogucen = postavke.wifiOmogucen;
   spremnik.imaKazaljke = postavke.imaKazaljke;
@@ -960,15 +708,6 @@ static void ucitajWifiSekcijuIzSpremnika(const EepromLayout::PostavkeSpremnik& s
   mrezniCache.wifi.mreznaMaska[sizeof(mrezniCache.wifi.mreznaMaska) - 1] = '\0';
   strncpy(mrezniCache.wifi.zadaniGateway, spremnik.zadaniGateway, sizeof(mrezniCache.wifi.zadaniGateway) - 1);
   mrezniCache.wifi.zadaniGateway[sizeof(mrezniCache.wifi.zadaniGateway) - 1] = '\0';
-}
-
-static void ucitajMQTTSekcijuIzSpremnika(const EepromLayout::PostavkeSpremnik& spremnik) {
-  strncpy(mrezniCache.mqtt.mqttBroker, spremnik.mqttBroker, sizeof(mrezniCache.mqtt.mqttBroker) - 1);
-  mrezniCache.mqtt.mqttBroker[sizeof(mrezniCache.mqtt.mqttBroker) - 1] = '\0';
-  strncpy(mrezniCache.mqtt.mqttKorisnik, spremnik.mqttKorisnik, sizeof(mrezniCache.mqtt.mqttKorisnik) - 1);
-  mrezniCache.mqtt.mqttKorisnik[sizeof(mrezniCache.mqtt.mqttKorisnik) - 1] = '\0';
-  strncpy(mrezniCache.mqtt.mqttLozinka, spremnik.mqttLozinka, sizeof(mrezniCache.mqtt.mqttLozinka) - 1);
-  mrezniCache.mqtt.mqttLozinka[sizeof(mrezniCache.mqtt.mqttLozinka) - 1] = '\0';
 }
 
 static void ucitajSinkronizacijskuSekcijuIzSpremnika(const EepromLayout::PostavkeSpremnik& spremnik) {
@@ -997,9 +736,6 @@ static void osigurajUcitanuMreznuSekciju(AktivnaMreznaSekcija trazenaSekcija) {
     case MREZNA_SEKCIJA_WIFI:
       ucitajWifiSekcijuIzSpremnika(spremnik);
       break;
-    case MREZNA_SEKCIJA_MQTT:
-      ucitajMQTTSekcijuIzSpremnika(spremnik);
-      break;
     case MREZNA_SEKCIJA_SINKRONIZACIJA:
       ucitajSinkronizacijskuSekcijuIzSpremnika(spremnik);
       break;
@@ -1023,6 +759,134 @@ static void spremiSpremnikPostavki(EepromLayout::PostavkeSpremnik& spremnik) {
   invalidirajMrezniCache();
 }
 
+static bool jeKompatibilanEEPROMZapisSuncevihDogadaja(
+    const EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  return spremnik.potpis == EepromLayout::SUNCEVI_DOGADAJI_POTPIS &&
+         spremnik.verzija == EepromLayout::SUNCEVI_DOGADAJI_VERZIJA &&
+         spremnik.checksum == izracunajChecksumSuncevihDogadaja(spremnik);
+}
+
+static bool sanitizirajSunceveDogadajeSpremnik(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  bool trebaSpremiti = false;
+
+  if (spremnik.zemljopisnaSirinaE5 != ZADANA_ZEMLJOPISNA_SIRINA_E5) {
+    spremnik.zemljopisnaSirinaE5 = ZADANA_ZEMLJOPISNA_SIRINA_E5;
+    trebaSpremiti = true;
+  }
+  if (spremnik.zemljopisnaDuzinaE5 != ZADANA_ZEMLJOPISNA_DUZINA_E5) {
+    spremnik.zemljopisnaDuzinaE5 = ZADANA_ZEMLJOPISNA_DUZINA_E5;
+    trebaSpremiti = true;
+  }
+
+  const uint8_t novaMaska = sanitizirajMaskuSuncevihDogadaja(spremnik.maskaDogadaja);
+  if (novaMaska != spremnik.maskaDogadaja) {
+    spremnik.maskaDogadaja = novaMaska;
+    trebaSpremiti = true;
+  }
+
+  for (uint8_t i = 0; i < SUNCEVI_DOGADAJ_BROJ; ++i) {
+    const uint8_t novoZvono = ogranicenoZvonoSuncevogDogadaja(spremnik.zvona[i]);
+    if (novoZvono != spremnik.zvona[i]) {
+      spremnik.zvona[i] = novoZvono;
+      trebaSpremiti = true;
+    }
+
+    const int16_t novaOdgoda =
+        (i == SUNCEVI_DOGADAJ_PODNE) ? 0 : ogranicenaOdgodaSuncevogDogadajaMin(spremnik.odgodeMin[i]);
+    if (novaOdgoda != spremnik.odgodeMin[i]) {
+      spremnik.odgodeMin[i] = novaOdgoda;
+      trebaSpremiti = true;
+    }
+  }
+
+  return trebaSpremiti;
+}
+
+static void pripremiIntegritetSuncevihDogadaja(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  spremnik.potpis = EepromLayout::SUNCEVI_DOGADAJI_POTPIS;
+  spremnik.verzija = EepromLayout::SUNCEVI_DOGADAJI_VERZIJA;
+  spremnik.checksum = izracunajChecksumSuncevihDogadaja(spremnik);
+}
+
+static void ucitajSunceveDogadajeIzSpremnika(const EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  postavke.zemljopisnaSirinaE5 = ZADANA_ZEMLJOPISNA_SIRINA_E5;
+  postavke.zemljopisnaDuzinaE5 = ZADANA_ZEMLJOPISNA_DUZINA_E5;
+  postavke.maskaSuncevihDogadaja = sanitizirajMaskuSuncevihDogadaja(spremnik.maskaDogadaja);
+  memcpy(postavke.zvonaSuncevihDogadaja, spremnik.zvona, sizeof(postavke.zvonaSuncevihDogadaja));
+  memcpy(
+      postavke.odgodeSuncevihDogadajaMin, spremnik.odgodeMin, sizeof(postavke.odgodeSuncevihDogadajaMin));
+}
+
+static void upisiSunceveDogadajeUSpremnik(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  spremnik.zemljopisnaSirinaE5 = ZADANA_ZEMLJOPISNA_SIRINA_E5;
+  spremnik.zemljopisnaDuzinaE5 = ZADANA_ZEMLJOPISNA_DUZINA_E5;
+  spremnik.maskaDogadaja = sanitizirajMaskuSuncevihDogadaja(postavke.maskaSuncevihDogadaja);
+  memcpy(spremnik.zvona, postavke.zvonaSuncevihDogadaja, sizeof(spremnik.zvona));
+  memcpy(spremnik.odgodeMin, postavke.odgodeSuncevihDogadajaMin, sizeof(spremnik.odgodeMin));
+}
+
+static void spremiSunceveDogadajeSpremnik(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  sanitizirajSunceveDogadajeSpremnik(spremnik);
+  pripremiIntegritetSuncevihDogadaja(spremnik);
+  WearLeveling::spremi(
+      EepromLayout::BAZA_SUNCEVI_DOGADAJI, EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI, spremnik);
+  ucitajSunceveDogadajeIzSpremnika(spremnik);
+}
+
+static bool ucitajSunceveDogadajeSkeniranjem(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
+  const int pocetniSlot = WearLeveling::odrediSlotZaCitanje(
+      EepromLayout::BAZA_SUNCEVI_DOGADAJI,
+      EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI,
+      sizeof(EepromLayout::SunceviDogadajiSpremnik));
+
+  for (int pomak = 0; pomak < EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI; ++pomak) {
+    const int slot =
+        (pocetniSlot - pomak + EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI) %
+        EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI;
+    const int adresa =
+        EepromLayout::BAZA_SUNCEVI_DOGADAJI +
+        slot * static_cast<int>(sizeof(EepromLayout::SunceviDogadajiSpremnik));
+    EepromLayout::SunceviDogadajiSpremnik kandidat{};
+    if (!VanjskiEEPROM::procitaj(adresa, &kandidat, sizeof(kandidat))) {
+      continue;
+    }
+    if (!jeKompatibilanEEPROMZapisSuncevihDogadaja(kandidat)) {
+      continue;
+    }
+
+    spremnik = kandidat;
+    WearLeveling::zapamtiZadnjiSlot(
+        EepromLayout::BAZA_SUNCEVI_DOGADAJI,
+        EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI,
+        sizeof(EepromLayout::SunceviDogadajiSpremnik),
+        static_cast<uint8_t>(slot));
+    return true;
+  }
+
+  return false;
+}
+
+static void ucitajSunceveDogadaje() {
+  EepromLayout::SunceviDogadajiSpremnik spremnik = napraviZadaneSunceveDogadaje();
+  bool ucitano = ucitajSunceveDogadajeSkeniranjem(spremnik);
+  bool trebaSpremiti = false;
+
+  if (!ucitano) {
+    spremnik = napraviZadaneSunceveDogadaje();
+    trebaSpremiti = true;
+  }
+
+  if (sanitizirajSunceveDogadajeSpremnik(spremnik)) {
+    trebaSpremiti = true;
+  }
+
+  ucitajSunceveDogadajeIzSpremnika(spremnik);
+
+  if (trebaSpremiti) {
+    spremiSunceveDogadajeSpremnik(spremnik);
+  }
+}
+
 }  // namespace
 
 void ucitajPostavke() {
@@ -1031,14 +895,7 @@ void ucitajPostavke() {
   bool ucitanoIzEeproma = ucitajAktualniSpremnikSkeniranjem(spremnik);
 
   if (!ucitanoIzEeproma) {
-    if (migrirajV10Spremnik(spremnik)) {
-      posaljiPCLog(F("Postavke: migrirane iz verzije 10 na verziju 11"));
-      trebaSpremiti = true;
-    } else if (migrirajV9Spremnik(spremnik)) {
-      posaljiPCLog(F("Postavke: migrirane iz verzije 9 na verziju 11"));
-      trebaSpremiti = true;
-    } else if (migrirajV8Spremnik(spremnik)) {
-      posaljiPCLog(F("Postavke: migrirane iz verzije 8 na verziju 11"));
+    if (pokusajMigriratiStarijePostavke(spremnik, false)) {
       trebaSpremiti = true;
     } else {
       posaljiPCLog(F("Postavke: koriste default vrijednosti"));
@@ -1050,29 +907,13 @@ void ucitajPostavke() {
     if (jeKompatibilanEEPROMZapisPostavki(spremnik)) {
       if (jeSpremnikNaZadanimPostavkama(spremnik)) {
         EepromLayout::PostavkeSpremnik legacy = spremnik;
-        if (migrirajV10Spremnik(legacy)) {
+        if (pokusajMigriratiStarijePostavke(legacy, true)) {
           spremnik = legacy;
-          posaljiPCLog(F("Postavke: vracen stariji v10 zapis preko zadane v11 kopije"));
-          trebaSpremiti = true;
-        } else if (migrirajV9Spremnik(legacy)) {
-          spremnik = legacy;
-          posaljiPCLog(F("Postavke: vracen stariji v9 zapis preko zadane v11 kopije"));
-          trebaSpremiti = true;
-        } else if (migrirajV8Spremnik(legacy)) {
-          spremnik = legacy;
-          posaljiPCLog(F("Postavke: vracen stariji v8 zapis preko zadane v11 kopije"));
           trebaSpremiti = true;
         }
       }
     } else {
-      if (migrirajV10Spremnik(spremnik)) {
-        posaljiPCLog(F("Postavke: migrirane iz verzije 10 na verziju 11"));
-        trebaSpremiti = true;
-      } else if (migrirajV9Spremnik(spremnik)) {
-        posaljiPCLog(F("Postavke: migrirane iz verzije 9 na verziju 11"));
-        trebaSpremiti = true;
-      } else if (migrirajV8Spremnik(spremnik)) {
-        posaljiPCLog(F("Postavke: migrirane iz verzije 8 na verziju 11"));
+      if (pokusajMigriratiStarijePostavke(spremnik, false)) {
         trebaSpremiti = true;
       } else {
         posaljiPCLog(F("Postavke: nekompatibilan zapis -> reset na default"));
@@ -1093,19 +934,17 @@ void ucitajPostavke() {
   pripremiIntegritetPostavki(spremnik);
   ucitajRadnePostavkeIzSpremnika(spremnik);
   invalidirajMrezniCache();
+  ucitajSunceveDogadaje();
 
   char log[256];
-  snprintf(
+  snprintf_P(
       log,
       sizeof(log),
-      "Postavke: sat %d-%d, WiFi: %s SSID=%s, MQTT: %s @%s:%u, NTP: %s (%s), DCF: %s, LCD: %s, Kazaljke: %s, Slavljenje: %u, Otkucavanje: %u, Cavli RD/NED/SL=%u/%u/%u %s, Zvona=%u, Mjesta=%u",
+      PSTR("Postavke: sat %d-%d, WiFi: %s SSID=%s, NTP: %s (%s), DCF: %s, LCD: %s, Kazaljke: %s, Slavljenje: %u, Otkucavanje: %u, Cavli RD/NED/SL=%u/%u/%u odg=%u, Zvona=%u, Mjesta=%u, Sunce loc=%ld/%ld maska=%u"),
       spremnik.satOd,
       spremnik.satDo,
       spremnik.wifiOmogucen ? "ON" : "OFF",
       spremnik.wifiSsid,
-      spremnik.mqttOmogucen ? "ON" : "OFF",
-      spremnik.mqttBroker,
-      spremnik.mqttPort,
       dohvatiNtpServerBezZastavice(spremnik.ntpServer),
       procitajNtpOmogucenostIzTeksta(spremnik.ntpServer) ? "ON" : "OFF",
       spremnik.dcfOmogucen ? "ON" : "OFF",
@@ -1116,9 +955,12 @@ void ucitajPostavke() {
       spremnik.trajanjeZvonjenjaRadniMin,
       spremnik.trajanjeZvonjenjaNedjeljaMin,
       spremnik.trajanjeSlavljenjaMin,
-      spremnik.slavljenjePrijeZvonjenja ? "PRIJE" : "POSLIJE",
+      spremnik.slavljenjePrijeZvonjenja,
       spremnik.brojZvona,
-      spremnik.brojMjestaZaCavle);
+      spremnik.brojMjestaZaCavle,
+      static_cast<long>(postavke.zemljopisnaSirinaE5),
+      static_cast<long>(postavke.zemljopisnaDuzinaE5),
+      postavke.maskaSuncevihDogadaja);
   posaljiPCLog(log);
 
   if (trebaSpremiti) {
@@ -1152,11 +994,11 @@ uint8_t dohvatiCavaoNedjeljaZaZvono(uint8_t zvono) {
 }
 
 uint8_t dohvatiCavaoSlavljenja() {
-  return sanitizirajOznakuCavla(postavke.cavaoSlavljenje, dohvatiBrojMjestaZaCavle());
+  return 5;
 }
 
 uint8_t dohvatiCavaoMrtvackog() {
-  return sanitizirajOznakuCavla(postavke.cavaoMrtvacko, dohvatiBrojMjestaZaCavle());
+  return 0;
 }
 
 bool jeDozvoljenoOtkucavanjeUSatu(int sat) {
@@ -1188,6 +1030,10 @@ int dohvatiTihiPeriodDoSata() {
 void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo) {
   satOd = constrain(satOd, 0, 23);
   satDo = constrain(satDo, 0, 23);
+
+  if (postavke.tihiSatiOd == satOd && postavke.tihiSatiDo == satDo) {
+    return;
+  }
 
   postavke.tihiSatiOd = satOd;
   postavke.tihiSatiDo = satDo;
@@ -1234,8 +1080,8 @@ uint8_t dohvatiTrajanjeSlavljenjaMin() {
   return ogranicenoTrajanjeCavla(postavke.trajanjeSlavljenjaMin);
 }
 
-bool jeSlavljenjePrijeZvonjenja() {
-  return postavke.slavljenjePrijeZvonjenja != 0;
+uint8_t dohvatiOdgoduSlavljenjaMin() {
+  return ogranicenaOdgodaSlavljenjaMin(postavke.slavljenjePrijeZvonjenja);
 }
 
 bool jePlocaKonfigurirana() {
@@ -1269,10 +1115,6 @@ bool koristiDhcpMreza() {
   return postavke.koristiDhcp;
 }
 
-bool jeMQTTOmogucen() {
-  return postavke.mqttOmogucen;
-}
-
 bool jeLCDPozadinskoOsvjetljenjeUkljuceno() {
   return postavke.lcdPozadinskoOsvjetljenje;
 }
@@ -1304,25 +1146,6 @@ const char* dohvatiZadaniGateway() {
   return mrezniCache.wifi.zadaniGateway;
 }
 
-const char* dohvatiMQTTBroker() {
-  osigurajUcitanuMreznuSekciju(MREZNA_SEKCIJA_MQTT);
-  return mrezniCache.mqtt.mqttBroker;
-}
-
-uint16_t dohvatiMQTTPort() {
-  return postavke.mqttPort;
-}
-
-const char* dohvatiMQTTKorisnika() {
-  osigurajUcitanuMreznuSekciju(MREZNA_SEKCIJA_MQTT);
-  return mrezniCache.mqtt.mqttKorisnik;
-}
-
-const char* dohvatiMQTTLozinku() {
-  osigurajUcitanuMreznuSekciju(MREZNA_SEKCIJA_MQTT);
-  return mrezniCache.mqtt.mqttLozinka;
-}
-
 const char* dohvatiNTPServer() {
   osigurajUcitanuMreznuSekciju(MREZNA_SEKCIJA_SINKRONIZACIJA);
   return dohvatiNtpServerBezZastavice(mrezniCache.sinkronizacija.ntpServer);
@@ -1334,6 +1157,38 @@ bool jeNTPOmogucen() {
 
 bool jeDCFOmogucen() {
   return postavke.dcfOmogucen;
+}
+
+int32_t dohvatiZemljopisnuSirinuE5() {
+  return ZADANA_ZEMLJOPISNA_SIRINA_E5;
+}
+
+int32_t dohvatiZemljopisnuDuzinuE5() {
+  return ZADANA_ZEMLJOPISNA_DUZINA_E5;
+}
+
+bool jeSuncevDogadajOmogucen(uint8_t dogadaj) {
+  if (!jeValjanSuncevDogadaj(dogadaj)) {
+    return false;
+  }
+  return (postavke.maskaSuncevihDogadaja & (1U << dogadaj)) != 0;
+}
+
+uint8_t dohvatiZvonoZaSuncevDogadaj(uint8_t dogadaj) {
+  if (!jeValjanSuncevDogadaj(dogadaj)) {
+    return 1;
+  }
+  return ogranicenoZvonoSuncevogDogadaja(postavke.zvonaSuncevihDogadaja[dogadaj]);
+}
+
+int dohvatiOdgoduSuncevogDogadajaMin(uint8_t dogadaj) {
+  if (!jeValjanSuncevDogadaj(dogadaj)) {
+    return 0;
+  }
+  if (dogadaj == SUNCEVI_DOGADAJ_PODNE) {
+    return 0;
+  }
+  return ogranicenaOdgodaSuncevogDogadajaMin(postavke.odgodeSuncevihDogadajaMin[dogadaj]);
 }
 
 void postaviWiFiOmogucen(bool omogucen) {
@@ -1351,19 +1206,58 @@ void postaviWiFiOmogucen(bool omogucen) {
   posaljiPCLog(omogucen ? F("Postavke: WiFi ukljucen") : F("Postavke: WiFi iskljucen"));
 }
 
-void postaviMQTTOmogucen(bool omogucen) {
-  if (postavke.mqttOmogucen == omogucen) {
+void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odgodaMin) {
+  if (!jeValjanSuncevDogadaj(dogadaj)) {
     return;
   }
 
-  postavke.mqttOmogucen = omogucen;
+  const uint8_t novoZvono = ogranicenoZvonoSuncevogDogadaja(zvono);
+  const int16_t novaOdgoda =
+      (dogadaj == SUNCEVI_DOGADAJ_PODNE) ? 0 : ogranicenaOdgodaSuncevogDogadajaMin(odgodaMin);
+  const uint8_t bitDogadaja = static_cast<uint8_t>(1U << dogadaj);
+  const bool prethodnoOmogucen = (postavke.maskaSuncevihDogadaja & bitDogadaja) != 0;
 
-  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
-  ucitajKompatibilanSpremnik(spremnik);
-  upisiRadnePostavkeUSpremnik(spremnik);
-  spremiSpremnikPostavki(spremnik);
+  if (prethodnoOmogucen == omogucen &&
+      postavke.zvonaSuncevihDogadaja[dogadaj] == novoZvono &&
+      postavke.odgodeSuncevihDogadajaMin[dogadaj] == novaOdgoda) {
+    return;
+  }
 
-  posaljiPCLog(omogucen ? F("Postavke: MQTT ukljucen") : F("Postavke: MQTT iskljucen"));
+  if (omogucen) {
+    postavke.maskaSuncevihDogadaja |= bitDogadaja;
+  } else {
+    postavke.maskaSuncevihDogadaja &= static_cast<uint8_t>(~bitDogadaja);
+  }
+  postavke.maskaSuncevihDogadaja =
+      sanitizirajMaskuSuncevihDogadaja(postavke.maskaSuncevihDogadaja);
+  postavke.zvonaSuncevihDogadaja[dogadaj] = novoZvono;
+  postavke.odgodeSuncevihDogadajaMin[dogadaj] = novaOdgoda;
+
+  EepromLayout::SunceviDogadajiSpremnik spremnik = napraviZadaneSunceveDogadaje();
+  if (!ucitajSunceveDogadajeSkeniranjem(spremnik)) {
+    spremnik = napraviZadaneSunceveDogadaje();
+  }
+  upisiSunceveDogadajeUSpremnik(spremnik);
+  spremiSunceveDogadajeSpremnik(spremnik);
+
+  const char* naziv = "nepoznato";
+  if (dogadaj == SUNCEVI_DOGADAJ_JUTRO) {
+    naziv = "jutro";
+  } else if (dogadaj == SUNCEVI_DOGADAJ_PODNE) {
+    naziv = "podne";
+  } else if (dogadaj == SUNCEVI_DOGADAJ_VECER) {
+    naziv = "vecer";
+  }
+
+  char log[96];
+  snprintf(log,
+           sizeof(log),
+           "Suncevi dogadaj %s: %s, zvono=%u, odgoda=%d min",
+           naziv,
+           jeSuncevDogadajOmogucen(dogadaj) ? "ON" : "OFF",
+           dohvatiZvonoZaSuncevDogadaj(dogadaj),
+           dohvatiOdgoduSuncevogDogadajaMin(dogadaj));
+  posaljiPCLog(log);
 }
 
 void postaviLCDPozadinskoOsvjetljenje(bool ukljuceno) {
@@ -1441,11 +1335,11 @@ void postaviModOtkucavanja(uint8_t mod) {
 }
 
 void postaviKonfiguracijuPloce(bool aktivna, int pocetakMinuta, int krajMinuta) {
-  pocetakMinuta = constrain(pocetakMinuta, 0, 23 * 60 + 59);
-  krajMinuta = constrain(krajMinuta, 0, 23 * 60 + 59);
+  pocetakMinuta = normalizirajMinutuPloceNaBlok(pocetakMinuta);
+  krajMinuta = normalizirajMinutuPloceNaBlok(krajMinuta);
 
   if (aktivna && krajMinuta <= pocetakMinuta) {
-    krajMinuta = min(pocetakMinuta + 15, 23 * 60 + 59);
+    krajMinuta = min(pocetakMinuta + PLOCA_MINUTNI_BLOK, PLOCA_ZADNJA_CETVRT);
   }
 
   const int kodiraniPocetak = kodirajPocetakPloceMinuta(pocetakMinuta, aktivna);
@@ -1478,11 +1372,23 @@ void postaviKonfiguracijuPloce(bool aktivna, int pocetakMinuta, int krajMinuta) 
 void postaviPostavkeCavala(uint8_t trajanjeRadniMin,
                            uint8_t trajanjeNedjeljaMin,
                            uint8_t trajanjeSlavljenjaMin,
-                           bool slavljenjePrijeZvonjenja) {
-  postavke.trajanjeZvonjenjaRadniMin = ogranicenoTrajanjeCavla(trajanjeRadniMin);
-  postavke.trajanjeZvonjenjaNedjeljaMin = ogranicenoTrajanjeCavla(trajanjeNedjeljaMin);
-  postavke.trajanjeSlavljenjaMin = ogranicenoTrajanjeCavla(trajanjeSlavljenjaMin);
-  postavke.slavljenjePrijeZvonjenja = slavljenjePrijeZvonjenja ? 1 : 0;
+                           uint8_t odgodaSlavljenjaMin) {
+  const uint8_t novoTrajanjeRadniMin = ogranicenoTrajanjeCavla(trajanjeRadniMin);
+  const uint8_t novoTrajanjeNedjeljaMin = ogranicenoTrajanjeCavla(trajanjeNedjeljaMin);
+  const uint8_t novoTrajanjeSlavljenjaMin = ogranicenoTrajanjeCavla(trajanjeSlavljenjaMin);
+  const uint8_t novaOdgodaSlavljenjaMin = ogranicenaOdgodaSlavljenjaMin(odgodaSlavljenjaMin);
+
+  if (postavke.trajanjeZvonjenjaRadniMin == novoTrajanjeRadniMin &&
+      postavke.trajanjeZvonjenjaNedjeljaMin == novoTrajanjeNedjeljaMin &&
+      postavke.trajanjeSlavljenjaMin == novoTrajanjeSlavljenjaMin &&
+      postavke.slavljenjePrijeZvonjenja == novaOdgodaSlavljenjaMin) {
+    return;
+  }
+
+  postavke.trajanjeZvonjenjaRadniMin = novoTrajanjeRadniMin;
+  postavke.trajanjeZvonjenjaNedjeljaMin = novoTrajanjeNedjeljaMin;
+  postavke.trajanjeSlavljenjaMin = novoTrajanjeSlavljenjaMin;
+  postavke.slavljenjePrijeZvonjenja = novaOdgodaSlavljenjaMin;
 
   EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
   ucitajKompatibilanSpremnik(spremnik);
@@ -1493,11 +1399,11 @@ void postaviPostavkeCavala(uint8_t trajanjeRadniMin,
   snprintf(
       log,
       sizeof(log),
-      "Postavke cavala: RD=%u NED=%u SL=%u %s",
+      "Postavke cavala: RD=%u NED=%u SL=%u ODG=%u",
       postavke.trajanjeZvonjenjaRadniMin,
       postavke.trajanjeZvonjenjaNedjeljaMin,
       postavke.trajanjeSlavljenjaMin,
-      postavke.slavljenjePrijeZvonjenja ? "PRIJE" : "POSLIJE");
+      postavke.slavljenjePrijeZvonjenja);
   posaljiPCLog(log);
 }
 
@@ -1508,19 +1414,33 @@ void postaviRasporedCavala(uint8_t brojMjestaZaCavle,
                            uint8_t cavaoSlavljenja,
                            uint8_t cavaoMrtvackog) {
   const uint8_t brojMjesta = ograniceniBrojMjestaZaCavle(brojMjestaZaCavle);
-
-  postavke.brojMjestaZaCavle = brojMjesta;
-  postavke.brojZvona = ograniceniBrojZvona(brojZvona);
+  const uint8_t noviBrojZvona = ograniceniBrojZvona(brojZvona);
+  uint8_t noviCavliRadni[4];
+  uint8_t noviCavliNedjelja[4];
 
   for (uint8_t i = 0; i < 4; i++) {
-    postavke.cavliRadni[i] =
-        sanitizirajOznakuCavla((radni != nullptr && i < 2) ? radni[i] : 0, brojMjesta);
-    postavke.cavliNedjelja[i] =
-        sanitizirajOznakuCavla((nedjelja != nullptr && i < 2) ? nedjelja[i] : 0, brojMjesta);
+    noviCavliRadni[i] = sanitizirajOznakuCavlaZvona(
+        sanitizirajOznakuCavla((radni != nullptr && i < 2) ? radni[i] : 0, brojMjesta));
+    noviCavliNedjelja[i] = sanitizirajOznakuCavlaZvona(
+        sanitizirajOznakuCavla((nedjelja != nullptr && i < 2) ? nedjelja[i] : 0, brojMjesta));
   }
 
-  postavke.cavaoSlavljenje = sanitizirajOznakuCavla(cavaoSlavljenja, brojMjesta);
-  postavke.cavaoMrtvacko = sanitizirajOznakuCavla(cavaoMrtvackog, brojMjesta);
+  if (postavke.brojMjestaZaCavle == brojMjesta &&
+      postavke.brojZvona == noviBrojZvona &&
+      memcmp(postavke.cavliRadni, noviCavliRadni, sizeof(noviCavliRadni)) == 0 &&
+      memcmp(postavke.cavliNedjelja, noviCavliNedjelja, sizeof(noviCavliNedjelja)) == 0 &&
+      postavke.cavaoSlavljenje == 5 &&
+      postavke.cavaoMrtvacko == 0) {
+    return;
+  }
+
+  postavke.brojMjestaZaCavle = brojMjesta;
+  postavke.brojZvona = noviBrojZvona;
+  memcpy(postavke.cavliRadni, noviCavliRadni, sizeof(noviCavliRadni));
+  memcpy(postavke.cavliNedjelja, noviCavliNedjelja, sizeof(noviCavliNedjelja));
+
+  postavke.cavaoSlavljenje = 5;
+  postavke.cavaoMrtvacko = 0;
 
   EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
   ucitajKompatibilanSpremnik(spremnik);
@@ -1552,24 +1472,15 @@ void postaviWiFiPodatke(const char* ssid, const char* lozinka) {
     return;
   }
 
-  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
-  ucitajKompatibilanSpremnik(spremnik);
-  upisiRadnePostavkeUSpremnik(spremnik);
+  char noviSsid[33];
+  char novaLozinka[33];
+  strncpy(noviSsid, ssid, sizeof(noviSsid) - 1);
+  noviSsid[sizeof(noviSsid) - 1] = '\0';
+  strncpy(novaLozinka, lozinka, sizeof(novaLozinka) - 1);
+  novaLozinka[sizeof(novaLozinka) - 1] = '\0';
 
-  strncpy(spremnik.wifiSsid, ssid, sizeof(spremnik.wifiSsid) - 1);
-  spremnik.wifiSsid[sizeof(spremnik.wifiSsid) - 1] = '\0';
-  strncpy(spremnik.wifiLozinka, lozinka, sizeof(spremnik.wifiLozinka) - 1);
-  spremnik.wifiLozinka[sizeof(spremnik.wifiLozinka) - 1] = '\0';
-
-  spremiSpremnikPostavki(spremnik);
-
-  char log[80];
-  snprintf(log, sizeof(log), "Postavke: WiFi spremljen SSID=%s", spremnik.wifiSsid);
-  posaljiPCLog(log);
-}
-
-void postaviMQTTPodatke(const char* broker, uint16_t port, const char* korisnik, const char* lozinka) {
-  if (broker == nullptr || korisnik == nullptr || lozinka == nullptr) {
+  if (strcmp(dohvatiWifiSsid(), noviSsid) == 0 &&
+      strcmp(dohvatiWifiLozinku(), novaLozinka) == 0) {
     return;
   }
 
@@ -1577,24 +1488,78 @@ void postaviMQTTPodatke(const char* broker, uint16_t port, const char* korisnik,
   ucitajKompatibilanSpremnik(spremnik);
   upisiRadnePostavkeUSpremnik(spremnik);
 
-  strncpy(spremnik.mqttBroker, broker, sizeof(spremnik.mqttBroker) - 1);
-  spremnik.mqttBroker[sizeof(spremnik.mqttBroker) - 1] = '\0';
-  spremnik.mqttPort = (port == 0) ? 1883 : port;
-  strncpy(spremnik.mqttKorisnik, korisnik, sizeof(spremnik.mqttKorisnik) - 1);
-  spremnik.mqttKorisnik[sizeof(spremnik.mqttKorisnik) - 1] = '\0';
-  strncpy(spremnik.mqttLozinka, lozinka, sizeof(spremnik.mqttLozinka) - 1);
-  spremnik.mqttLozinka[sizeof(spremnik.mqttLozinka) - 1] = '\0';
+  strncpy(spremnik.wifiSsid, noviSsid, sizeof(spremnik.wifiSsid) - 1);
+  spremnik.wifiSsid[sizeof(spremnik.wifiSsid) - 1] = '\0';
+  strncpy(spremnik.wifiLozinka, novaLozinka, sizeof(spremnik.wifiLozinka) - 1);
+  spremnik.wifiLozinka[sizeof(spremnik.wifiLozinka) - 1] = '\0';
 
   spremiSpremnikPostavki(spremnik);
 
-  char log[128];
-  snprintf(
-      log,
-      sizeof(log),
-      "Postavke: MQTT spremljen broker=%s:%u, korisnik=%s",
-      spremnik.mqttBroker,
-      spremnik.mqttPort,
-      spremnik.mqttKorisnik);
+  strncpy(mrezniCache.wifi.wifiSsid, spremnik.wifiSsid, sizeof(mrezniCache.wifi.wifiSsid) - 1);
+  mrezniCache.wifi.wifiSsid[sizeof(mrezniCache.wifi.wifiSsid) - 1] = '\0';
+  strncpy(mrezniCache.wifi.wifiLozinka, spremnik.wifiLozinka, sizeof(mrezniCache.wifi.wifiLozinka) - 1);
+  mrezniCache.wifi.wifiLozinka[sizeof(mrezniCache.wifi.wifiLozinka) - 1] = '\0';
+  strncpy(mrezniCache.wifi.statickaIp, spremnik.statickaIp, sizeof(mrezniCache.wifi.statickaIp) - 1);
+  mrezniCache.wifi.statickaIp[sizeof(mrezniCache.wifi.statickaIp) - 1] = '\0';
+  strncpy(mrezniCache.wifi.mreznaMaska, spremnik.mreznaMaska, sizeof(mrezniCache.wifi.mreznaMaska) - 1);
+  mrezniCache.wifi.mreznaMaska[sizeof(mrezniCache.wifi.mreznaMaska) - 1] = '\0';
+  strncpy(mrezniCache.wifi.zadaniGateway, spremnik.zadaniGateway, sizeof(mrezniCache.wifi.zadaniGateway) - 1);
+  mrezniCache.wifi.zadaniGateway[sizeof(mrezniCache.wifi.zadaniGateway) - 1] = '\0';
+  aktivnaMreznaSekcija = MREZNA_SEKCIJA_WIFI;
+
+  char log[80];
+  snprintf(log, sizeof(log), "Postavke: WiFi spremljen SSID=%s", spremnik.wifiSsid);
+  posaljiPCLog(log);
+}
+
+void postaviWiFiPodatkeZaSetup(const char* ssid, const char* lozinka) {
+  if (ssid == nullptr || lozinka == nullptr) {
+    return;
+  }
+
+  char noviSsid[33];
+  char novaLozinka[33];
+  strncpy(noviSsid, ssid, sizeof(noviSsid) - 1);
+  noviSsid[sizeof(noviSsid) - 1] = '\0';
+  strncpy(novaLozinka, lozinka, sizeof(novaLozinka) - 1);
+  novaLozinka[sizeof(novaLozinka) - 1] = '\0';
+
+  if (strcmp(dohvatiWifiSsid(), noviSsid) == 0 &&
+      strcmp(dohvatiWifiLozinku(), novaLozinka) == 0 &&
+      postavke.koristiDhcp) {
+    return;
+  }
+
+  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
+  ucitajKompatibilanSpremnik(spremnik);
+  upisiRadnePostavkeUSpremnik(spremnik);
+
+  strncpy(spremnik.wifiSsid, noviSsid, sizeof(spremnik.wifiSsid) - 1);
+  spremnik.wifiSsid[sizeof(spremnik.wifiSsid) - 1] = '\0';
+  strncpy(spremnik.wifiLozinka, novaLozinka, sizeof(spremnik.wifiLozinka) - 1);
+  spremnik.wifiLozinka[sizeof(spremnik.wifiLozinka) - 1] = '\0';
+  spremnik.koristiDhcp = true;
+  postavke.koristiDhcp = true;
+
+  spremiSpremnikPostavki(spremnik);
+
+  strncpy(mrezniCache.wifi.wifiSsid, spremnik.wifiSsid, sizeof(mrezniCache.wifi.wifiSsid) - 1);
+  mrezniCache.wifi.wifiSsid[sizeof(mrezniCache.wifi.wifiSsid) - 1] = '\0';
+  strncpy(mrezniCache.wifi.wifiLozinka, spremnik.wifiLozinka, sizeof(mrezniCache.wifi.wifiLozinka) - 1);
+  mrezniCache.wifi.wifiLozinka[sizeof(mrezniCache.wifi.wifiLozinka) - 1] = '\0';
+  strncpy(mrezniCache.wifi.statickaIp, spremnik.statickaIp, sizeof(mrezniCache.wifi.statickaIp) - 1);
+  mrezniCache.wifi.statickaIp[sizeof(mrezniCache.wifi.statickaIp) - 1] = '\0';
+  strncpy(mrezniCache.wifi.mreznaMaska, spremnik.mreznaMaska, sizeof(mrezniCache.wifi.mreznaMaska) - 1);
+  mrezniCache.wifi.mreznaMaska[sizeof(mrezniCache.wifi.mreznaMaska) - 1] = '\0';
+  strncpy(mrezniCache.wifi.zadaniGateway, spremnik.zadaniGateway, sizeof(mrezniCache.wifi.zadaniGateway) - 1);
+  mrezniCache.wifi.zadaniGateway[sizeof(mrezniCache.wifi.zadaniGateway) - 1] = '\0';
+  aktivnaMreznaSekcija = MREZNA_SEKCIJA_WIFI;
+
+  char log[96];
+  snprintf(log,
+           sizeof(log),
+           "Setup WiFi: spremljen SSID=%s i aktiviran DHCP za novu mrezu",
+           spremnik.wifiSsid);
   posaljiPCLog(log);
 }
 
@@ -1620,6 +1585,11 @@ void postaviNTPOmogucen(bool omogucen) {
 
 void postaviSinkronizacijskePostavke(const char* ntpServer, bool dcfOmogucen) {
   if (ntpServer == nullptr) {
+    return;
+  }
+
+  if (strcmp(dohvatiNTPServer(), ntpServer) == 0 &&
+      postavke.dcfOmogucen == dcfOmogucen) {
     return;
   }
 

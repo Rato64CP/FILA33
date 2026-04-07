@@ -288,8 +288,12 @@ void inicijalizirajRTC() {
   rtcSqwAktivan = false;
   rtcSqwGreskaPrijavljena = false;
   rtcSqwZadnjiTickMs = millis();
+  posaljiPCLog(F("RTC: pocinjem ucitavanje DST statusa"));
   ucitajDSTStatus();
+  posaljiPCLog(F("RTC: DST status ucitan"));
+  posaljiPCLog(F("RTC: pocinjem ucitavanje zadnje sinkronizacije"));
   ucitajZadnjuSinkronizaciju();
+  posaljiPCLog(F("RTC: zadnja sinkronizacija ucitana"));
   if (!vrijemePotvrdjenoZaAutomatiku) {
     trenutniIzvor = IZ_RTC;
     azurirajOznakuIzvora();
@@ -349,20 +353,17 @@ uint32_t dohvatiRtcSekundniBrojac() {
   return lokalniRtcTick;
 }
 
-void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
-  // Provjera validnosti NTP vremena
-  if (ntpVrijeme.unixtime() == 0 || ntpVrijeme.year() < 2024) {
-    posaljiPCLog(F("NTP: neispravno vrijeme, odbacujem"));
-    return;
-  }
-  
-  // Ažuriranje RTC-a
+static void primijeniVrijemeIzNTP(const DateTime& ntpVrijeme) {
   if (rtc.begin()) {
     rtc.adjust(ntpVrijeme);
     rtcBaterijaOk = true;
+  } else {
+    signalizirajError_RTC();
   }
-  
+
   trenutnoVrijeme = ntpVrijeme;
+  fallbackVrijeme = ntpVrijeme;
+  fallbackAktivan = true;
   dstAktivan = izracunajDSTIzKalendara(ntpVrijeme);
   spremiDSTStatus();
   zadnjaSinkronizacija = ntpVrijeme;
@@ -372,8 +373,8 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
       F("Vrijeme: potvrdeno iz NTP-a, automatika toranjskog sata je aktivna"));
   azurirajOznakuIzvora();
   spremiZadnjuSinkronizaciju();
-  
-  String log = F("Vrijeme ažurirano iz NTP: ");
+
+  String log = F("Vrijeme azurirano iz NTP: ");
   log += ntpVrijeme.year();
   log += F("-");
   log += ntpVrijeme.month();
@@ -382,8 +383,31 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
   log += F(" ");
   log += ntpVrijeme.hour();
   log += F(":");
+  if (ntpVrijeme.minute() < 10) log += F("0");
   log += ntpVrijeme.minute();
+  log += F(":");
+  if (ntpVrijeme.second() < 10) log += F("0");
+  log += ntpVrijeme.second();
   posaljiPCLog(log);
+}
+
+void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
+  // Provjera validnosti NTP vremena
+  if (ntpVrijeme.unixtime() == 0 || ntpVrijeme.year() < 2024) {
+    posaljiPCLog(F("NTP: neispravno vrijeme, odbacujem"));
+    return;
+  }
+
+  // NTP se ovdje primjenjuje odmah jer trenutak zahtjeva vec bira Mega
+  // tek kad su kazaljke i ploca u sigurnom stanju za sinkronizaciju.
+  primijeniVrijemeIzNTP(ntpVrijeme);
+  return;
+  /*
+  
+  // Ažuriranje RTC-a
+  
+  String log = F("Vrijeme ažurirano iz NTP: ");
+  */
 }
 
 void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
@@ -397,6 +421,7 @@ void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
   if (trenutniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela()) {
     return;
   }
+
   
   // Ažuriranje RTC-a
   if (rtc.begin()) {
@@ -469,6 +494,8 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   if (rucnoVrijeme.second() < 10) log += F("0");
   log += rucnoVrijeme.second();
   posaljiPCLog(log);
+  zatraziPoravnanjeTaktaKazaljki();
+  zatraziPoravnanjeTaktaPloce();
 }
 
 String dohvatiIzvorVremena() {
@@ -519,6 +546,10 @@ bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme) {
   const uint32_t sada = vrijeme.unixtime();
 
   return sada >= pocetakTisine.unixtime() && sada < krajTisine.unixtime();
+}
+
+int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme) {
+  return izracunajDSTIzKalendara(vrijeme) ? 120 : 60;
 }
 
 DateTime getZadnjeSinkroniziranoVrijeme() {

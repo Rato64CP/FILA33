@@ -90,7 +90,7 @@
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
-// Serial3:        9600 baud   - ESP8266 MQTT gateway (Rx3=pin15, Tx3=pin14)
+// Serial3:        9600 baud   - ESP8266 WiFi/NTP/web modul (Rx3=pin15, Tx3=pin14)
 
 // All PIN assignments consolidated in this single header file
 // No duplicate definitions allowed in other source files

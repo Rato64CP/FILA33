@@ -21,6 +21,7 @@ bool jeRtcSqwAktivan();
 bool fallbackImaPouzdanuReferencu();
 bool jeVrijemePotvrdjenoZaAutomatiku();
 bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
+int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme);
 
 DateTime getZadnjeSinkroniziranoVrijeme();
 void oznaciPovratakNaRTC();

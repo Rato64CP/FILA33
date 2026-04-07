@@ -101,13 +101,13 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   const EepromLayout::UnifiedMotionState najnovijeStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   stanje = najnovijeStanje;
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  if (stanje.hand_active != HAND_NEAKTIVNO) {
+    return;
+  }
   if (rtcTick == zadnjiObradeniRtcTick) {
     return;
   }
   zadnjiObradeniRtcTick = rtcTick;
-  if (stanje.hand_active != HAND_NEAKTIVNO) {
-    return;
-  }
   const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
   if ((rtcVrijeme.second() % 6) != 0) {
     return;
@@ -269,6 +269,13 @@ void postaviRucnuBlokaduKazaljki(bool blokirano) {
 
 bool jeRucnaBlokadaKazaljkiAktivna() {
   return rucnaBlokadaKazaljki;
+}
+
+bool mozeSeRucnoNamjestatiKazaljke() {
+  if (!imaKazaljkeSata()) {
+    return true;
+  }
+  return UnifiedMotionStateStore::dohvatiIliMigriraj().hand_active == HAND_NEAKTIVNO;
 }
 
 void postaviRucnuPozicijuKazaljki(int satKazaljke, int minutaKazaljke) {

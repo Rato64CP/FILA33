@@ -1,86 +1,85 @@
 # 🕰️ Automatika toranjskog sata
 
-Firmware za **Arduino Mega 2560** koji upravlja toranjskim satom kroz četiri ključna mehanička sklopa:
-- kazaljke
-- okretna ploča
-- zvona
-- čekići (otkucavanje)
+Firmware i prateca logika za toranjski sat temeljen na podjeli poslova:
+- `Arduino Mega 2560` upravlja kazaljkama, okretnom plocom, zvonima, cekicima, lokalnim postavkama i recovery logikom.
+- `ESP8266` sluzi kao vanjski mrezni modul za WiFi, NTP, setup WiFi i servisni API.
 
-Sustav koristi **DS3231 RTC** kao primarni izvor vremena, **ESP** preko `Serial3` za NTP/MQTT integraciju i **24C32 EEPROM** za trajnu pohranu stanja i postavki.
+## ✨ Sto sustav radi
 
----
+- vodi vrijeme preko `DS3231 RTC`, `NTP` i `DCF77`
+- upravlja kazaljkama sata uz korekciju i sinkronizaciju
+- upravlja okretnom plocom kroz parne i neparne faze
+- vodi zvona, cekice, slavljenje i mrtvacko
+- cuva kriticno stanje i postavke u `24C32 EEPROM-u`
+- vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
 
-## ✨ Glavne funkcionalnosti
+## 🧭 Trenutna arhitektura
 
-- Sinkronizacija vremena preko RTC-a, NTP-a i DCF77.
-- Dinamička korekcija kazaljki korak-po-korak bez agresivnih skokova.
-- Dvofazno upravljanje okretnom pločom preko PARNI i NEPARNI relejskih faza.
-- Automatsko i ručno upravljanje zvonima.
-- Satno i polusatno otkucavanje čekića uz podršku za tihi period.
-- Recovery nakon watchdog i power-loss reseta uz periodično spremanje kritičnog stanja.
-- Wear-leveling EEPROM-a s trajnim pamćenjem zadnjeg zapisanog slota radi točnog recoveryja kazaljki i ploče nakon boota.
-- LCD izbornik sa 6 tipki za lokalne postavke.
+- `main/` je glavni firmware toranjskog sata za `Mega 2560`.
+- `esp_firmware/` je pomocni firmware za `ESP8266`.
+- Mega je jedino mjesto istine za radne postavke sata.
+- ESP vise ne uredjuje postavke sata preko weba.
+- ESP web sloj ostaje ogranicen na `/`, `/setup`, `/status` i `/api/...`.
 
----
+## 🔌 Serijska veza Mega <-> ESP
 
-## 🧱 Arhitektura modula (`main/`)
+- Mega koristi `Serial3` za komunikaciju s ESP modulom.
+- Aktivne naredbe obuhvacaju `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`.
+- Stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`.
 
-- `main.ino` – orkestracija inicijalizacije i glavne petlje.
-- `time_glob.*` – rad s vremenom, RTC/NTP/DCF status i fallback logika.
-- `esp_serial.*` – serijska komunikacija s ESP-om (`NTP:`, `CMD:`, `MQTT:`).
-- `kazaljke_sata.*` – upravljanje koracima kazaljki i sinkronizacijom prema vremenu.
-- `okretna_ploca.*` – logika ciljne pozicije i dvofaznih koraka ploče.
-- `zvonjenje.*` – upravljanje zvonima i inercijom.
-- `otkucavanje.*` – satno i polusatno otkucavanje, slavljenje i mrtvačko.
-- `menu_system.*` i `tipke.*` – korisnički izbornik i ulaz s tipki.
-- `postavke.*` – učitavanje i spremanje postavki te validacija integriteta.
-- `unified_motion_state.*` – jedinstveni model stanja kazaljki i ploče.
-- `power_recovery.*` i `watchdog.*` – sigurnost rada 24/7 i recovery nakon boota.
-- `wear_leveling.*` i `i2c_eeprom.*` – pristup i raspodjela zapisa u 24C32 EEPROM-u.
+## 🧩 Glavni moduli u `main/`
 
----
+- `main.ino` - inicijalizacija i glavna petlja toranjskog sata
+- `time_glob.*` - RTC, NTP, DCF i prioritet izvora vremena
+- `esp_serial.*` - serijska veza s ESP modulom
+- `kazaljke_sata.*` - logika kazaljki i korekcije
+- `okretna_ploca.*` - upravljanje polozajem i fazama ploce
+- `zvonjenje.*` - upravljanje zvonima
+- `otkucavanje.*` - cekici, satno i polusatno otkucavanje
+- `menu_system.*` i `tipke.*` - lokalni LCD izbornik i unos
+- `postavke.*` - citanje, validacija i spremanje postavki
+- `unified_motion_state.*` - zajednicko stanje kazaljki i ploce
+- `power_recovery.*` i `watchdog.*` - 24/7 pouzdanost i oporavak
+- `wear_leveling.*` i `i2c_eeprom.*` - trajna pohrana u 24C32
 
-## 💾 EEPROM i Recovery
+## 📶 Setup WiFi za toranjski sat
 
-- `main/wear_leveling.*` trajno pamti zadnji uspješno zapisani slot za svaki segment 24C32 EEPROM-a.
-- `main/unified_motion_state.*`, `main/power_recovery.*`, `main/postavke.*` i `main/time_glob.*` nakon boota zato čitaju najnoviji zapis, a ne stariji slot.
-- Ova logika je važna za toranjski sat jer sprječava lažnu korekciju kazaljki ili ploče nakon kratkog nestanka napajanja.
+- ESP moze pokrenuti privremenu setup mrezu `FILA33_setup`.
+- Lozinka setup mreze je `toranj33`.
+- Setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`.
+- Status LED na `GPIO12 / D6` signalizira stanje WiFi veze i setup AP moda.
+- Setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`.
+- Nakon spremanja nove mreze ESP prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen.
 
----
+## 💾 EEPROM i recovery
 
-## 🔧 Hardverske komponente
+- `24C32 EEPROM` cuva postavke i kriticno radno stanje.
+- `wear_leveling` smanjuje trosenje EEPROM-a kroz kruzno spremanje.
+- `unified_motion_state.*` i `power_recovery.*` vracaju kazaljke i plocu u dosljedno stanje nakon restarta.
+- Kod izmjena koje diraju EEPROM raspored ili recovery obavezno provjeri:
+- `main/eeprom_konstante.h`
+- `main/unified_motion_state.*`
+- `main/power_recovery.*`
+
+## 🔧 Hardver
 
 - Arduino Mega 2560
-- DS3231 RTC + 24C32 EEPROM (I2C)
-- ESP modul (UART3)
-- LCD 2x16 (I2C)
-- Relejni izlazi za kazaljke, ploču, zvona i čekiće
+- ESP8266 modul
+- DS3231 RTC
+- 24C32 EEPROM
+- LCD 16x2 preko I2C
 - DCF77 prijemnik
-- 6 tipki za izbornik
-- 2 tipke za slavljenje i mrtvačko
-- 2 ručne sklopke zvona
+- relejni izlazi za kazaljke, plocu, zvona i cekice
+- tipke za lokalni izbornik i servisne funkcije
 
----
+## 📚 README vodi
 
-## 🧭 Brzi pregled rada
+- [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
+- [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
 
-1. `setup()` inicijalizira vrijeme, postavke, ulaze/izlaze, module i recovery.
-2. `loop()` ciklički obrađuje komunikaciju, UI, zvona, čekiće, kazaljke, ploču, sinkronizaciju i periodično spremanje stanja.
-3. Watchdog se osvježava u petlji kako bi sustav ostao stabilan u 24/7 radu.
+## 🛡️ Napomene za razvoj
 
----
-
-## 📚 Dokumentacija
-
-- Tehnička dokumentacija ponašanja sustava: `docs/tehnicka_dokumentacija_firmware_sustava.md`
-- Analiza modularnosti menija, tipki i postavki: `docs/analiza_modularnosti_meni_tipke_postavke.md`
-
----
-
-## 🛡️ Napomena za razvoj
-
-Kod promjena koje diraju toranjski sat i povezane komponente, obavezno:
-- sačuvati kompatibilnost EEPROM zapisa
-- zadržati neblokirajući rad glavne petlje
-- potvrditi da watchdog i recovery putanje ostaju funkcionalne
-- kod izmjena recovery logike provjeriti usklađenost modula `main/eeprom_konstante.h`, `main/unified_motion_state.*` i `main/power_recovery.*`
+- glavna petlja mora ostati neblokirajuca
+- Mega mora ostati autoritet za postavke toranjskog sata
+- kvar ESP-a ne smije zaustaviti osnovni rad kazaljki, ploce, zvona i cekica
+- pri izmjenama recovery putanja provjeri uskladenost modula koji diraju EEPROM i stanje gibanja

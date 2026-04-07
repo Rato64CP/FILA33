@@ -1,6 +1,6 @@
 // power_recovery.cpp – Boot recovery, graceful shutdown, watchdog integration
 // Implements 24/7 reliability with:
-// - EEPROM-based state persistence (6 wear-leveling slots per data)
+// - EEPROM-based state persistence (rotirajuci wear-leveling slotovi)
 // - Automatic recovery after power loss
 // - Graceful shutdown support (requires external power loss detection)
 // - State validation and EEPROM health checks

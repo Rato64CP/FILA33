@@ -110,8 +110,8 @@ Ovo je namjerno „meka“ korekcija radi zaštite mehanike.
 ## 4. ROTATING PLATE (OKRETNA PLOČA)
 
 ### Logika koraka svakih 15 minuta
-Ciljna pozicija ploče se računa iz vremena u 15-minutnim blokovima. Aktivni dnevni prozor je:
-- **od 04:59 do 20:44**,
+Ciljna pozicija ploče se računa iz vremena u 15-minutnim blokovima. Aktivni dnevni prozor je po postavkama konfigurabilan, a zadani prozor je:
+- **od 05:00 do 20:45**,
 - izvan tog prozora cilj je noćna pozicija 63.
 
 ### Dvofazni model (PARNI + NEPARNI)
@@ -213,7 +213,7 @@ Nakon `ACK:NTP`, sustav pokreće „budnu“ korekciju kazaljki ako nisu sinkron
 
 ### Kako se postavke mijenjaju i spremaju
 1. korisnik promijeni vrijednost kroz meni,
-2. `menu_system` pozove API iz `postavke` (npr. tihi sati, MQTT),
+2. `menu_system` pozove API iz `postavke` (npr. tihi sati, WiFi, NTP),
 3. `postavke` validira, pripremi integritet (potpis/verzija/checksum),
 4. zapis ide kroz wear-leveling slotove u EEPROM.
 
@@ -234,7 +234,7 @@ Ako bilo što ne prođe validaciju, sustav se vraća na zadane vrijednosti i pon
 1. LCD + PC serial,
 2. vanjski EEPROM,
 3. RTC + učitavanje postavki,
-4. tipke, ESP, opcionalno MQTT, meni,
+4. tipke, ESP, meni,
 5. zvona, otkucavanje, kazaljke, ploču, DCF,
 6. watchdog,
 7. power-recovery oznake i boot recovery.
@@ -299,7 +299,7 @@ Satna granularnost (minuta 00) smanjuje jitter i nepotrebne mikrokorekcije kroz 
 ## 🛠️ Developer notes (ključne zamke)
 
 - `WearLeveling::spremi` koristi statički brojač po tipu/predlošku; pri većim refaktorima paziti na neočekivane obrasce raspodjele zapisa.
-- U `okretna_ploca.cpp` ciljna pozicija je trenutno vezana uz fiksne konstante 04:59–20:44; ako se želi potpuno konfigurabilan prozor, treba uskladiti izračun cilja s postavkama.
+- `okretna_ploca.cpp` očekuje da su početak i kraj prozora rada poravnani na 15-minutne blokove; web i spremanje postavki zato ih normaliziraju na četvrt sata.
 - `power_recovery.cpp` ima vlastitu lokalnu strukturu backupa; kod promjena layouta obavezno uskladiti i `eeprom_konstante.h` i recovery logiku.
 - Ručni override zvona ima prioritet nad automatikom; pri dijagnostici „zašto zvono ne staje“ prvo provjeriti stanje fizičkih sklopki.
 

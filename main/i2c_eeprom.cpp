@@ -11,6 +11,7 @@ constexpr size_t UKUPNI_KAPACITET = 4096;         // 32 kbit = 4096 bajtova
 constexpr unsigned long CEKANJE_ZAPISA_MS = 5UL;  // Vrijeme interne pohrane nakon page write
 
 bool inicijaliziran = false;
+bool inicijalizacijaPokusana = false;
 
 bool jeUnutarOpsega(int adresa, size_t duljina) {
   return adresa >= 0 && (static_cast<size_t>(adresa) + duljina) <= UKUPNI_KAPACITET;
@@ -27,9 +28,13 @@ bool provjeriDostupnost() {
 namespace VanjskiEEPROM {
 
 bool inicijaliziraj() {
-  if (!inicijaliziran) {
+  if (!inicijalizacijaPokusana) {
     Wire.begin();
+    #if defined(WIRE_HAS_TIMEOUT) || defined(TWBR)
+    Wire.setWireTimeout(25000, true);
+    #endif
     inicijaliziran = provjeriDostupnost();
+    inicijalizacijaPokusana = true;
   }
   return inicijaliziran;
 }

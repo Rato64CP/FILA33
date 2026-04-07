@@ -140,7 +140,7 @@ void ukljuciZvono(int zvono) {
   if (!zvona.aktivan[indeks]) {
     aktivirajBell_Relej(indeks);
     zvona.aktivan[indeks] = true;
-    // Rucno i daljinsko paljenje preko weba/MQTT traje dok ne stigne
+    // Rucno i daljinsko paljenje preko weba/API-ja traje dok ne stigne
     // eksplicitno gasenje. Samo putanja `aktivirajZvonjenjeNaTrajanje()`
     // postavlja vremenski ogranicen rad.
     zvona.start_ms[indeks] = millis();
@@ -270,7 +270,7 @@ void upravljajZvonom() {
     }
   }
 
-  // Ako je rucni override aktivan, ima prioritet nad MQTT/web automatikom.
+  // Ako je rucni override aktivan, ima prioritet nad web/API automatikom.
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     if (manualnoUpravljanje.override_aktivan[i] && !zvona.aktivan[i]) {
       ukljuciZvonoIzRucneSklopke(i + 1);

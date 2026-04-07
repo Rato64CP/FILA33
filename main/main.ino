@@ -1,4 +1,4 @@
-// main.ino – Glavni orkestrator sustava toranjskog sata
+// main.ino - Glavni orkestrator sustava toranjskog sata
 #include <Arduino.h>
 
 #include "lcd_display.h"
@@ -17,28 +17,26 @@
 #include "mrtvacko_thumbwheel.h"
 #include "dcf_sync.h"
 #include "watchdog.h"
-#include "mqtt_handler.h"
 #include "power_recovery.h"
+#include "sunceva_automatika.h"
 
 void setup() {
   inicijalizirajLCD();
   inicijalizirajPCSerijsku();
 
-  VanjskiEEPROM::inicijaliziraj();
+  posaljiPCLog(VanjskiEEPROM::inicijaliziraj()
+                   ? F("EEPROM: vanjski EEPROM dostupan")
+                   : F("EEPROM: vanjski EEPROM nije dostupan"));
   inicijalizirajRTC();
   ucitajPostavke();
   primijeniLCDPozadinskoOsvjetljenje(jeLCDPozadinskoOsvjetljenjeUkljuceno());
 
   inicijalizirajTipke();
   inicijalizirajESP();
-  if (jeMQTTOmogucen()) {
-    inicijalizirajMQTT();
-  } else {
-    posaljiPCLog(F("MQTT: onemogućen u postavkama, inicijalizacija preskočena"));
-  }
   inicijalizirajMenuSistem();
 
   inicijalizirajZvona();
+  inicijalizirajSuncevuAutomatiku();
   inicijalizirajOtkucavanje();
   inicijalizirajMrtvackoThumbwheel();
   inicijalizirajKazaljke();
@@ -65,14 +63,13 @@ void loop() {
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
 
   upravljajZvonom();
+  upravljajSuncevomAutomatikom();
   osvjeziMrtvackoThumbwheel();
   upravljajOtkucavanjem();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();
+  obradiAutomatskiNTPZahtjevESP();
 
-  if (jeMQTTOmogucen()) {
-    upravljajMQTT();
-  }
   if (jeDCFOmogucen()) {
     osvjeziDCFSinkronizaciju();
   }

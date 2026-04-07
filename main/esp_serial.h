@@ -4,11 +4,13 @@
 
 void inicijalizirajESP();
 void obradiESPSerijskuKomunikaciju();
+void obradiAutomatskiNTPZahtjevESP();
 void posaljiWifiPostavkeESP();
 void posaljiWiFiStatusESP();
 void posaljiNTPPostavkeESP();
-void posaljiMQTTPostavkeESP();
 void posaljiNTPZahtjevESP();
 void posaljiESPKomandu(const char* komanda);
 void posaljiESPKomandu(const String& komanda);
 bool jeWiFiPovezanNaESP();
+const char* dohvatiESPWiFiLokalnuIP();
+const char* dohvatiESPWiFiMACAdresu();

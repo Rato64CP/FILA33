@@ -1,7 +1,7 @@
 // eeprom_konstante.h - CONSOLIDATED EEPROM ADDRESS DEFINITIONS
 // SINGLE SOURCE OF TRUTH for all EEPROM address assignments
 // 24C32 external EEPROM (4096 bytes total)
-// Wear-leveling: 6 slots per data type to extend EEPROM lifespan
+// Wear-leveling: broj slotova ovisi o segmentu kako bi se produzio vijek 24C32
 
 #ifndef EEPROM_KONSTANTE_H
 #define EEPROM_KONSTANTE_H
@@ -132,7 +132,7 @@ struct SystemStateBackup {
 
 constexpr int BAZA_BOOT_FLAGS =
   BAZA_POSTAVKE + (SLOTOVI_POSTAVKE * SLOT_SIZE_POSTAVKE);
-constexpr int SLOTOVI_BOOT_FLAGS = 6;
+constexpr int SLOTOVI_BOOT_FLAGS = 50;
 constexpr int SLOT_SIZE_BOOT_FLAGS = sizeof(SystemStateBackup);
 
 // ==================== JEDINSTVENO STANJE KRETANJA ====================
@@ -183,10 +183,32 @@ constexpr int BAZA_EEPROM_DIJAGNOSTIKA =
   BAZA_DST_STATUS + (SLOTOVI_DST_STATUS * SLOT_SIZE_DST_STATUS);
 constexpr int VELICINA_EEPROM_DIJAGNOSTIKA = sizeof(uint32_t);
 
+// ==================== SUNCEVA AUTOMATIKA ZVONJENJA ====================
+// Zaseban blok za jutarnje, podnevno i vecernje zvono toranjskog sata.
+
+struct SunceviDogadajiSpremnik {
+  uint16_t potpis;
+  uint8_t verzija;
+  uint8_t maskaDogadaja;
+  int32_t zemljopisnaSirinaE5;
+  int32_t zemljopisnaDuzinaE5;
+  uint8_t zvona[3];
+  int16_t odgodeMin[3];
+  uint16_t checksum;
+};
+
+constexpr uint16_t SUNCEVI_DOGADAJI_POTPIS = 0x5344;
+constexpr uint8_t SUNCEVI_DOGADAJI_VERZIJA = 1;
+
+constexpr int BAZA_SUNCEVI_DOGADAJI =
+  BAZA_EEPROM_DIJAGNOSTIKA + VELICINA_EEPROM_DIJAGNOSTIKA;
+constexpr int SLOTOVI_SUNCEVI_DOGADAJI = 6;
+constexpr int SLOT_SIZE_SUNCEVI_DOGADAJI = sizeof(SunceviDogadajiSpremnik);
+
 // ==================== VALIDATION MACROS ====================
 
 static_assert(
-  (BAZA_EEPROM_DIJAGNOSTIKA + VELICINA_EEPROM_DIJAGNOSTIKA) <= 4096,
+  (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <= 4096,
   "EEPROM layout exceeds 24C32 capacity (4096 bytes)"
 );
 

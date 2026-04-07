@@ -17,13 +17,13 @@ typedef enum {
   MENU_STATE_SYSTEM_SETTINGS,     // Sustav
   MENU_STATE_HAND_CORRECTION,     // Rucno namjestanje kazaljki
   MENU_STATE_TIME_ADJUST,         // Rucno namjestanje maticnog sata
-  MENU_STATE_WIFI_CONFIG,         // WiFi konfiguracija
+  MENU_STATE_WIFI_IP_DISPLAY,     // Prikaz lokalne WiFi IP adrese
   MENU_STATE_INFO_DISPLAY,        // Informacije o toranjskom satu
   MENU_STATE_CONFIRMATION,        // Potvrda akcije
-  MENU_STATE_QUIET_HOURS,         // Zadrzano radi kompatibilnosti
-  MENU_STATE_NAIL_SETTINGS,       // Zadrzano radi kompatibilnosti
-  MENU_STATE_MODE_SELECT,         // Zadrzano radi kompatibilnosti
-  MENU_STATE_SYNC_CONFIG          // Zadrzano radi kompatibilnosti
+  MENU_STATE_QUIET_HOURS,         // Uredjivanje tihih sati
+  MENU_STATE_NAIL_SETTINGS,       // Uredjivanje trajanja cavala
+  MENU_STATE_SUNCE_SETTINGS,      // Uredjivanje suncevih dogadaja
+  MENU_STATE_MODE_SELECT          // Odabir moda otkucavanja
 } MenuState;
 
 typedef enum {

@@ -77,7 +77,10 @@ bool jeMetaZaAktivniSegment(const MetaWearLeveling& meta) {
      meta.velicinaSlota == EepromLayout::SLOT_SIZE_UNIFIED_STANJE) ||
     (meta.baznaAdresa == EepromLayout::BAZA_DST_STATUS &&
      meta.brojSlotova == EepromLayout::SLOTOVI_DST_STATUS &&
-     meta.velicinaSlota == EepromLayout::SLOT_SIZE_DST_STATUS);
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_DST_STATUS) ||
+    (meta.baznaAdresa == EepromLayout::BAZA_SUNCEVI_DOGADAJI &&
+     meta.brojSlotova == EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI &&
+     meta.velicinaSlota == EepromLayout::SLOT_SIZE_SUNCEVI_DOGADAJI);
 }
 
 int pronadiTocniMetaIndex(int baznaAdresa, int brojSlotova, size_t velicinaSlota) {

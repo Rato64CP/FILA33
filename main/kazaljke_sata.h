@@ -22,3 +22,4 @@ void pokreniBudnoKorekciju();
 void zatraziPoravnanjeTaktaKazaljki();
 void postaviRucnuBlokaduKazaljki(bool blokirano);
 bool jeRucnaBlokadaKazaljkiAktivna();
+bool mozeSeRucnoNamjestatiKazaljke();
