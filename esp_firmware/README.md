@@ -5,7 +5,8 @@ Ova podmapa sadrzi firmware za `ESP8266` koji radi kao vanjski mrezni modul tora
 ## ✨ Uloga ESP modula
 
 - spaja toranjski sat na lokalnu WiFi mrezu
-- dohvaca NTP vrijeme i salje ga Megi u lokalnom CET/CEST obliku
+- dohvaca NTP vrijeme i drzi ga spremnim za `Arduino Megu 2560`
+- salje NTP vrijeme Megi tek kad `Mega` posalje `NTPREQ:SYNC`
 - pruza kratki servisni web sloj
 - prihvaca setup WiFi kroz privremeni AP
 - prenosi jednostavne API naredbe prema Megi
@@ -29,7 +30,7 @@ Ova podmapa sadrzi firmware za `ESP8266` koji radi kao vanjski mrezni modul tora
 - `WIFIEN:0` i `WIFIEN:1` gase ili pale WiFi radio
 - `WIFISTATUS?` trazi trenutno WiFi stanje
 - `NTPCFG:<server>` postavlja NTP server
-- `NTPREQ:SYNC` trazi trenutno NTP vrijeme s ESP-a
+- `NTPREQ:SYNC` trazi trenutno NTP vrijeme s ESP-a u trenutku koji odabere Mega
 - `NTP:YYYY-MM-DDTHH:MM:SS` salje lokalno vrijeme Megi
 - `STATUS?` trazi kratki runtime status od Mege
 - `CMD:<naredba>` prenosi servisne naredbe za zvona i modove rada
@@ -59,6 +60,7 @@ Ova podmapa sadrzi firmware za `ESP8266` koji radi kao vanjski mrezni modul tora
 ## ✅ Sto provjeriti nakon boota
 
 - serijski monitor treba pokazati `CFGREQ`, `WIFI:CONNECTED` i `WIFI:LOCAL_IP:...` kada je mreza dostupna
+- `ESP` vise ne treba sam slati `NTP:` po spajanju; NTP prema Megi ide tek nakon `NTPREQ:SYNC`
 - `http://<ip-esp>/status` treba vratiti JSON s IP adresom i stanjem veze
 - pocetna stranica treba prikazati da je ESP ogranicen na WiFi, NTP, setup i API
 - API pozivi poput `http://<ip-esp>/api/bell1/on` trebaju poslati odgovarajuci `CMD:` prema Megi

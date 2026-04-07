@@ -38,14 +38,17 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 ## ⏱️ Izvori vremena
 
 - `DS3231 RTC` je glavni izvor za offline rad
-- `NTP` dolazi preko ESP modula
+- `NTP` dolazi preko ESP modula, ali trenutak sinkronizacije bira `Mega 2560`
 - `DCF77` sluzi kao dodatna sinkronizacija i fallback
 - automatski prijelaz CET/CEST ostaje pod kontrolom firmwarea toranjskog sata
+- `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
 
 ## 🔌 Serijska komunikacija s ESP-om
 
 - Mega koristi `Serial3`
 - aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
+- `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
+- `ESP` vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
 
 ## 💾 EEPROM i recovery

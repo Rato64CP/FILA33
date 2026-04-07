@@ -25,6 +25,8 @@ Firmware i prateca logika za toranjski sat temeljen na podjeli poslova:
 
 - Mega koristi `Serial3` za komunikaciju s ESP modulom.
 - Aktivne naredbe obuhvacaju `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`.
+- `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne.
+- `ESP8266` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege.
 - Stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`.
 
 ## 🧩 Glavni moduli u `main/`
