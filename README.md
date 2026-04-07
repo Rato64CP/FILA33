@@ -1,87 +1,183 @@
-# 🕰️ Automatika toranjskog sata
+🕰️ Automatika toranjskog sata
 
-Firmware i prateca logika za toranjski sat temeljen na podjeli poslova:
-- `Arduino Mega 2560` upravlja kazaljkama, okretnom plocom, zvonima, cekicima, lokalnim postavkama i recovery logikom.
-- `ESP8266` sluzi kao vanjski mrezni modul za WiFi, NTP, setup WiFi i servisni API.
+Firmware i upravljačka logika za toranjski sat temeljena na distribuiranoj arhitekturi:
 
-## ✨ Sto sustav radi
+Arduino Mega 2560 – real-time upravljanje (kazaljke, okretna ploča, zvona, čekići, lokalne postavke, recovery)
+ESP8266 – mrežni sloj (WiFi, NTP, konfiguracija, servisni API)
 
-- vodi vrijeme preko `DS3231 RTC`, `NTP` i `DCF77`
-- upravlja kazaljkama sata uz korekciju i sinkronizaciju
-- upravlja okretnom plocom kroz parne i neparne faze
-- vodi zvona, cekice, slavljenje i mrtvacko
-- cuva kriticno stanje i postavke u `24C32 EEPROM-u`
-- vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
+Sustav je dizajniran kao fail-safe i offline-first, gdje osnovne funkcije sata rade potpuno neovisno o mreži.
 
-## 🧭 Trenutna arhitektura
+✨ Funkcionalnosti sustava
 
-- `main/` je glavni firmware toranjskog sata za `Mega 2560`.
-- `esp_firmware/` je pomocni firmware za `ESP8266`.
-- Mega je jedino mjesto istine za radne postavke sata.
-- ESP vise ne uredjuje postavke sata preko weba.
-- ESP web sloj ostaje ogranicen na `/`, `/setup`, `/status` i `/api/...`.
+🕒 Vođenje vremena
+DS3231 RTC (primarni izvor)
+NTP sinkronizacija (na zahtjev)
+DCF77 prijemnik (opcijski)
+upravljanje prioritetima izvora vremena
 
-## 🔌 Serijska veza Mega <-> ESP
+⚙️ Upravljanje mehanikom
+kazaljke sata (precizna korekcija i sinkronizacija)
+okretna ploča (parne / neparne faze)
+zvona:
+redovno zvonjenje
+slavljenje
+mrtvačko
+čekići:
+satno i polusatno otkucavanje
 
-- Mega koristi `Serial3` za komunikaciju s ESP modulom.
-- Aktivne naredbe obuhvacaju `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`.
-- `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne.
-- `ESP8266` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege.
-- Stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`.
+💾 Trajna pohrana
+24C32 EEPROM
+wear leveling (kružno spremanje)
+spremanje kritičnog stanja sustava
 
-## 🧩 Glavni moduli u `main/`
+🛡️ Pouzdanost
+watchdog zaštita
+power-loss recovery
+automatski povrat u valjano stanje
 
-- `main.ino` - inicijalizacija i glavna petlja toranjskog sata
-- `time_glob.*` - RTC, NTP, DCF i prioritet izvora vremena
-- `esp_serial.*` - serijska veza s ESP modulom
-- `kazaljke_sata.*` - logika kazaljki i korekcije
-- `okretna_ploca.*` - upravljanje polozajem i fazama ploce
-- `zvonjenje.*` - upravljanje zvonima
-- `otkucavanje.*` - cekici, satno i polusatno otkucavanje
-- `menu_system.*` i `tipke.*` - lokalni LCD izbornik i unos
-- `postavke.*` - citanje, validacija i spremanje postavki
-- `unified_motion_state.*` - zajednicko stanje kazaljki i ploce
-- `power_recovery.*` i `watchdog.*` - 24/7 pouzdanost i oporavak
-- `wear_leveling.*` i `i2c_eeprom.*` - trajna pohrana u 24C32
+🧭 Arhitektura sustava
+            +------------------+
+            |    ESP8266       |
+            |------------------|
+            | WiFi / NTP / API |
+            +--------+---------+
+                     |
+                 Serial3
+                     |
++--------------------+--------------------+
+|           Arduino Mega 2560             |
+|----------------------------------------|
+| logika sata (autoritet)                |
+| kazaljke / ploča / zvona / čekići      |
+| EEPROM / recovery / watchdog           |
++--------------------+--------------------+
+                     |
+     +---------------+----------------+
+     |        periferni uređaji       |
+     | RTC / LCD / releji / tipke     |
+     +--------------------------------+
 
-## 📶 Setup WiFi za toranjski sat
+👉 Mega je jedini autoritet za rad i stanje sustava
 
-- ESP moze pokrenuti privremenu setup mrezu `FILA33_setup`.
-- Lozinka setup mreze je `toranj33`.
-- Setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`.
-- Status LED na `GPIO12 / D6` signalizira stanje WiFi veze i setup AP moda.
-- Setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`.
-- Nakon spremanja nove mreze ESP prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen.
+🔐 Pravila komunikacije Mega ↔ ESP
+Mega inicira sve operacije (master)
+ESP nikada ne šalje podatke samoinicijativno
+NTP sinkronizacija se izvršava isključivo na zahtjev Mege
+komunikacija mora biti:
+neblokirajuća
+otporna na greške
 
-## 💾 EEPROM i recovery
+🔌 Serijska komunikacija
 
-- `24C32 EEPROM` cuva postavke i kriticno radno stanje.
-- `wear_leveling` smanjuje trosenje EEPROM-a kroz kruzno spremanje.
-- `unified_motion_state.*` i `power_recovery.*` vracaju kazaljke i plocu u dosljedno stanje nakon restarta.
-- Kod izmjena koje diraju EEPROM raspored ili recovery obavezno provjeri:
-- `main/eeprom_konstante.h`
-- `main/unified_motion_state.*`
-- `main/power_recovery.*`
+Mega koristi Serial3 za komunikaciju s ESP modulom.
 
-## 🔧 Hardver
+Podržane naredbe:
+WIFI:
+WIFIEN:
+WIFISTATUS?
+NTPCFG:
+NTPREQ:SYNC
+NTP:
+CMD:
+STATUS?
+Napomene:
+ESP odgovara samo na zahtjev (nema automatskih poruka)
 
-- Arduino Mega 2560
-- ESP8266 modul
-- DS3231 RTC
-- 24C32 EEPROM
-- LCD 16x2 preko I2C
-- DCF77 prijemnik
-- relejni izlazi za kazaljke, plocu, zvona i cekice
-- tipke za lokalni izbornik i servisne funkcije
+stare komande:
 
-## 📚 README vodi
+WEBCFG?
+WEBCFGSET:
 
-- [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
-- [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
+vraćaju:
+ERR:WEBCFGDISABLED
 
-## 🛡️ Napomene za razvoj
+📁 Struktura projekta
 
-- glavna petlja mora ostati neblokirajuca
-- Mega mora ostati autoritet za postavke toranjskog sata
-- kvar ESP-a ne smije zaustaviti osnovni rad kazaljki, ploce, zvona i cekica
-- pri izmjenama recovery putanja provjeri uskladenost modula koji diraju EEPROM i stanje gibanja
+main/ (Arduino Mega firmware)
+main.ino – inicijalizacija i glavna petlja
+time_glob.* – RTC, NTP, DCF i prioriteti
+esp_serial.* – komunikacija s ESP-om
+kazaljke_sata.* – logika kazaljki
+okretna_ploca.* – upravljanje pločom
+zvonjenje.* – upravljanje zvonima
+otkucavanje.* – čekići i otkucavanje
+menu_system.*, tipke.* – LCD izbornik
+postavke.* – konfiguracija
+unified_motion_state.* – zajedničko stanje
+power_recovery.*, watchdog.* – oporavak
+wear_leveling.*, i2c_eeprom.* – EEPROM
+esp_firmware/ (ESP8266 firmware)
+WiFi povezivanje
+NTP dohvat vremena
+web sučelje i API
+
+📶 WiFi setup
+
+ESP može pokrenuti setup mrežu:
+
+SSID: FILA33_setup
+lozinka: toranj33
+Aktivacija:
+dugi pritisak tipke na GPIO14 (D5) → GND
+Status LED:
+GPIO12 (D6)
+Web pristup:
+http://192.168.4.1/
+http://192.168.4.1/setup
+
+Nakon konfiguracije:
+
+ESP šalje WiFi podatke Megi
+sustav ostaje usklađen
+
+💾 EEPROM i recovery
+
+24C32 čuva:
+postavke
+stanje kazaljki i ploče
+wear leveling smanjuje trošenje
+
+⚠️ Važno
+
+Promjene u EEPROM strukturi zahtijevaju:
+
+kompatibilnost sa starim zapisima
+ILI
+migracijsku logiku
+Kritični moduli:
+eeprom_konstante.h
+unified_motion_state.*
+power_recovery.*
+
+⚠️ Ponašanje u slučaju grešaka
+
+Situacija	Ponašanje sustava
+gubitak WiFi	rad bez prekida (RTC)
+kvar ESP-a	nema utjecaja na rad sata
+reset Mege	recovery iz EEPROM-a
+nestanak napajanja	nastavak iz zadnjeg stanja
+
+🔧 Hardver
+
+Arduino Mega 2560
+ESP8266 modul
+DS3231 RTC
+24C32 EEPROM
+LCD 16x2 (I2C)
+DCF77 prijemnik
+relejni izlazi (preko drivera – npr. ULN2803/ULN2804)
+tipke za upravljanje
+
+🛡️ Napomene za razvoj
+
+glavna petlja mora biti neblokirajuća
+Mega mora ostati autoritet sustava
+kvar ESP-a ne smije utjecati na osnovni rad
+recovery logika mora ostati konzistentna
+
+pri izmjenama:
+
+EEPROM strukture
+logike gibanja
+
+obavezno provjeriti kompatibilnost
