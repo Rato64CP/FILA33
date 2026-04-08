@@ -26,6 +26,8 @@ constexpr int SLOTOVI_BOOT_FLAGS = EepromLayout::SLOTOVI_BOOT_FLAGS;
 constexpr int BAZA_EEPROM_DIJAGNOSTIKA = EepromLayout::BAZA_EEPROM_DIJAGNOSTIKA;
 constexpr uint8_t HAND_NEAKTIVNO = 0;
 constexpr uint8_t HAND_RELEJ_NIJEDAN = 0;
+constexpr uint8_t PLATE_FAZA_STABILNO = 0;
+constexpr uint8_t BROJ_POZICIJA_PLOCE = 64;
 constexpr uint16_t BROJ_MINUTA_CIKLUS = 720;
 constexpr uint32_t LEGACY_MIN_UNIX_TIMESTAMP = 1000000000UL;
 constexpr uint32_t EEPROM_DIJAGNOSTICKI_POTPIS = 0x12345678UL;
@@ -159,6 +161,13 @@ void odradiBootRecovery() {
       jedinstvenoStanje.hand_start_ms = 0;
       UnifiedMotionStateStore::spremiAkoPromjena(jedinstvenoStanje);
       posaljiPCLog(F("Power Recovery: Dovrsen prekinuti impuls kazaljki kao jedan korak"));
+    }
+    if (jedinstvenoStanje.plate_phase != PowerRecoveryLayout::PLATE_FAZA_STABILNO) {
+      jedinstvenoStanje.plate_position =
+        static_cast<uint8_t>((jedinstvenoStanje.plate_position + 1) % PowerRecoveryLayout::BROJ_POZICIJA_PLOCE);
+      jedinstvenoStanje.plate_phase = PowerRecoveryLayout::PLATE_FAZA_STABILNO;
+      UnifiedMotionStateStore::spremiAkoPromjena(jedinstvenoStanje);
+      posaljiPCLog(F("Power Recovery: Dovrsen prekinuti korak ploce kao jedan korak"));
     }
     posaljiPCLog(F("Power Recovery: Zadrzavam novije jedinstveno stanje kretanja"));
   } else {

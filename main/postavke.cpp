@@ -195,7 +195,11 @@ static int normalizirajMinutuPloceNaBlok(int minute) {
 }
 
 static uint8_t ogranicenoTrajanjeCavla(uint8_t trajanjeMin) {
-  return constrain(trajanjeMin, 1, 4);
+  return (trajanjeMin <= 2) ? 2 : 3;
+}
+
+static unsigned int ogranicenoTrajanjeImpulsaCekicaMs(unsigned int trajanjeMs) {
+  return constrain(trajanjeMs, 50U, 150U);
 }
 
 static uint8_t ograniceniBrojZvona(uint8_t brojZvona) {
@@ -557,11 +561,7 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
       }
     }
   }
-  if (spremnik.trajanjeImpulsaCekicaMs < 50) {
-    spremnik.trajanjeImpulsaCekicaMs = 150;
-    trebaSpremiti = true;
-  }
-  if (spremnik.trajanjeImpulsaCekicaMs > 150) {
+  if (spremnik.trajanjeImpulsaCekicaMs < 50 || spremnik.trajanjeImpulsaCekicaMs > 150) {
     spremnik.trajanjeImpulsaCekicaMs = 150;
     trebaSpremiti = true;
   }
@@ -569,15 +569,15 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
     spremnik.pauzaIzmeduUdaraca = 400;
     trebaSpremiti = true;
   }
-  if (spremnik.trajanjeZvonjenjaRadniMin < 1 || spremnik.trajanjeZvonjenjaRadniMin > 4) {
+  if (spremnik.trajanjeZvonjenjaRadniMin != 2 && spremnik.trajanjeZvonjenjaRadniMin != 3) {
     spremnik.trajanjeZvonjenjaRadniMin = 2;
     trebaSpremiti = true;
   }
-  if (spremnik.trajanjeZvonjenjaNedjeljaMin < 1 || spremnik.trajanjeZvonjenjaNedjeljaMin > 4) {
+  if (spremnik.trajanjeZvonjenjaNedjeljaMin != 2 && spremnik.trajanjeZvonjenjaNedjeljaMin != 3) {
     spremnik.trajanjeZvonjenjaNedjeljaMin = 3;
     trebaSpremiti = true;
   }
-  if (spremnik.trajanjeSlavljenjaMin < 1 || spremnik.trajanjeSlavljenjaMin > 4) {
+  if (spremnik.trajanjeSlavljenjaMin != 2 && spremnik.trajanjeSlavljenjaMin != 3) {
     spremnik.trajanjeSlavljenjaMin = 2;
     trebaSpremiti = true;
   }
@@ -998,6 +998,8 @@ uint8_t dohvatiCavaoSlavljenja() {
 }
 
 uint8_t dohvatiCavaoMrtvackog() {
+  // Mrtvacko zvono je namjerno odvojeno od okretne ploce i cavala.
+  // Polje ostaje samo radi kompatibilnosti spremljenih postavki toranjskog sata.
   return 0;
 }
 
@@ -1049,11 +1051,32 @@ void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo) {
 }
 
 unsigned int dohvatiTrajanjeImpulsaCekica() {
-  return postavke.trajanjeImpulsaCekicaMs;
+  return ogranicenoTrajanjeImpulsaCekicaMs(postavke.trajanjeImpulsaCekicaMs);
 }
 
 unsigned int dohvatiPauzuIzmeduUdaraca() {
   return postavke.pauzaIzmeduUdaraca;
+}
+
+void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs) {
+  const unsigned int novoTrajanjeMs = ogranicenoTrajanjeImpulsaCekicaMs(trajanjeMs);
+  if (postavke.trajanjeImpulsaCekicaMs == novoTrajanjeMs) {
+    return;
+  }
+
+  postavke.trajanjeImpulsaCekicaMs = novoTrajanjeMs;
+
+  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
+  ucitajKompatibilanSpremnik(spremnik);
+  upisiRadnePostavkeUSpremnik(spremnik);
+  spremiSpremnikPostavki(spremnik);
+
+  char log[64];
+  snprintf(log,
+           sizeof(log),
+           "Postavke: trajanje impulsa cekica postavljeno na %u ms",
+           static_cast<unsigned>(postavke.trajanjeImpulsaCekicaMs));
+  posaljiPCLog(log);
 }
 
 unsigned long dohvatiTrajanjeZvonjenjaRadniMs() {

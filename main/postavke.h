@@ -30,6 +30,7 @@ void postaviTihiPeriodSatnihOtkucaja(int satOd, int satDo);
 // Trajanja raznih zvona i akcija (ms)
 unsigned int dohvatiTrajanjeImpulsaCekica();
 unsigned int dohvatiPauzuIzmeduUdaraca();
+void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs);
 unsigned long dohvatiTrajanjeZvonjenjaRadniMs();
 unsigned long dohvatiTrajanjeZvonjenjaNedjeljaMs();
 unsigned long dohvatiTrajanjeSlavljenjaMs();

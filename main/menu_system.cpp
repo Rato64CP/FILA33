@@ -114,11 +114,13 @@ static const char* const stavkeMreze[] PROGMEM = {
   TEKST_MREZA_POVRATAK
 };
 
-static const int BROJ_STAVKI_SUSTAVA = 2;
+static const int BROJ_STAVKI_SUSTAVA = 3;
 static const char TEKST_SUSTAV_LCD[] PROGMEM = "LCD svjetlo";
+static const char TEKST_SUSTAV_CEKIC[] PROGMEM = "Impuls cekica";
 static const char TEKST_SUSTAV_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeSustava[] PROGMEM = {
   TEKST_SUSTAV_LCD,
+  TEKST_SUSTAV_CEKIC,
   TEKST_SUSTAV_POVRATAK
 };
 
@@ -211,6 +213,13 @@ static uint8_t cavliRadniUredjivanje[4] = {1, 2, 0, 0};
 static uint8_t cavliNedjeljaUredjivanje[4] = {3, 4, 0, 0};
 static int faza_postavki_cavala = 0;
 
+static int prebaciTrajanjeDvaIliTriMinute(int trenutno, int smjer) {
+  if (smjer >= 0) {
+    return (trenutno == 2) ? 3 : 2;
+  }
+  return (trenutno == 3) ? 2 : 3;
+}
+
 static const int BROJ_STRANA_SUNCE = 9;
 static const int SUNCE_STRANA_JUTRO_ON = 0;
 static const int SUNCE_STRANA_JUTRO_ZVONO = 1;
@@ -235,6 +244,16 @@ static bool sinkUredjivanjeAktivno = false;
 static int sinkKursor = 0;
 static bool dcfOmogucenUredjivanje = true;
 static char ntpServerUredjivanje[40] = "";
+
+static unsigned int prilagodiTrajanjeImpulsaCekicaZaMeni(unsigned int trenutnoMs, int deltaKorak) {
+  int novoMs = static_cast<int>(trenutnoMs) + (deltaKorak * 10);
+  if (novoMs > 150) {
+    novoMs = 50;
+  } else if (novoMs < 50) {
+    novoMs = 150;
+  }
+  return static_cast<unsigned int>(novoMs);
+}
 
 // ==================== I2C ADDRESS DETECTION ====================
 
@@ -544,6 +563,11 @@ static void prikaziSustavMenu() {
   if (odabraniIndex == 0) {
     snprintf(redak2, sizeof(redak2), "> LCD: %s",
              jeLCDPozadinskoOsvjetljenjeUkljuceno() ? "ON" : "OFF");
+  } else if (odabraniIndex == 1) {
+    snprintf(redak2,
+             sizeof(redak2),
+             "> Cekic:%3ums",
+             static_cast<unsigned>(dohvatiTrajanjeImpulsaCekica()));
   } else {
     kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("> Povratak"));
   }
@@ -709,13 +733,13 @@ static void prikaziPodesavanjeCavala() {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Odgoda slavl"));
     snprintf(redak2, sizeof(redak2), "%d min [SEL]", odgodaSlavljenjaMin);
   } else if (faza_postavki_cavala == 8) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono RD 1-4m"));
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono RD 2-3m"));
     snprintf(redak2, sizeof(redak2), "RD:%d min [SEL]", trajanjeZvonaRdMin);
   } else if (faza_postavki_cavala == 9) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono NED 1-4"));
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Zvono NED 2-3"));
     snprintf(redak2, sizeof(redak2), "NED:%d min [SEL]", trajanjeZvonaNedMin);
   } else if (faza_postavki_cavala == 10) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Slavljenje 1-4"));
+    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Slavljenje 2-3"));
     snprintf(redak2, sizeof(redak2), "SL:%d min [SEL]", trajanjeSlavljenjaMin);
   } else {
     kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Spremi cavle"));
@@ -1234,9 +1258,24 @@ static void obradiKlucSustav(KeyEvent event) {
         const bool novoStanje = !jeLCDPozadinskoOsvjetljenjeUkljuceno();
         postaviLCDPozadinskoOsvjetljenje(novoStanje);
         primijeniLCDPozadinskoOsvjetljenje(novoStanje);
+      } else if (odabraniIndex == 1) {
+        postaviTrajanjeImpulsaCekica(
+            prilagodiTrajanjeImpulsaCekicaZaMeni(dohvatiTrajanjeImpulsaCekica(), 1));
       } else {
         odabraniIndex = INDEX_POSTAVKE_SUSTAV;
         trenutnoStanje = MENU_STATE_SETTINGS;
+      }
+      break;
+    case KEY_LEFT:
+      if (odabraniIndex == 1) {
+        postaviTrajanjeImpulsaCekica(
+            prilagodiTrajanjeImpulsaCekicaZaMeni(dohvatiTrajanjeImpulsaCekica(), -1));
+      }
+      break;
+    case KEY_RIGHT:
+      if (odabraniIndex == 1) {
+        postaviTrajanjeImpulsaCekica(
+            prilagodiTrajanjeImpulsaCekicaZaMeni(dohvatiTrajanjeImpulsaCekica(), 1));
       }
       break;
     case KEY_BACK:
@@ -1292,11 +1331,11 @@ static void obradiKlucPostavkeCavala(KeyEvent event) {
       } else if (faza_postavki_cavala == 7) {
         odgodaSlavljenjaMin = (odgodaSlavljenjaMin + 1) % 11;
       } else if (faza_postavki_cavala == 8) {
-        trajanjeZvonaRdMin = (trajanjeZvonaRdMin % 4) + 1;
+        trajanjeZvonaRdMin = prebaciTrajanjeDvaIliTriMinute(trajanjeZvonaRdMin, 1);
       } else if (faza_postavki_cavala == 9) {
-        trajanjeZvonaNedMin = (trajanjeZvonaNedMin % 4) + 1;
+        trajanjeZvonaNedMin = prebaciTrajanjeDvaIliTriMinute(trajanjeZvonaNedMin, 1);
       } else if (faza_postavki_cavala == 10) {
-        trajanjeSlavljenjaMin = (trajanjeSlavljenjaMin % 4) + 1;
+        trajanjeSlavljenjaMin = prebaciTrajanjeDvaIliTriMinute(trajanjeSlavljenjaMin, 1);
       }
       sanitizirajRasporedCavalaUredjivanje();
       break;
@@ -1308,11 +1347,11 @@ static void obradiKlucPostavkeCavala(KeyEvent event) {
       } else if (faza_postavki_cavala == 7) {
         odgodaSlavljenjaMin = (odgodaSlavljenjaMin + 10) % 11;
       } else if (faza_postavki_cavala == 8) {
-        trajanjeZvonaRdMin = (trajanjeZvonaRdMin - 2 + 4) % 4 + 1;
+        trajanjeZvonaRdMin = prebaciTrajanjeDvaIliTriMinute(trajanjeZvonaRdMin, -1);
       } else if (faza_postavki_cavala == 9) {
-        trajanjeZvonaNedMin = (trajanjeZvonaNedMin - 2 + 4) % 4 + 1;
+        trajanjeZvonaNedMin = prebaciTrajanjeDvaIliTriMinute(trajanjeZvonaNedMin, -1);
       } else if (faza_postavki_cavala == 10) {
-        trajanjeSlavljenjaMin = (trajanjeSlavljenjaMin - 2 + 4) % 4 + 1;
+        trajanjeSlavljenjaMin = prebaciTrajanjeDvaIliTriMinute(trajanjeSlavljenjaMin, -1);
       }
       sanitizirajRasporedCavalaUredjivanje();
       break;

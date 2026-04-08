@@ -22,15 +22,13 @@ const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;  // 2 s izmedu satnih udara
 const unsigned long SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS = 150UL;
 
 // Slavljenje mod 1: tocan uzorak 1-2-2 s definiranim pauzama
-const unsigned long SLAVLJENJE_TRAJANJE_UDARCA_MS = 150UL;
 const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC1_MS = 300UL;
 const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS = 150UL;
 
 // Slavljenje mod 2: neprekinuti slijed 1-2-1-2 s istim impulsima i pauzama
 const unsigned long SLAVLJENJE_PAUZA_MOD2_MS = 150UL;
 
-// Mrtvacko: oba cekica 150 ms, zatim 10 s pauza
-const unsigned long MRTVACKO_TRAJANJE_UDARCA_MS = 150UL;
+// Mrtvacko: oba cekica s konfiguriranim impulsom, zatim 10 s pauza
 const unsigned long MRTVACKO_PAUZA_MS = 10000UL;
 
 // ==================== STATE MACHINE CONSTANTS ====================
@@ -138,6 +136,10 @@ static unsigned long normalizirajSigurnoTrajanjeCekicaMs(unsigned long trazenoTr
     trazenoTrajanjeMs = SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS;
   }
   return trazenoTrajanjeMs;
+}
+
+static unsigned long dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs() {
+  return normalizirajSigurnoTrajanjeCekicaMs(dohvatiTrajanjeImpulsaCekica());
 }
 
 static bool jeCekicSigurnosnoAktivan(int pin) {
@@ -339,7 +341,7 @@ void otkucajSate(int broj) {
       OTKUCAVANJE_CEKIC1,
       broj,
       PIN_CEKIC_MUSKI,
-      TRAJANJE_IMPULSA_CEKICA_DEFAULT,
+      dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
       SATNO_OTKUCAJ_PAUZA_MS,
       F("cekic 1 - puni sat"));
 }
@@ -349,7 +351,7 @@ void otkucajPolasata() {
       OTKUCAVANJE_CEKIC2,
       1,
       PIN_CEKIC_ZENSKI,
-      dohvatiTrajanjeImpulsaCekica(),
+      dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
       dohvatiPauzuIzmeduUdaraca(),
       F("cekic 2 - pola sata"));
 }
@@ -378,7 +380,7 @@ void zapocniSlavljenje() {
   slavljenje.vrijeme_koraka_ms = sadaMs;
   slavljenje.cekic_aktivan = true;
   slavljenje.aktivni_pin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
-  aktivirajCekic_Internal(slavljenje.aktivni_pin, SLAVLJENJE_TRAJANJE_UDARCA_MS);
+  aktivirajCekic_Internal(slavljenje.aktivni_pin, dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs());
 
   String log = F("Slavljenje: pokrenuto (mod ");
   log += modSlavljenja;
@@ -412,7 +414,7 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
       dohvatiPauzuSlavljenjaNakonKoraka(slavljenje.aktivni_mod, slavljenje.trenutni_korak);
 
   if (slavljenje.cekic_aktivan) {
-    if (proteklo >= SLAVLJENJE_TRAJANJE_UDARCA_MS) {
+    if (proteklo >= dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs()) {
       deaktivirajCekic_Internal(slavljenje.aktivni_pin);
       slavljenje.cekic_aktivan = false;
       slavljenje.aktivni_pin = -1;
@@ -426,7 +428,7 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
     slavljenje.trenutni_korak = (slavljenje.trenutni_korak + 1) % brojKoraka;
     const int sljedeci_pin =
         dohvatiPinSlavljenjaZaKorak(slavljenje.aktivni_mod, slavljenje.trenutni_korak);
-    aktivirajCekic_Internal(sljedeci_pin, SLAVLJENJE_TRAJANJE_UDARCA_MS);
+    aktivirajCekic_Internal(sljedeci_pin, dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs());
     slavljenje.aktivni_pin = sljedeci_pin;
     slavljenje.cekic_aktivan = true;
     slavljenje.vrijeme_koraka_ms = sadaMs;
@@ -435,10 +437,11 @@ static void azurirajSlavljenje(unsigned long sadaMs) {
 
 // ==================== FUNERAL MODE ====================
 
-// Pokretanje mrtvackog: oba cekica 150 ms, zatim 10 s pauza
+// Pokretanje mrtvackog: oba cekica s konfiguriranim impulsom, zatim 10 s pauza
 void zapocniMrtvacko() {
   unsigned long sadaMs = millis();
   const uint8_t trajanjeMin = dohvatiMrtvackoThumbwheelVrijednost();
+  const unsigned long trajanjeImpulsaMs = dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs();
 
   if (!jeOperacijaDozvoljena()) {
     posaljiPCLog(F("Mrtvacko: ne moze se pokrenuti (inercija ili blok)"));
@@ -459,10 +462,12 @@ void zapocniMrtvacko() {
   mrtvacko.auto_stop_nakon_ms = mrtvacko.auto_stop_ukljucen
       ? static_cast<unsigned long>(trajanjeMin) * 60000UL
       : 0UL;
-  aktivirajCekic_Internal(PIN_CEKIC_MUSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
-  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
+  aktivirajCekic_Internal(PIN_CEKIC_MUSKI, trajanjeImpulsaMs);
+  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, trajanjeImpulsaMs);
 
-  String log = F("Mrtvacko: pokrenuto (oba cekica 150ms / pauza 10s");
+  String log = F("Mrtvacko: pokrenuto (oba cekica ");
+  log += String(trajanjeImpulsaMs);
+  log += F("ms / pauza 10s");
   if (mrtvacko.auto_stop_ukljucen) {
     log += F(", auto-stop nakon ");
     log += String(trajanjeMin);
@@ -511,7 +516,7 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
   const unsigned long proteklo = sadaMs - mrtvacko.vrijeme_faze_ms;
 
   if (mrtvacko.cekici_aktivni) {
-    if (proteklo >= MRTVACKO_TRAJANJE_UDARCA_MS) {
+    if (proteklo >= dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs()) {
       deaktivirajObaCekica_Internal();
       mrtvacko.cekici_aktivni = false;
       mrtvacko.vrijeme_faze_ms = sadaMs;
@@ -520,8 +525,9 @@ static void azurirajMrtvacko(unsigned long sadaMs) {
   }
 
   if (proteklo >= MRTVACKO_PAUZA_MS) {
-    aktivirajCekic_Internal(PIN_CEKIC_MUSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
-    aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, MRTVACKO_TRAJANJE_UDARCA_MS);
+    const unsigned long trajanjeImpulsaMs = dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs();
+    aktivirajCekic_Internal(PIN_CEKIC_MUSKI, trajanjeImpulsaMs);
+    aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, trajanjeImpulsaMs);
     mrtvacko.cekici_aktivni = true;
     mrtvacko.vrijeme_faze_ms = sadaMs;
   }
@@ -670,7 +676,7 @@ void upravljajOtkucavanjem() {
                   OTKUCAVANJE_CEKIC1,
                   4,
                   PIN_CEKIC_MUSKI,
-                  TRAJANJE_IMPULSA_CEKICA_DEFAULT,
+                  dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
                   SATNO_OTKUCAJ_PAUZA_MS,
                   F("opcija 2, puni sat"));
             } else if (sada.minute() == 15) {
@@ -678,7 +684,7 @@ void upravljajOtkucavanjem() {
                   OTKUCAVANJE_CEKIC2,
                   1,
                   PIN_CEKIC_ZENSKI,
-                  dohvatiTrajanjeImpulsaCekica(),
+                  dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
                   SATNO_OTKUCAJ_PAUZA_MS,
                   F("opcija 2, HH:15"));
             } else if (sada.minute() == 30) {
@@ -686,7 +692,7 @@ void upravljajOtkucavanjem() {
                   OTKUCAVANJE_CEKIC1,
                   2,
                   PIN_CEKIC_MUSKI,
-                  TRAJANJE_IMPULSA_CEKICA_DEFAULT,
+                  dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
                   SATNO_OTKUCAJ_PAUZA_MS,
                   F("opcija 2, HH:30"));
             } else {
@@ -694,7 +700,7 @@ void upravljajOtkucavanjem() {
                   OTKUCAVANJE_CEKIC2,
                   3,
                   PIN_CEKIC_ZENSKI,
-                  dohvatiTrajanjeImpulsaCekica(),
+                  dohvatiKonfiguriranoTrajanjeImpulsaCekicaMs(),
                   SATNO_OTKUCAJ_PAUZA_MS,
                   F("opcija 2, HH:45"));
             }
