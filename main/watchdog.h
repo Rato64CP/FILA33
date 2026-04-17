@@ -1,4 +1,4 @@
-// watchdog.h – Watchdog monitoring za 24/7 pouzdanost
+// watchdog.h - Watchdog nadzor za 24/7 pouzdanost
 #pragma once
 
 #include <stdint.h>

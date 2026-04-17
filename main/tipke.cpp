@@ -1,4 +1,4 @@
-// tipke.cpp – Upravljanje tipkama i menijom za postavke
+// tipke.cpp - Upravljanje matricnom tipkovnicom i menijem toranjskog sata
 #include <Arduino.h>
 #include "tipke.h"
 #include "lcd_display.h"
@@ -6,83 +6,244 @@
 #include "debouncing.h"
 #include "menu_system.h"
 #include "podesavanja_piny.h"
+#include "zvonjenje.h"
+#include "slavljenje_mrtvacko.h"
 
-// ==================== KEYPAD CONFIGURATION ====================
+namespace {
 
-// Key state tracking
-static struct {
-  uint8_t pin;
-  KeyEvent event;
-} keypadMapping[6] = {
-  {PIN_KEY_UP, KEY_UP},
-  {PIN_KEY_DOWN, KEY_DOWN},
-  {PIN_KEY_LEFT, KEY_LEFT},
-  {PIN_KEY_RIGHT, KEY_RIGHT},
-  {PIN_KEY_SELECT, KEY_SELECT},
-  {PIN_KEY_BACK, KEY_BACK}
+static const uint8_t BROJ_REDAKA = 4;
+static const uint8_t BROJ_STUPACA = 5;
+static const uint8_t BROJ_LOGICKIH_TIPKI = 16;
+static const uint8_t DEBOUNCE_TIPKE_MS = 30;
+static const unsigned long DUGI_PRITISAK_TIPKE_MS = 1200UL;
+
+static const uint8_t PINOVI_REDAKA[BROJ_REDAKA] = {
+  PIN_KEYPAD_ROW_0,
+  PIN_KEYPAD_ROW_1,
+  PIN_KEYPAD_ROW_2,
+  PIN_KEYPAD_ROW_3
 };
 
-// ==================== KEYPAD INITIALIZATION ====================
+static const uint8_t PINOVI_STUPACA[BROJ_STUPACA] = {
+  PIN_KEYPAD_COL_0,
+  PIN_KEYPAD_COL_1,
+  PIN_KEYPAD_COL_2,
+  PIN_KEYPAD_COL_3,
+  PIN_KEYPAD_COL_4
+};
 
-void inicijalizirajTipke() {
-  // Initialize debouncing system
-  inicijalizirajDebouncing();
-  
-  // Configure keypad pins as inputs with pull-ups
-  for (int i = 0; i < 6; i++) {
-    pinMode(keypadMapping[i].pin, INPUT_PULLUP);
+struct MapiranjeTipke {
+  uint8_t redak;
+  uint8_t stupac;
+  KeyEvent event;
+  const char* naziv;
+};
+
+struct DebounceMatrice {
+  bool zadnjeSirovoPritisnuto;
+  bool stabilnoPritisnuto;
+  bool odgodenaObradaNaOtpustanju;
+  bool dugoZadrzavanjeObradeno;
+  unsigned long zadnjaPromjenaMs;
+  unsigned long vrijemePritiskaMs;
+};
+
+// Raspored je mapiran prema stvarnom ocitanju tipkovnice na toranjskom satu.
+static const MapiranjeTipke MAPIRANJA_TIPKI[BROJ_LOGICKIH_TIPKI] = {
+  {3, 3, KEY_UP, "UP"},
+  {3, 2, KEY_DOWN, "DOWN"},
+  {0, 0, KEY_LEFT, "LEFT"},
+  {2, 0, KEY_RIGHT, "RIGHT"},
+  {3, 0, KEY_SELECT, "ENT"},
+  {3, 1, KEY_BACK, "ESC"},
+  {1, 0, KEY_DIGIT_0, "0"},
+  {0, 3, KEY_DIGIT_1, "1"},
+  {1, 3, KEY_DIGIT_2, "2"},
+  {2, 3, KEY_DIGIT_3, "3"},
+  {0, 2, KEY_DIGIT_4, "4"},
+  {1, 2, KEY_DIGIT_5, "5"},
+  {2, 2, KEY_DIGIT_6, "6"},
+  {0, 1, KEY_DIGIT_7, "7"},
+  {1, 1, KEY_DIGIT_8, "8"},
+  {2, 1, KEY_DIGIT_9, "9"}
+};
+
+static DebounceMatrice debounceTipki[BROJ_LOGICKIH_TIPKI];
+
+static void postaviRetkeUMirnoStanje() {
+  for (uint8_t i = 0; i < BROJ_REDAKA; ++i) {
+    digitalWrite(PINOVI_REDAKA[i], LOW);
+    pinMode(PINOVI_REDAKA[i], INPUT);
   }
-  
-  posaljiPCLog(F("Tipke: inicijalizirane sa 6 kljuceva"));
 }
 
-// ==================== KEY SCANNING ====================
+static void inicijalizirajMatricnePinove() {
+  postaviRetkeUMirnoStanje();
+  for (uint8_t i = 0; i < BROJ_STUPACA; ++i) {
+    pinMode(PINOVI_STUPACA[i], INPUT_PULLUP);
+  }
+}
 
-void provjeriTipke() {
-  // Scan all 6 keys with debouncing
-  for (int i = 0; i < 6; i++) {
-    uint8_t pin = keypadMapping[i].pin;
-    KeyEvent event = keypadMapping[i].event;
-    
-    SwitchState novoStanje;
-    bool promjena = obradiDebouncedInput(pin, 30, &novoStanje);
-    
-    if (promjena && novoStanje == SWITCH_PRESSED) {
-      if (event == KEY_SELECT && jeUpozorenjeRtcBaterijeAktivno()) {
-        potvrdiUpozorenjeRtcBaterije();
-        posaljiPCLog(F("RTC: upozorenje za bateriju potvrdjeno tipkom SELECT"));
-        return;
-      }
+static void inicijalizirajDebounceMatrice() {
+  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
+    debounceTipki[i].zadnjeSirovoPritisnuto = false;
+    debounceTipki[i].stabilnoPritisnuto = false;
+    debounceTipki[i].odgodenaObradaNaOtpustanju = false;
+    debounceTipki[i].dugoZadrzavanjeObradeno = false;
+    debounceTipki[i].zadnjaPromjenaMs = 0;
+    debounceTipki[i].vrijemePritiskaMs = 0;
+  }
+}
 
-      // Key was pressed
-      String log = F("Tipka: ");
-      switch (event) {
-        case KEY_UP:
-          log += F("UP");
-          break;
-        case KEY_DOWN:
-          log += F("DOWN");
-          break;
-        case KEY_LEFT:
-          log += F("LEFT");
-          break;
-        case KEY_RIGHT:
-          log += F("RIGHT");
-          break;
-        case KEY_SELECT:
-          log += F("SELECT");
-          break;
-        case KEY_BACK:
-          log += F("BACK");
-          break;
-        default:
-          log += F("UNKNOWN");
-          break;
-      }
-      posaljiPCLog(log);
-      
-      // Send key event to menu system
-      obradiKluc(event);
+static void ocitajMatricu(bool stanja[BROJ_REDAKA][BROJ_STUPACA]) {
+  for (uint8_t redak = 0; redak < BROJ_REDAKA; ++redak) {
+    postaviRetkeUMirnoStanje();
+    pinMode(PINOVI_REDAKA[redak], OUTPUT);
+    digitalWrite(PINOVI_REDAKA[redak], LOW);
+    delayMicroseconds(5);
+
+    for (uint8_t stupac = 0; stupac < BROJ_STUPACA; ++stupac) {
+      stanja[redak][stupac] = (digitalRead(PINOVI_STUPACA[stupac]) == LOW);
     }
   }
+
+  postaviRetkeUMirnoStanje();
+}
+
+static void obradiPritisakTipke(const MapiranjeTipke& tipka) {
+  if (tipka.event == KEY_SELECT && jeUpozorenjeRtcBaterijeAktivno()) {
+    potvrdiUpozorenjeRtcBaterije();
+    posaljiPCLog(F("RTC: upozorenje za bateriju potvrdjeno tipkom SELECT"));
+    return;
+  }
+
+  String log = F("Tipka matrice: ");
+  log += tipka.naziv;
+  posaljiPCLog(log);
+  obradiKluc(tipka.event);
+}
+
+static bool jeTipkaZaDugoZadrzavanje(const MapiranjeTipke& tipka) {
+  return tipka.event == KEY_DIGIT_1 || tipka.event == KEY_DIGIT_2;
+}
+
+static bool trebaOdgoditiKratkiPritisak(const MapiranjeTipke& tipka) {
+  return jeTipkaZaDugoZadrzavanje(tipka) && dohvatiMenuState() == MENU_STATE_DISPLAY_TIME;
+}
+
+static void obradiDugoZadrzavanjeTipke(const MapiranjeTipke& tipka) {
+  if (tipka.event == KEY_DIGIT_1) {
+    const bool biloAktivno = jeSlavljenjeUTijeku();
+    if (biloAktivno) {
+      zaustaviSlavljenje();
+    } else {
+      zapocniSlavljenje();
+    }
+
+    const bool sadaAktivno = jeSlavljenjeUTijeku();
+    if (sadaAktivno != biloAktivno) {
+      posaljiPCLog(sadaAktivno
+                       ? F("Tipka matrice 1 (dugo): slavljenje pokrenuto")
+                       : F("Tipka matrice 1 (dugo): slavljenje zaustavljeno"));
+    } else {
+      posaljiPCLog(F("Tipka matrice 1 (dugo): slavljenje nije promijenjeno"));
+    }
+    return;
+  }
+
+  if (tipka.event == KEY_DIGIT_2) {
+    const bool biloAktivno = jeMrtvackoUTijeku();
+    if (biloAktivno) {
+      zaustaviMrtvacko();
+    } else {
+      zapocniMrtvacko();
+    }
+
+    const bool sadaAktivno = jeMrtvackoUTijeku();
+    if (sadaAktivno != biloAktivno) {
+      posaljiPCLog(sadaAktivno
+                       ? F("Tipka matrice 2 (dugo): mrtvacko pokrenuto")
+                       : F("Tipka matrice 2 (dugo): mrtvacko zaustavljeno"));
+    } else {
+      posaljiPCLog(F("Tipka matrice 2 (dugo): mrtvacko nije promijenjeno"));
+    }
+  }
+}
+
+static void obradiLogickuTipku(uint8_t indeksTipke, bool sirovoPritisnuto, unsigned long sadaMs) {
+  DebounceMatrice& stanje = debounceTipki[indeksTipke];
+
+  if (sirovoPritisnuto != stanje.zadnjeSirovoPritisnuto) {
+    stanje.zadnjeSirovoPritisnuto = sirovoPritisnuto;
+    stanje.zadnjaPromjenaMs = sadaMs;
+  }
+
+  if ((sadaMs - stanje.zadnjaPromjenaMs) < DEBOUNCE_TIPKE_MS) {
+    return;
+  }
+
+  if (sirovoPritisnuto == stanje.stabilnoPritisnuto) {
+    return;
+  }
+
+  stanje.stabilnoPritisnuto = sirovoPritisnuto;
+  if (stanje.stabilnoPritisnuto) {
+    stanje.vrijemePritiskaMs = sadaMs;
+    stanje.dugoZadrzavanjeObradeno = false;
+    stanje.odgodenaObradaNaOtpustanju = trebaOdgoditiKratkiPritisak(MAPIRANJA_TIPKI[indeksTipke]);
+
+    if (!stanje.odgodenaObradaNaOtpustanju) {
+      obradiPritisakTipke(MAPIRANJA_TIPKI[indeksTipke]);
+    }
+  } else {
+    if (stanje.odgodenaObradaNaOtpustanju && !stanje.dugoZadrzavanjeObradeno) {
+      obradiPritisakTipke(MAPIRANJA_TIPKI[indeksTipke]);
+    }
+
+    stanje.odgodenaObradaNaOtpustanju = false;
+    stanje.dugoZadrzavanjeObradeno = false;
+    stanje.vrijemePritiskaMs = 0;
+  }
+}
+
+static void provjeriDugaZadrzavanjaTipki(unsigned long sadaMs) {
+  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
+    DebounceMatrice& stanje = debounceTipki[i];
+    const MapiranjeTipke& tipka = MAPIRANJA_TIPKI[i];
+
+    if (!stanje.stabilnoPritisnuto || !stanje.odgodenaObradaNaOtpustanju ||
+        stanje.dugoZadrzavanjeObradeno || !jeTipkaZaDugoZadrzavanje(tipka)) {
+      continue;
+    }
+
+    if ((sadaMs - stanje.vrijemePritiskaMs) < DUGI_PRITISAK_TIPKE_MS) {
+      continue;
+    }
+
+    stanje.dugoZadrzavanjeObradeno = true;
+    obradiDugoZadrzavanjeTipke(tipka);
+  }
+}
+
+}  // namespace
+
+void inicijalizirajTipke() {
+  inicijalizirajDebouncing();
+  inicijalizirajMatricnePinove();
+  inicijalizirajDebounceMatrice();
+
+  posaljiPCLog(F("Tipke: inicijalizirana 4x5 matricna tipkovnica (strelice, Ent, Esc, 0-9)"));
+}
+
+void provjeriTipke() {
+  bool stanjaMatrice[BROJ_REDAKA][BROJ_STUPACA];
+  ocitajMatricu(stanjaMatrice);
+
+  const unsigned long sadaMs = millis();
+  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
+    const MapiranjeTipke& tipka = MAPIRANJA_TIPKI[i];
+    obradiLogickuTipku(i, stanjaMatrice[tipka.redak][tipka.stupac], sadaMs);
+  }
+
+  provjeriDugaZadrzavanjaTipki(sadaMs);
 }

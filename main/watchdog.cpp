@@ -1,4 +1,4 @@
-// watchdog.cpp – Watchdog monitoring za 24/7 pouzdanost
+// watchdog.cpp - Watchdog nadzor za 24/7 pouzdanost
 #include <Arduino.h>
 #include <avr/wdt.h>
 #include "watchdog.h"

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <RTClib.h>
 #include "zvonjenje.h"
+#include "slavljenje_mrtvacko.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "lcd_display.h"
@@ -75,7 +76,7 @@ static void prekiniPosebneNacineZbogZvona(int indeks) {
     return;
   }
 
-  String log = F("Bell");
+  String log = F("Zvono");
   log += (indeks + 1);
   log += F(": ima prioritet i prekida ");
   if (prekinutoSlavljenje && prekinutoMrtvacko) {
@@ -93,13 +94,13 @@ static void aktivirajBell_Relej(int indeks) {
     return;
   }
 
-  // BELL zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
+  // Zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
   prekiniPosebneNacineZbogZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
   inercija.inercija_aktivna = true;
   inercija.vrijeme_pocetka = millis();
 
-  String log = F("Bell");
+  String log = F("Zvono");
   log += (indeks + 1);
   log += F(": aktivirana, inercija (90s) poceta");
   posaljiPCLog(log);
@@ -112,7 +113,7 @@ static void deaktivirajBell_Relej(int indeks) {
   }
 
   digitalWrite(PINOVI_ZVONA[indeks], LOW);
-  String log = F("Bell");
+  String log = F("Zvono");
   log += (indeks + 1);
   log += F(": deaktivirana");
   posaljiPCLog(log);
@@ -250,7 +251,7 @@ void upravljajZvonom() {
 
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     if (obradiDebouncedInput(PINOVI_RUCNIH_SKLOPKI[i], 30, &novoStanje)) {
-      String log = F("Manual BELL");
+        String log = F("Rucno ZVONO");
       log += (i + 1);
       log += (novoStanje == SWITCH_PRESSED) ? F(" ON") : F(" OFF");
 
@@ -286,7 +287,7 @@ void upravljajZvonom() {
       const unsigned long proteklo = sadaMs - zvona.start_ms[i];
       if (proteklo >= zvona.duration_ms[i]) {
         iskljuciZvono(i + 1);
-        String log = F("Bell");
+        String log = F("Zvono");
         log += (i + 1);
         log += F(": trajanje isteklo");
         posaljiPCLog(log);

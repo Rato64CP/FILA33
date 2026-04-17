@@ -24,13 +24,3 @@ void deaktivirajZvonjenje(int zvono);
 
 // Provjera inercijske blokade
 bool jeLiInerciaAktivna();
-
-// Slavljenje (implementacija u otkucavanje.cpp)
-void zapocniSlavljenje();
-void zaustaviSlavljenje();
-bool jeSlavljenjeUTijeku();
-
-// Mrtvacko zvono (implementacija u otkucavanje.cpp)
-void zapocniMrtvacko();
-void zaustaviMrtvacko();
-bool jeMrtvackoUTijeku();

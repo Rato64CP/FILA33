@@ -1,4 +1,4 @@
-// pc_serial.cpp – PC serijska komunikacija za debugging
+// pc_serial.cpp - PC serijska komunikacija za dijagnostiku
 #include <Arduino.h>
 #include "pc_serial.h"
 

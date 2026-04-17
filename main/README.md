@@ -15,8 +15,8 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 ## 🧭 Podjela poslova Mega / ESP
 
 - `Mega 2560` vodi sve radne odluke toranjskog sata.
-- `ESP8266` je samo pomocni mrezni modul.
-- ESP donosi WiFi, NTP, setup WiFi i servisni API.
+- `ESP8266`, `ESP32` ili `Raspberry Pi` je samo pomocni mrezni sloj.
+- Vanjski mrezni sloj donosi WiFi, NTP, setup WiFi, Home Assistant integraciju i servisni API.
 - Postavke rada sata vise se ne uredjuju preko ESP weba.
 - Stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`.
 
@@ -24,7 +24,7 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 
 - `main.ino` - inicijalizacija i glavna petlja
 - `time_glob.*` - upravljanje izvorima vremena i sinkronizacijom
-- `esp_serial.*` - UART protokol prema ESP-u
+- `esp_serial.*` - UART protokol prema vanjskom mreznom mostu
 - `kazaljke_sata.*` - kretanje i sinkronizacija kazaljki
 - `okretna_ploca.*` - polozaj, koraci i faze ploce
 - `zvonjenje.*` - zvona i pripadna stanja
@@ -45,10 +45,11 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 
 ## 🔌 Serijska komunikacija s ESP-om
 
-- Mega koristi `Serial3`
+- Mega trenutno koristi `Serial3` za ugradeni `ESP8266` na Mega+WiFi R3 plocici
+- `Serial1` ostaje pripremljen za buduci vanjski `Raspberry Pi` most
 - aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
-- `ESP` vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
+- vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
 
 ## 💾 EEPROM i recovery
@@ -69,7 +70,7 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - DS3231 RTC i 24C32 EEPROM preko I2C
 - LCD 16x2 preko I2C
 - DCF77 prijemnik
-- lokalne tipke i servisni ulazi
+- 4x5 matricna tipkovnica, servisni ulazi i brojcani unos `HH:MM`
 
 ## ✅ Smjernice za razvoj
 

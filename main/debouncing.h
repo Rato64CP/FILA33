@@ -1,4 +1,4 @@
-// debouncing.h – Software debouncing for keypad inputs and relay feedback
+// debouncing.h - Softversko uklanjanje podrhtavanja za tipkovnicu i povrat releja
 #pragma once
 
 #include <stdint.h>

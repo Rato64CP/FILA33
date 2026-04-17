@@ -7,6 +7,7 @@
 namespace {
 constexpr uint8_t EEPROM_ADRESA = 0x57;           // Tipična adresa 24C32 na RTC pločici
 constexpr size_t VELICINA_STRANICE = 32;          // 24C32 zapisuje po 32 bajta
+constexpr size_t MAX_I2C_PODATAKA_PO_PAKETU = 30; // AVR Wire buffer: 32 bajta - 2 bajta adrese
 constexpr size_t UKUPNI_KAPACITET = 4096;         // 32 kbit = 4096 bajtova
 constexpr unsigned long CEKANJE_ZAPISA_MS = 5UL;  // Vrijeme interne pohrane nakon page write
 
@@ -93,6 +94,11 @@ bool zapisi(int adresa, const void* izvor, size_t duljina) {
 
     // prvo ograničimo blok na kraj stranice
     size_t blok = (preostalo < prostor) ? preostalo : prostor;
+
+    // Na AVR-u u jedan Wire paket moraju stati i 2 bajta EEPROM adrese.
+    if (blok > MAX_I2C_PODATAKA_PO_PAKETU) {
+      blok = MAX_I2C_PODATAKA_PO_PAKETU;
+    }
 
     // dodatno ograničenje da ne pređemo kraj EEPROM-a
     size_t preostaliKapacitet = UKUPNI_KAPACITET - static_cast<size_t>(adresa);

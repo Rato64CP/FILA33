@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <RTClib.h>
 #include <math.h>
+#include "otkucavanje.h"
 #include "postavke.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
@@ -14,6 +15,7 @@ constexpr float PI_F = 3.14159265f;
 constexpr float SUNCEV_ZENIT_RAD = 90.833f * (PI_F / 180.0f);
 constexpr int FIKSNO_PODNE_MINUTA = 12 * 60;
 constexpr uint8_t FIKSNO_PODNE_SEKUNDA = 30;
+constexpr unsigned long ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS = 1000UL;
 
 struct DnevniRasporedSuncevihDogadaja {
   bool valjano;
@@ -21,7 +23,17 @@ struct DnevniRasporedSuncevihDogadaja {
   int minute[SUNCEVI_DOGADAJ_BROJ];
 };
 
+struct ZakazanoSuncevoZvonjenje {
+  bool aktivno;
+  uint8_t dogadaj;
+  uint8_t zvono;
+  uint32_t datumKljuc;
+  unsigned long startMs;
+  unsigned long trajanjeMs;
+};
+
 static DnevniRasporedSuncevihDogadaja raspored = {false, 0, {-1, -1, -1}};
+static ZakazanoSuncevoZvonjenje zakazanoZvonjenje = {false, 0, 0, 0, 0, 0};
 static uint32_t zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
 static uint32_t zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
 static uint32_t zadnjiOkinutiDatum[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
@@ -187,6 +199,73 @@ static const __FlashStringHelper* nazivDogadaja(uint8_t dogadaj) {
   return F("vecer");
 }
 
+static bool vrijemeProslo(unsigned long ciljMs) {
+  return static_cast<long>(millis() - ciljMs) >= 0;
+}
+
+static bool jeMinutaKolizijeSOtkucavanjem(int minutaUDanu) {
+  const uint8_t modOtkucavanja = dohvatiModOtkucavanja();
+  if (modOtkucavanja == 0) {
+    return false;
+  }
+
+  const int minutaUSatu = minutaUDanu % 60;
+  if (modOtkucavanja == 2) {
+    return minutaUSatu == 0 || minutaUSatu == 15 || minutaUSatu == 30 || minutaUSatu == 45;
+  }
+
+  return minutaUSatu == 0 || minutaUSatu == 30;
+}
+
+static void zakaziSuncevoZvonjenje(uint8_t dogadaj,
+                                   uint8_t zvono,
+                                   uint32_t datumKljuc,
+                                   unsigned long trajanjeMs) {
+  zakazanoZvonjenje.aktivno = true;
+  zakazanoZvonjenje.dogadaj = dogadaj;
+  zakazanoZvonjenje.zvono = zvono;
+  zakazanoZvonjenje.datumKljuc = datumKljuc;
+  zakazanoZvonjenje.startMs = millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
+  zakazanoZvonjenje.trajanjeMs = trajanjeMs;
+
+  String log = F("Suncevo zvonjenje odgodeno do kraja otkucavanja: ");
+  log += nazivDogadaja(dogadaj);
+  log += F(" -> ZVONO");
+  log += zvono;
+  posaljiPCLog(log);
+}
+
+static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
+  if (!zakazanoZvonjenje.aktivno) {
+    return;
+  }
+
+  if (zakazanoZvonjenje.datumKljuc != napraviDatumKljuc(sada)) {
+    zakazanoZvonjenje.aktivno = false;
+    return;
+  }
+
+  if (!vrijemeProslo(zakazanoZvonjenje.startMs)) {
+    return;
+  }
+
+  if (jeOtkucavanjeUTijeku() || jeZvonoUTijeku() || jeLiInerciaAktivna()) {
+    zakazanoZvonjenje.startMs = millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
+    return;
+  }
+
+  aktivirajZvonjenjeNaTrajanje(zakazanoZvonjenje.zvono, zakazanoZvonjenje.trajanjeMs);
+
+  String log = F("Suncevo zvonjenje: ");
+  log += nazivDogadaja(zakazanoZvonjenje.dogadaj);
+  log += F(" -> ZVONO");
+  log += zakazanoZvonjenje.zvono;
+  log += F(" nakon odgode zbog otkucavanja");
+  posaljiPCLog(log);
+
+  zakazanoZvonjenje.aktivno = false;
+}
+
 static void osvjeziDnevniRaspored(const DateTime& sada) {
   raspored.valjano = true;
   raspored.datumKljuc = napraviDatumKljuc(sada);
@@ -261,19 +340,25 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
     return;
   }
 
-  if (jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
-    String log = F("Suncevo zvonjenje preskoceno (tihi sati): ");
+  if (!jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute())) {
+    String log = F("Suncevo zvonjenje preskoceno (izvan BAT raspona): ");
     log += nazivDogadaja(dogadaj);
     posaljiPCLog(log);
     return;
   }
 
   const uint8_t zvono = dohvatiZvonoZaSuncevDogadaj(dogadaj);
-  aktivirajZvonjenjeNaTrajanje(zvono, dohvatiTrajanjeSuncevogZvonjenja(sada));
+  const unsigned long trajanjeZvona = dohvatiTrajanjeSuncevogZvonjenja(sada);
+  if (jeMinutaKolizijeSOtkucavanjem(trazenaMinuta)) {
+    zakaziSuncevoZvonjenje(dogadaj, zvono, datumKljuc, trajanjeZvona);
+    return;
+  }
+
+  aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
 
   String log = F("Suncevo zvonjenje: ");
   log += nazivDogadaja(dogadaj);
-  log += F(" -> BELL");
+  log += F(" -> ZVONO");
   log += zvono;
   log += F(" u ");
   if (sada.hour() < 10) {
@@ -319,15 +404,22 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
     return;
   }
 
-  if (jeTihiPeriodAktivanZaSatneOtkucaje(sada.hour())) {
-    posaljiPCLog(F("Suncevo zvonjenje preskoceno (tihi sati): podne"));
+  if (!jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute())) {
+    posaljiPCLog(F("Suncevo zvonjenje preskoceno (izvan BAT raspona): podne"));
     return;
   }
 
   const uint8_t zvono = dohvatiZvonoZaSuncevDogadaj(SUNCEVI_DOGADAJ_PODNE);
-  aktivirajZvonjenjeNaTrajanje(zvono, dohvatiTrajanjeSuncevogZvonjenja(sada));
+  const unsigned long trajanjeZvona = dohvatiTrajanjeSuncevogZvonjenja(sada);
+  if (jeMinutaKolizijeSOtkucavanjem(FIKSNO_PODNE_MINUTA) || jeZvonoUTijeku() ||
+      jeLiInerciaAktivna()) {
+    zakaziSuncevoZvonjenje(SUNCEVI_DOGADAJ_PODNE, zvono, datumKljuc, trajanjeZvona);
+    return;
+  }
 
-  String log = F("Suncevo zvonjenje: podne -> BELL");
+  aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
+
+  String log = F("Suncevo zvonjenje: podne -> ZVONO");
   log += zvono;
   log += F(" u 12:00:30");
   posaljiPCLog(log);
@@ -338,6 +430,7 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
 void inicijalizirajSuncevuAutomatiku() {
   raspored.valjano = false;
   raspored.datumKljuc = 0;
+  zakazanoZvonjenje.aktivno = false;
   for (uint8_t i = 0; i < SUNCEVI_DOGADAJ_BROJ; ++i) {
     raspored.minute[i] = -1;
     zadnjiOkinutiDatum[i] = 0;
@@ -376,6 +469,7 @@ void upravljajSuncevomAutomatikom() {
   }
   zadnjiObradeniKljucSekunde = kljucSekunde;
 
+  obradiZakazanoSuncevoZvonjenje(sada);
   obradiFiksnoPodnevnoZvonjenje(sada);
 }
 

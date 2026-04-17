@@ -1,4 +1,4 @@
-// tipke.h – Upravljanje tipkama i postavkama
+// tipke.h - Upravljanje tipkama i postavkama
 #pragma once
 
 void inicijalizirajTipke();

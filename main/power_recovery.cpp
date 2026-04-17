@@ -1,9 +1,9 @@
-// power_recovery.cpp – Boot recovery, graceful shutdown, watchdog integration
-// Implements 24/7 reliability with:
-// - EEPROM-based state persistence (rotirajuci wear-leveling slotovi)
-// - Automatic recovery after power loss
-// - Graceful shutdown support (requires external power loss detection)
-// - State validation and EEPROM health checks
+// power_recovery.cpp - Boot recovery, kontrolirano gasenje i watchdog integracija
+// Pouzdanost toranjskog sata 24/7 ostvaruje se ovako:
+// - EEPROM pamti stanje kroz rotirajuce wear-leveling slotove
+// - nakon gubitka napajanja sustav pokusava automatski recovery
+// - podrzano je kontrolirano gasenje uz vanjsku dojavu nestanka napajanja
+// - provjera valjanosti stanja i osnovne provjere zdravlja EEPROM-a
 
 #include <Arduino.h>
 #include <avr/interrupt.h>

@@ -5,6 +5,7 @@
 void inicijalizirajESP();
 void obradiESPSerijskuKomunikaciju();
 void obradiAutomatskiNTPZahtjevESP();
+void zatraziPrioritetnuNTPSinkronizaciju();
 void posaljiWifiPostavkeESP();
 void posaljiWiFiStatusESP();
 void posaljiNTPPostavkeESP();

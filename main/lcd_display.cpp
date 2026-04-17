@@ -1,5 +1,6 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
-// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + status sinkronizacije + uskrsna blokada
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + oznaka dana za cavle (R/N)
+// + zvjezdica aktivnosti na zadnjem mjestu.
 // Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery) + WiFi oznaka na 16. znaku.
 
 #include <Arduino.h>
@@ -13,13 +14,16 @@
 #include "time_glob.h"
 #include "dcf_sync.h"
 #include "otkucavanje.h"
+#include "postavke.h"
 #include "zvonjenje.h"
+#include "slavljenje_mrtvacko.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 static char line1_buffer[17];
+static char zadnje_ispisani_redak1[17];
 static unsigned long last_line1_refresh = 0;
 static uint32_t last_line1_rtc_tick = 0xFFFFFFFFUL;
 static uint32_t last_line1_dcf_visual_tick = 0xFFFFFFFFUL;
@@ -27,7 +31,10 @@ static uint32_t last_line1_dcf_visual_tick = 0xFFFFFFFFUL;
 static char wifi_status = ' ';
 
 static char line2_buffer[17];
+static char zadnje_ispisani_redak2[17];
 static unsigned long last_line2_refresh = 0;
+static bool lcd_pozadinsko_stanje_poznato = false;
+static bool lcd_pozadinsko_stanje_ukljuceno = true;
 static int last_date_minute = -1;
 static bool otkucavanje_poruka_aktivna = false;
 static bool rtc_battery_warning_active = false;
@@ -53,6 +60,8 @@ static bool activity_is_error = false;
 static bool blink_visible = true;
 static unsigned long last_blink_toggle = 0;
 static const unsigned long BLINK_INTERVAL_MS = 200;
+static const uint8_t LCD_NOCNI_REZIM_OD_SAT = 0;
+static const uint8_t LCD_NOCNI_REZIM_DO_SAT = 5;
 static const char LCD_DAN_NED[] PROGMEM = "NED";
 static const char LCD_DAN_PON[] PROGMEM = "PON";
 static const char LCD_DAN_UTO[] PROGMEM = "UTO";
@@ -69,8 +78,8 @@ static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
   LCD_DAN_PET,
   LCD_DAN_SUB
 };
-static const char LCD_PORUKA_BELL1[] PROGMEM = "Bell 1 ringing  ";
-static const char LCD_PORUKA_BELL2[] PROGMEM = "Bell 2 ringing  ";
+static const char LCD_PORUKA_BELL1[] PROGMEM = "Zvono 1 radi   ";
+static const char LCD_PORUKA_BELL2[] PROGMEM = "Zvono 2 radi   ";
 static const char LCD_PORUKA_OBA_ZVONA[] PROGMEM = "Zvone oba zvona";
 static const char LCD_PORUKA_OTKUCAJ[] PROGMEM = "Otkucavanje...  ";
 static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERR:RTC baterija";
@@ -83,6 +92,31 @@ static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
   odrediste[velicina - 1] = '\0';
+}
+
+static void pripremiRedakZaLCD(const char* tekst, char* odrediste) {
+  memset(odrediste, ' ', 16);
+
+  if (tekst != nullptr) {
+    const size_t duljina = strlen(tekst);
+    const size_t brojZnakova = (duljina < 16) ? duljina : 16;
+    memcpy(odrediste, tekst, brojZnakova);
+  }
+
+  odrediste[16] = '\0';
+}
+
+static void upisiRedakNaLCD(uint8_t redak, const char* tekst, char* zadnjiRedak) {
+  char pripremljeniRedak[17];
+  pripremiRedakZaLCD(tekst, pripremljeniRedak);
+
+  if (strcmp(pripremljeniRedak, zadnjiRedak) == 0) {
+    return;
+  }
+
+  lcd.setCursor(0, redak);
+  lcd.print(pripremljeniRedak);
+  strncpy(zadnjiRedak, pripremljeniRedak, 17);
 }
 
 static void pripremiDrugiRedakSaWiFiOznakom(const char* tekst) {
@@ -110,17 +144,35 @@ static PGM_P dohvatiNazivDanaIzFlash(uint8_t danUTjednu) {
   return reinterpret_cast<PGM_P>(pgm_read_ptr(&LCD_NAZIVI_DANA[danUTjednu]));
 }
 
-static char izracunajOznakuStanjaLCD() {
-  if (rtc_battery_warning_active || current_activity == ACTIVITY_ERROR || activity_is_error) {
-    return 'E';
-  }
-
+static bool jeSustavAktivanNaLCD() {
   const EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
-  if (stanje.hand_active != 0 || stanje.plate_phase != 0) {
-    return 'R';
+  return stanje.hand_active != 0 ||
+         stanje.plate_phase != 0 ||
+         jeZvonoUTijeku() ||
+         jeOtkucavanjeUTijeku() ||
+         jeSlavljenjeUTijeku() ||
+         jeMrtvackoUTijeku();
+}
+
+static char dohvatiOznakuDanaZaCavle(const DateTime& vrijeme) {
+  return (vrijeme.dayOfTheWeek() == 0) ? 'N' : 'R';
+}
+
+static bool jeLCDUNocnomRezimu(const DateTime& vrijeme) {
+  const uint8_t sat = vrijeme.hour();
+  return sat >= LCD_NOCNI_REZIM_OD_SAT && sat <= LCD_NOCNI_REZIM_DO_SAT;
+}
+
+static bool odrediStvarnoStanjeLCDPozadinskogOsvjetljenja(bool rucnoUkljuceno) {
+  if (!rucnoUkljuceno) {
+    return false;
   }
 
-  return 'N';
+  return !jeLCDUNocnomRezimu(dohvatiTrenutnoVrijeme());
+}
+
+static void osvjeziAutomatskoLCDPozadinskoOsvjetljenje() {
+  primijeniLCDPozadinskoOsvjetljenje(jeLCDPozadinskoOsvjetljenjeUkljuceno());
 }
 
 void inicijalizirajLCD() {
@@ -140,9 +192,11 @@ void inicijalizirajLCD() {
 
   memset(line1_buffer, ' ', sizeof(line1_buffer) - 1);
   line1_buffer[16] = '\0';
+  zadnje_ispisani_redak1[0] = '\0';
 
   memset(line2_buffer, ' ', sizeof(line2_buffer) - 1);
   line2_buffer[16] = '\0';
+  zadnje_ispisani_redak2[0] = '\0';
 
   memset(activity_message, ' ', sizeof(activity_message) - 1);
   activity_message[16] = '\0';
@@ -177,15 +231,15 @@ static void build_line1() {
     source_str[sizeof(source_str) - 1] = '\0';
   }
 
-  const char oznaka_stanja = izracunajOznakuStanjaLCD();
-  const char* zavrsneOznake = jeUskrsnaTisinaAktivna(now) ? "NE" : "  ";
+  const char oznaka_dana = dohvatiOznakuDanaZaCavle(now);
+  const char oznaka_aktivnosti = jeSustavAktivanNaLCD() ? '*' : ' ';
 
   snprintf(line1_buffer, sizeof(line1_buffer),
-           "%02d:%02d:%02d %s %c%s",
+           "%02d:%02d:%02d %s %c%c",
            now.hour(), now.minute(), now.second(),
            source_str,
-           oznaka_stanja,
-           zavrsneOznake);
+           oznaka_dana,
+           oznaka_aktivnosti);
   line1_buffer[16] = '\0';
 }
 
@@ -392,6 +446,8 @@ void signalizirajFuneral_Mode() {
 }
 
 void prikaziSat() {
+  osvjeziAutomatskoLCDPozadinskoOsvjetljenje();
+
   const unsigned long now_ms = millis();
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
   const uint32_t dcfVisualTick = dohvatiDcfVizualniBrojac();
@@ -422,33 +478,27 @@ void prikaziSat() {
 
   if (trebaOsvjezitiRedak1) {
     build_line1();
-    lcd.setCursor(0, 0);
-    lcd.print(line1_buffer);
+    upisiRedakNaLCD(0, line1_buffer, zadnje_ispisani_redak1);
     osvjeziWatchdog();
   }
 
   if (now_ms - last_line2_refresh >= 500UL) {
     last_line2_refresh = now_ms;
     build_line2();
-    lcd.setCursor(0, 1);
-    lcd.print(line2_buffer);
+    upisiRedakNaLCD(1, line2_buffer, zadnje_ispisani_redak2);
     osvjeziWatchdog();
   }
 }
 
 void prikaziPoruku(const char* redak1, const char* redak2) {
+  osvjeziAutomatskoLCDPozadinskoOsvjetljenje();
+
   if (redak1) {
-    lcd.setCursor(0, 0);
-    lcd.print(F("                "));
-    lcd.setCursor(0, 0);
-    lcd.print(redak1);
+    upisiRedakNaLCD(0, redak1, zadnje_ispisani_redak1);
   }
 
   if (redak2) {
-    lcd.setCursor(0, 1);
-    lcd.print(F("                "));
-    lcd.setCursor(0, 1);
-    lcd.print(redak2);
+    upisiRedakNaLCD(1, redak2, zadnje_ispisani_redak2);
   }
 }
 
@@ -480,7 +530,15 @@ void prikaziLokalnuWiFiIP(const char* ipAdresa) {
 }
 
 void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci) {
-  if (ukljuci) {
+  const bool stvarnoUkljuci = odrediStvarnoStanjeLCDPozadinskogOsvjetljenja(ukljuci);
+  if (lcd_pozadinsko_stanje_poznato && lcd_pozadinsko_stanje_ukljuceno == stvarnoUkljuci) {
+    return;
+  }
+
+  lcd_pozadinsko_stanje_ukljuceno = stvarnoUkljuci;
+  lcd_pozadinsko_stanje_poznato = true;
+
+  if (stvarnoUkljuci) {
     lcd.backlight();
   } else {
     lcd.noBacklight();

@@ -17,6 +17,7 @@ static const uint8_t DCF_SAT_NOC_DO = 6;
 static const unsigned long DCF_CEKANJE_WIFI_MS = 300000UL;
 static const unsigned long DCF_VRIJEME_STABILIZACIJE_MS = 60000UL;
 static const unsigned long DCF_MAX_TRAJANJE_POKUSAJA_PO_SATU_MS = 20UL * 60000UL;
+static const unsigned long DCF_PRODUZENJE_ZA_DRUGU_POTVRDU_MS = 120000UL;
 static const unsigned long DCF_MINUTA_MARKER_MS = 1500UL;
 
 static const unsigned long PULS_0_MIN_MS = 70UL;
@@ -128,7 +129,7 @@ static bool trebaNocniFallback() {
     return false;
   }
 
-  if (strcmp(dohvatiOznakuIzvoraVremena(), "NTP") == 0 && !jeSinkronizacijaZastarjela()) {
+  if (jeZadnjaSvjezaSinkronizacijaIzNTP()) {
     return false;
   }
 
@@ -176,7 +177,7 @@ static uint8_t procitajVrijednost(const uint8_t* indeksi, const uint8_t* tezine,
   return vrijednost;
 }
 
-static DateTime dekodirajDCFVrijeme() {
+static bool dekodirajDCFVrijeme(DateTime& dekodiranoVrijeme, bool& dstAktivan) {
   static const uint8_t minuteIndeksi[] = {21, 22, 23, 24, 25, 26, 27};
   static const uint8_t minuteTezine[] = {1, 2, 4, 8, 10, 20, 40};
   static const uint8_t satIndeksi[] = {29, 30, 31, 32, 33, 34};
@@ -189,23 +190,23 @@ static DateTime dekodirajDCFVrijeme() {
   static const uint8_t godinaTezine[] = {1, 2, 4, 8, 10, 20, 40, 80};
 
   if (dcfBrojBita != 59) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
   if (dcfBitovi[20] != 1) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
   const bool cet = dcfBitovi[17] != 0;
   const bool cest = dcfBitovi[18] != 0;
   if (cet == cest) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
   if (!provjeriParitet(21, 27, 28) ||
       !provjeriParitet(29, 34, 35) ||
       !provjeriParitet(36, 57, 58)) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
   const uint8_t minuta = procitajVrijednost(minuteIndeksi, minuteTezine, sizeof(minuteIndeksi));
@@ -215,7 +216,7 @@ static DateTime dekodirajDCFVrijeme() {
   const uint8_t godina = procitajVrijednost(godinaIndeksi, godinaTezine, sizeof(godinaIndeksi));
 
   if (minuta > 59 || sat > 23 || dan == 0 || dan > 31 || mjesec == 0 || mjesec > 12) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
   DateTime dekodirano(2000 + godina, mjesec, dan, sat, minuta, 0);
@@ -224,10 +225,12 @@ static DateTime dekodirajDCFVrijeme() {
       dekodirano.day() != dan ||
       dekodirano.hour() != sat ||
       dekodirano.minute() != minuta) {
-    return DateTime((uint32_t)0);
+    return false;
   }
 
-  return dekodirano;
+  dekodiranoVrijeme = dekodirano;
+  dstAktivan = cest;
+  return true;
 }
 
 static void zavrsiSatniPokusaj(uint32_t satniKljuc, const __FlashStringHelper* poruka) {
@@ -266,15 +269,40 @@ static void pokreniSatniPokusaj(const DateTime& sada, uint32_t satniKljuc) {
   posaljiPCLog(log);
 }
 
+static void produziSesijuZaDruguPotvrdu() {
+  const unsigned long predlozeniKraj = millis() + DCF_PRODUZENJE_ZA_DRUGU_POTVRDU_MS;
+  if (predlozeniKraj > dcfKrajSesijeMs) {
+    dcfKrajSesijeMs = predlozeniKraj;
+  }
+}
+
 static void obradiDovrseniOkvir(uint32_t nocniKljuc, uint32_t satniKljuc) {
   if (dcfBrojBita != 59) {
     ocistiDcfOkvir();
     return;
   }
 
-  const DateTime novoVrijeme = dekodirajDCFVrijeme();
-  if (novoVrijeme.unixtime() == 0 || novoVrijeme.year() < 2024) {
+  DateTime novoVrijeme((uint32_t)0);
+  bool dstAktivan = false;
+  if (!dekodirajDCFVrijeme(novoVrijeme, dstAktivan) ||
+      novoVrijeme.unixtime() == 0 ||
+      novoVrijeme.year() < 2024) {
     posaljiPCLog(F("DCF77: primljen okvir nije valjan, nastavljam slusanje"));
+    ocistiDcfOkvir();
+    return;
+  }
+
+  const RezultatProvjereSinkronizacije rezultatSinkronizacije =
+      azurirajVrijemeIzDCF(novoVrijeme, true, dstAktivan);
+  if (rezultatSinkronizacije == SINKRONIZACIJA_CEKA_DODATNU_POTVRDU) {
+    produziSesijuZaDruguPotvrdu();
+    posaljiPCLog(F("DCF77: prvi valjani okvir trazi jos jednu potvrdu, nastavljam slusanje"));
+    ocistiDcfOkvir();
+    return;
+  }
+
+  if (rezultatSinkronizacije != SINKRONIZACIJA_PRIHVACENA) {
+    posaljiPCLog(F("DCF77: valjani okvir nije prihvacen, nastavljam slusanje"));
     ocistiDcfOkvir();
     return;
   }
@@ -284,7 +312,6 @@ static void obradiDovrseniOkvir(uint32_t nocniKljuc, uint32_t satniKljuc) {
     zadnjaUspjesnaNocDcfKljuc = nocniKljuc;
     zadnjiSatniPokusajKljuc = satniKljuc;
   }
-  azurirajVrijemeIzDCF(novoVrijeme);
   zatraziPoravnanjeTaktaKazaljki();
   zatraziPoravnanjeTaktaPloce();
 

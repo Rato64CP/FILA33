@@ -1,15 +1,15 @@
-// time_glob.cpp – Globalno rukovanje vremenom
+// time_glob.cpp - Globalno rukovanje vremenom
 #include <Arduino.h>
 #include <RTClib.h>
 #include "time_glob.h"
-#include "i2c_eeprom.h"
 #include "eeprom_konstante.h"
 #include "podesavanja_piny.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
-#include "lcd_display.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
+#include "esp_serial.h"
+#include "lcd_display.h"
 
 // DS3231 RTC modul
 static RTC_DS3231 rtc;
@@ -17,21 +17,34 @@ static RTC_DS3231 rtc;
 // Trenutno vrijeme (cache)
 static DateTime trenutnoVrijeme;
 
-// Izvor vremena
-static enum {
+// Izvor vremena toranjskog sata:
+// - trenutniIzvor je ono sto sada stvarno prikazujemo i koristimo kao aktivni izvor rada
+// - zadnjiPotvrdeniIzvor pamti odakle je dosla zadnja svjeza sinkronizacija
+enum IzvorVremena {
   IZ_RTC,
   IZ_MAN,
   IZ_NTP,
   IZ_DCF
-} trenutniIzvor = IZ_RTC;
+};
+
+static IzvorVremena trenutniIzvor = IZ_RTC;
+static IzvorVremena zadnjiPotvrdeniIzvor = IZ_RTC;
+
+// RTC + NTP jezgra toranjskog sata namjerno je konzervativna.
+// Pravila koja ne treba mijenjati bez stvarne potrebe:
+// - nakon boota sat uvijek krece iz RTC-a, bez cekanja mreze
+// - NTP samo potvrduje i korigira RTC, ne smije blokirati start sata
+// - prikaz "NTP" smije se pojaviti tek nakon stvarno uspjesne nove sinkronizacije
+// - ako vise od 24 sata nema nove sinkronizacije, prikaz i rad se vracaju na RTC
+// - nakon povratka napajanja ESP/WiFi dobiva pocetnu odgodu prije prvog NTP pokusaja
+// Svaka promjena ovdje mora cuvati taj tok rada.
 
 // Zadnja sinkronizacija
 static DateTime zadnjaSinkronizacija((uint32_t)0);
 static unsigned long zadnjaSinkronizacijaMs = 0;
-static const unsigned long TIMEOUT_SINKRONIZACIJE_MS = 3600000; // 1 sat
+static const unsigned long TIMEOUT_SINKRONIZACIJE_MS = 86400000UL; // 24 sata
 
 // Oznake
-static char oznakaDana = 'N';
 static char oznakaizvora[4] = "RTC";
 
 // RTC pouzdanost
@@ -42,17 +55,30 @@ static unsigned long rtcSqwZadnjiTickMs = 0;
 static bool dstAktivan = false;
 static bool dstStatusUcitan = false;
 static bool vrijemePotvrdjenoZaAutomatiku = false;
+static bool ntpSinkronizacijaZakazana = false;
+static DateTime zakazanoNtpVrijeme((uint32_t)0);
+static uint32_t zakazaniNtpRtcTick = 0;
+static unsigned long zakazaniNtpMs = 0;
+static bool zakazanoNtpImaEksplicitanDST = false;
+static bool zakazanoNtpDstAktivan = false;
+static bool sumnjivaSinkronizacijaNaCekanju = false;
+static uint8_t sumnjiviIzvorSinkronizacije = IZ_RTC;
+static DateTime sumnjivoVrijemeSinkronizacije((uint32_t)0);
+static unsigned long sumnjivaSinkronizacijaMs = 0;
 
-// Fallback referencija (koristi zadnje poznato vrijeme ako RTC/NTP/DCF nisu dostupni)
-static bool fallbackAktivan = false;
-static DateTime fallbackVrijeme((uint32_t)0);
 volatile uint32_t rtcSekundniBrojac = 0;
+
+static const uint16_t MIN_VALJANA_GODINA = 2024;
+static const uint16_t MAX_VALJANA_GODINA = 2099;
+static const uint32_t MAX_SKOK_BEZ_DODATNE_POTVRDE_S = 300UL;
+static const uint32_t MAX_RAZLIKA_IZMEDU_DVIJE_POTVRDE_S = 3UL;
+static const unsigned long ROK_SUMNJIVE_SINKRONIZACIJE_MS = 15UL * 60UL * 1000UL;
 
 void rtcSqwPrekid() {
   rtcSekundniBrojac++;
 }
 
-// -------------------- POMOĆNE FUNKCIJE --------------------
+// -------------------- POMOCNE FUNKCIJE --------------------
 
 static void azurirajOznakuIzvora() {
   switch (trenutniIzvor) {
@@ -75,9 +101,95 @@ static void azurirajOznakuIzvora() {
   oznakaizvora[sizeof(oznakaizvora) - 1] = '\0';
 }
 
+static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
+                                  bool imaEksplicitanDST,
+                                  bool dstAktivanIzvori);
+
+static bool jeVrijemeURasponuPouzdanosti(const DateTime& vrijeme) {
+  return vrijeme.unixtime() != 0 &&
+         vrijeme.year() >= MIN_VALJANA_GODINA &&
+         vrijeme.year() <= MAX_VALJANA_GODINA;
+}
+
+static void ocistiSumnjivuSinkronizaciju() {
+  sumnjivaSinkronizacijaNaCekanju = false;
+  sumnjiviIzvorSinkronizacije = IZ_RTC;
+  sumnjivoVrijemeSinkronizacije = DateTime((uint32_t)0);
+  sumnjivaSinkronizacijaMs = 0;
+}
+
+static uint32_t apsolutnaRazlikaSekundi(const DateTime& a, const DateTime& b) {
+  const uint32_t unixA = a.unixtime();
+  const uint32_t unixB = b.unixtime();
+  return (unixA >= unixB) ? (unixA - unixB) : (unixB - unixA);
+}
+
+static RezultatProvjereSinkronizacije potvrdiIliOdbijSumnjivuSinkronizaciju(
+    const DateTime& novoVrijeme,
+    uint8_t izvor,
+    const __FlashStringHelper* nazivIzvora) {
+  if (!jeVrijemeURasponuPouzdanosti(novoVrijeme)) {
+    String log = String(nazivIzvora);
+    log += F(": nevaljano vrijeme izvan dopustenog raspona, odbacujem");
+    posaljiPCLog(log);
+    ocistiSumnjivuSinkronizaciju();
+    return SINKRONIZACIJA_ODBIJENA;
+  }
+
+  if (!vrijemePotvrdjenoZaAutomatiku || !jeVrijemeURasponuPouzdanosti(trenutnoVrijeme)) {
+    ocistiSumnjivuSinkronizaciju();
+    return SINKRONIZACIJA_PRIHVACENA;
+  }
+
+  const uint32_t razlikaSekundi = apsolutnaRazlikaSekundi(trenutnoVrijeme, novoVrijeme);
+  if (razlikaSekundi <= MAX_SKOK_BEZ_DODATNE_POTVRDE_S) {
+    ocistiSumnjivuSinkronizaciju();
+    return SINKRONIZACIJA_PRIHVACENA;
+  }
+
+  const unsigned long sadaMs = millis();
+  if (sumnjivaSinkronizacijaNaCekanju &&
+      sumnjiviIzvorSinkronizacije == izvor &&
+      jeVrijemeURasponuPouzdanosti(sumnjivoVrijemeSinkronizacije) &&
+      (sadaMs - sumnjivaSinkronizacijaMs) <= ROK_SUMNJIVE_SINKRONIZACIJE_MS &&
+      apsolutnaRazlikaSekundi(sumnjivoVrijemeSinkronizacije, novoVrijeme) <=
+          MAX_RAZLIKA_IZMEDU_DVIJE_POTVRDE_S) {
+    String log = String(nazivIzvora);
+    log += F(": potvrden sumnjiv skok vremena, prihvacam korekciju");
+    posaljiPCLog(log);
+    ocistiSumnjivuSinkronizaciju();
+    return SINKRONIZACIJA_PRIHVACENA;
+  }
+
+  sumnjivaSinkronizacijaNaCekanju = true;
+  sumnjiviIzvorSinkronizacije = izvor;
+  sumnjivoVrijemeSinkronizacije = novoVrijeme;
+  sumnjivaSinkronizacijaMs = sadaMs;
+
+  String log = String(nazivIzvora);
+  log += F(": sumnjiv skok vremena od ");
+  log += String(razlikaSekundi);
+  log += F(" s, cekam ponovljenu potvrdu prije upisa u RTC");
+  posaljiPCLog(log);
+
+  if (izvor == IZ_NTP) {
+    zatraziPrioritetnuNTPSinkronizaciju();
+  }
+  return SINKRONIZACIJA_CEKA_DODATNU_POTVRDU;
+}
+
+static void otkaziZakazanuNtpSinkronizaciju() {
+  ntpSinkronizacijaZakazana = false;
+  zakazanoNtpVrijeme = DateTime((uint32_t)0);
+  zakazaniNtpRtcTick = 0;
+  zakazaniNtpMs = 0;
+  zakazanoNtpImaEksplicitanDST = false;
+  zakazanoNtpDstAktivan = false;
+}
+
 static void spremiZadnjuSinkronizaciju() {
   EepromLayout::ZadnjaSinkronizacija zs;
-  zs.izvor = (int)trenutniIzvor;
+  zs.izvor = static_cast<int>(zadnjiPotvrdeniIzvor);
   zs.timestamp = zadnjaSinkronizacija.unixtime();
   WearLeveling::spremi(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
                        EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
@@ -123,6 +235,16 @@ static bool izracunajDSTIzKalendara(const DateTime& vrijeme) {
   if (vrijeme.day() < zadnjaNedjelja) return true;
   if (vrijeme.day() > zadnjaNedjelja) return false;
   return vrijeme.hour() < 3;
+}
+
+static bool odrediDSTStatusSinkronizacije(const DateTime& vrijeme,
+                                          bool imaEksplicitanDST,
+                                          bool dstAktivanIzvori) {
+  if (imaEksplicitanDST) {
+    return dstAktivanIzvori;
+  }
+
+  return izracunajDSTIzKalendara(vrijeme);
 }
 
 static void spremiDSTStatus() {
@@ -177,8 +299,6 @@ static void primijeniDSTPomak(int pomakSekundi, bool noviDSTAktivan, const __Fla
   }
 
   trenutnoVrijeme = novoVrijeme;
-  fallbackVrijeme = novoVrijeme;
-  fallbackAktivan = true;
   dstAktivan = noviDSTAktivan;
   spremiDSTStatus();
 
@@ -209,19 +329,23 @@ static void ucitajZadnjuSinkronizaciju() {
                           EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
                           zs)) {
     zadnjaSinkronizacija = DateTime(zs.timestamp);
+    zadnjaSinkronizacijaMs = 0;
     if (zs.izvor == IZ_MAN) {
-      trenutniIzvor = IZ_MAN;
+      zadnjiPotvrdeniIzvor = IZ_MAN;
     } else if (zs.izvor == IZ_NTP) {
-      trenutniIzvor = IZ_NTP;
+      zadnjiPotvrdeniIzvor = IZ_NTP;
     } else if (zs.izvor == IZ_DCF) {
-      trenutniIzvor = IZ_DCF;
+      zadnjiPotvrdeniIzvor = IZ_DCF;
     } else {
-      trenutniIzvor = IZ_RTC;
+      zadnjiPotvrdeniIzvor = IZ_RTC;
     }
   } else {
     zadnjaSinkronizacija = DateTime((uint32_t)0);
-    trenutniIzvor = IZ_RTC;
+    zadnjaSinkronizacijaMs = 0;
+    zadnjiPotvrdeniIzvor = IZ_RTC;
   }
+  // Nakon boota sat realno radi iz RTC-a dok ne stigne nova potvrda izvora.
+  trenutniIzvor = IZ_RTC;
   azurirajOznakuIzvora();
 }
 
@@ -236,7 +360,7 @@ static void postaviVrijemePotvrdjenoZaAutomatiku(bool potvrdeno, const __FlashSt
   }
 }
 
-static DateTime izracunajDatumUskrsa(int godina) {
+DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
   const int a = godina % 19;
   const int b = godina / 100;
   const int c = godina % 100;
@@ -317,9 +441,32 @@ DateTime dohvatiTrenutnoVrijeme() {
       posaljiPCLog(F("RTC SQW: impulsi na D2 ponovno prisutni"));
       rtcSqwGreskaPrijavljena = false;
     }
-    if (rtc.begin()) {
+    bool ntpPrimijenjenNaOvomTicku = false;
+    if (ntpSinkronizacijaZakazana) {
+      uint32_t protekliRtcTickovi = 1;
+      if (zakazaniNtpRtcTick != 0 && lokalniRtcTick >= zakazaniNtpRtcTick) {
+        protekliRtcTickovi = lokalniRtcTick - zakazaniNtpRtcTick;
+        if (protekliRtcTickovi == 0) {
+          protekliRtcTickovi = 1;
+        }
+      } else if (zakazaniNtpMs != 0) {
+        protekliRtcTickovi = (sadaMs - zakazaniNtpMs) / 1000UL;
+        if (protekliRtcTickovi == 0) {
+          protekliRtcTickovi = 1;
+        }
+      }
+
+      const DateTime vrijemeZaPrimjenu(
+          zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
+      primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
+                            zakazanoNtpImaEksplicitanDST,
+                            zakazanoNtpDstAktivan);
+      ntpPrimijenjenNaOvomTicku = true;
+      posaljiPCLog(F("NTP: sinkronizacija primijenjena na RTC SQW granici sekunde"));
+    }
+    if (!ntpPrimijenjenNaOvomTicku && rtc.begin()) {
       trenutnoVrijeme = rtc.now();
-    } else {
+    } else if (!ntpPrimijenjenNaOvomTicku) {
       signalizirajError_RTC();
     }
   } else if ((sadaMs - rtcSqwZadnjiTickMs) > 2500UL) {
@@ -336,7 +483,8 @@ DateTime dohvatiTrenutnoVrijeme() {
     }
   }
 
-  if ((trenutniIzvor == IZ_NTP || trenutniIzvor == IZ_DCF) && jeSinkronizacijaZastarjela()) {
+  if ((zadnjiPotvrdeniIzvor == IZ_NTP || zadnjiPotvrdeniIzvor == IZ_DCF) &&
+      jeSinkronizacijaZastarjela()) {
     oznaciPovratakNaRTC();
   }
 
@@ -353,7 +501,17 @@ uint32_t dohvatiRtcSekundniBrojac() {
   return lokalniRtcTick;
 }
 
-static void primijeniVrijemeIzNTP(const DateTime& ntpVrijeme) {
+static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
+                                  bool imaEksplicitanDST,
+                                  bool dstAktivanIzvori) {
+  if (!jeVrijemeURasponuPouzdanosti(ntpVrijeme)) {
+    posaljiPCLog(F("NTP: odbijena interna primjena nevaljanog vremena"));
+    otkaziZakazanuNtpSinkronizaciju();
+    return;
+  }
+
+  otkaziZakazanuNtpSinkronizaciju();
+
   if (rtc.begin()) {
     rtc.adjust(ntpVrijeme);
     rtcBaterijaOk = true;
@@ -362,12 +520,15 @@ static void primijeniVrijemeIzNTP(const DateTime& ntpVrijeme) {
   }
 
   trenutnoVrijeme = ntpVrijeme;
-  fallbackVrijeme = ntpVrijeme;
-  fallbackAktivan = true;
-  dstAktivan = izracunajDSTIzKalendara(ntpVrijeme);
+  dstAktivan = odrediDSTStatusSinkronizacije(
+      ntpVrijeme,
+      imaEksplicitanDST,
+      dstAktivanIzvori);
   spremiDSTStatus();
   zadnjaSinkronizacija = ntpVrijeme;
   trenutniIzvor = IZ_NTP;
+  zadnjiPotvrdeniIzvor = IZ_NTP;
+  ocistiSumnjivuSinkronizaciju();
   postaviVrijemePotvrdjenoZaAutomatiku(
       true,
       F("Vrijeme: potvrdeno iz NTP-a, automatika toranjskog sata je aktivna"));
@@ -391,56 +552,95 @@ static void primijeniVrijemeIzNTP(const DateTime& ntpVrijeme) {
   posaljiPCLog(log);
 }
 
-void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme) {
+void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
+                          bool imaEksplicitanDST,
+                          bool dstAktivanIzvori) {
   // Provjera validnosti NTP vremena
-  if (ntpVrijeme.unixtime() == 0 || ntpVrijeme.year() < 2024) {
+  if (!jeVrijemeURasponuPouzdanosti(ntpVrijeme)) {
     posaljiPCLog(F("NTP: neispravno vrijeme, odbacujem"));
     return;
   }
 
-  // NTP se ovdje primjenjuje odmah jer trenutak zahtjeva vec bira Mega
-  // tek kad su kazaljke i ploca u sigurnom stanju za sinkronizaciju.
-  primijeniVrijemeIzNTP(ntpVrijeme);
+  if (potvrdiIliOdbijSumnjivuSinkronizaciju(ntpVrijeme, IZ_NTP, F("NTP")) !=
+      SINKRONIZACIJA_PRIHVACENA) {
+    return;
+  }
+
+  // Za precizniji trenutak sinkronizacije NTP se poravnava na iduci RTC SQW tik.
+  if (rtcSqwAktivan) {
+    zakazanoNtpVrijeme = ntpVrijeme;
+    ntpSinkronizacijaZakazana = true;
+    zakazaniNtpRtcTick = dohvatiRtcSekundniBrojac();
+    zakazaniNtpMs = millis();
+    zakazanoNtpImaEksplicitanDST = imaEksplicitanDST;
+    zakazanoNtpDstAktivan = dstAktivanIzvori;
+
+    String log = F("NTP: sinkronizacija zakazana na sljedeci RTC SQW tik od ");
+    log += ntpVrijeme.year();
+    log += F("-");
+    log += ntpVrijeme.month();
+    log += F("-");
+    log += ntpVrijeme.day();
+    log += F(" ");
+    log += ntpVrijeme.hour();
+    log += F(":");
+    if (ntpVrijeme.minute() < 10) log += F("0");
+    log += ntpVrijeme.minute();
+    log += F(":");
+    if (ntpVrijeme.second() < 10) log += F("0");
+    log += ntpVrijeme.second();
+    posaljiPCLog(log);
+    return;
+  }
+
+  // Ako RTC SQW trenutno nije dostupan, primijeni odmah kao fallback.
+  primijeniVrijemeIzNTP(ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori);
   return;
-  /*
-  
-  // Ažuriranje RTC-a
-  
-  String log = F("Vrijeme ažurirano iz NTP: ");
-  */
 }
 
-void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
+RezultatProvjereSinkronizacije azurirajVrijemeIzDCF(const DateTime& dcfVrijeme,
+                                                    bool imaEksplicitanDST,
+                                                    bool dstAktivanIzvori) {
+  otkaziZakazanuNtpSinkronizaciju();
+
   // Provjera validnosti DCF vremena
-  if (dcfVrijeme.unixtime() == 0 || dcfVrijeme.year() < 2024) {
+  if (!jeVrijemeURasponuPouzdanosti(dcfVrijeme)) {
     posaljiPCLog(F("DCF: neispravno vrijeme, odbacujem"));
-    return;
+    return SINKRONIZACIJA_ODBIJENA;
   }
   
   // Ako je NTP najnoviji izvor, ne mijenjaj
-  if (trenutniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela()) {
-    return;
+  if (zadnjiPotvrdeniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela()) {
+    return SINKRONIZACIJA_ODBIJENA;
   }
 
-  
-  // Ažuriranje RTC-a
+  const RezultatProvjereSinkronizacije rezultatProvjere =
+      potvrdiIliOdbijSumnjivuSinkronizaciju(dcfVrijeme, IZ_DCF, F("DCF"));
+  if (rezultatProvjere != SINKRONIZACIJA_PRIHVACENA) {
+    return rezultatProvjere;
+  }
+  // Azuriranje RTC-a
   if (rtc.begin()) {
     rtc.adjust(dcfVrijeme);
     rtcBaterijaOk = true;
   }
   
   trenutnoVrijeme = dcfVrijeme;
-  dstAktivan = izracunajDSTIzKalendara(dcfVrijeme);
+  dstAktivan = odrediDSTStatusSinkronizacije(
+      dcfVrijeme,
+      imaEksplicitanDST,
+      dstAktivanIzvori);
   spremiDSTStatus();
   zadnjaSinkronizacija = dcfVrijeme;
   trenutniIzvor = IZ_DCF;
+  zadnjiPotvrdeniIzvor = IZ_DCF;
+  ocistiSumnjivuSinkronizaciju();
   postaviVrijemePotvrdjenoZaAutomatiku(
       true,
       F("Vrijeme: potvrdeno iz DCF-a, automatika toranjskog sata je aktivna"));
   azurirajOznakuIzvora();
   spremiZadnjuSinkronizaciju();
-  
-  String log = F("Vrijeme ažurirano iz DCF: ");
+  String log = F("Vrijeme azurirano iz DCF: ");
   log += dcfVrijeme.year();
   log += F("-");
   log += dcfVrijeme.month();
@@ -451,10 +651,13 @@ void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme) {
   log += F(":");
   log += dcfVrijeme.minute();
   posaljiPCLog(log);
+  return SINKRONIZACIJA_PRIHVACENA;
 }
 
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
-  if (rucnoVrijeme.unixtime() == 0 || rucnoVrijeme.year() < 2024) {
+  otkaziZakazanuNtpSinkronizaciju();
+
+  if (!jeVrijemeURasponuPouzdanosti(rucnoVrijeme)) {
     posaljiPCLog(F("Rucno vrijeme: neispravna vrijednost, odbacujem"));
     return;
   }
@@ -467,12 +670,12 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   }
 
   trenutnoVrijeme = rucnoVrijeme;
-  fallbackVrijeme = rucnoVrijeme;
-  fallbackAktivan = true;
   dstAktivan = izracunajDSTIzKalendara(rucnoVrijeme);
   spremiDSTStatus();
   zadnjaSinkronizacija = rucnoVrijeme;
   trenutniIzvor = IZ_MAN;
+  zadnjiPotvrdeniIzvor = IZ_MAN;
+  ocistiSumnjivuSinkronizaciju();
   postaviVrijemePotvrdjenoZaAutomatiku(
       true,
       F("Vrijeme: rucno potvrdeno, automatika toranjskog sata je aktivna"));
@@ -496,27 +699,15 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   posaljiPCLog(log);
   zatraziPoravnanjeTaktaKazaljki();
   zatraziPoravnanjeTaktaPloce();
-}
-
-String dohvatiIzvorVremena() {
-  return String(dohvatiOznakuIzvoraVremena());
+  zatraziPrioritetnuNTPSinkronizaciju();
 }
 
 const char* dohvatiOznakuIzvoraVremena() {
   return oznakaizvora;
 }
 
-char dohvatiOznakuDana() {
-  return oznakaDana;
-}
-
-void azurirajOznakuDana() {
-  DateTime sada = dohvatiTrenutnoVrijeme();
-  uint8_t dan = sada.dayOfTheWeek();
-  const char znakovi[] = {'N', 'P', 'U', 'S', 'C', 'P', 'S'};
-  if (dan < 7) {
-    oznakaDana = znakovi[dan];
-  }
+bool jeZadnjaSvjezaSinkronizacijaIzNTP() {
+  return zadnjiPotvrdeniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela();
 }
 
 bool jeRTCPouzdan() {
@@ -525,10 +716,6 @@ bool jeRTCPouzdan() {
 
 bool jeRtcSqwAktivan() {
   return rtcSqwAktivan;
-}
-
-bool fallbackImaPouzdanuReferencu() {
-  return fallbackAktivan && fallbackVrijeme.unixtime() > 0;
 }
 
 bool jeVrijemePotvrdjenoZaAutomatiku() {
@@ -540,7 +727,7 @@ bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme) {
     return false;
   }
 
-  const DateTime uskrs = izracunajDatumUskrsa(vrijeme.year());
+  const DateTime uskrs = dohvatiDatumUskrsaZaGodinu(vrijeme.year());
   const DateTime pocetakTisine(uskrs.unixtime() - (3UL * 86400UL) + (19UL * 3600UL));
   const DateTime krajTisine(uskrs.unixtime() - 86400UL + (22UL * 3600UL));
   const uint32_t sada = vrijeme.unixtime();
@@ -552,23 +739,45 @@ int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme) {
   return izracunajDSTIzKalendara(vrijeme) ? 120 : 60;
 }
 
-DateTime getZadnjeSinkroniziranoVrijeme() {
-  return zadnjaSinkronizacija;
-}
-
 void oznaciPovratakNaRTC() {
-  // Ako je bila NTP ili DCF, vrati se na RTC.
-  if (trenutniIzvor == IZ_NTP || trenutniIzvor == IZ_DCF) {
+  // Ako je sat radio iz potvrdenog NTP/DCF izvora, vrati prikaz i rad na RTC.
+  if (trenutniIzvor != IZ_RTC) {
     trenutniIzvor = IZ_RTC;
     azurirajOznakuIzvora();
-    posaljiPCLog(F("Povratak na RTC nakon gubitka NTP/DCF sinkronizacije"));
+    posaljiPCLog(F("Povratak na RTC nakon vise od 24 sata bez nove NTP/DCF sinkronizacije"));
   }
 }
 
+void razvojnoResetirajIzvorSinkronizacijeNaRTC() {
+  zadnjaSinkronizacija = DateTime((uint32_t)0);
+  zadnjaSinkronizacijaMs = 0;
+  trenutniIzvor = IZ_RTC;
+  zadnjiPotvrdeniIzvor = IZ_RTC;
+  ocistiSumnjivuSinkronizaciju();
+  azurirajOznakuIzvora();
+  posaljiPCLog(F("Vrijeme: razvojni reset izvora sinkronizacije na RTC"));
+}
+
 bool jeSinkronizacijaZastarjela() {
-  if (zadnjaSinkronizacijaMs == 0) return true;
+  if (!jeVrijemeURasponuPouzdanosti(zadnjaSinkronizacija)) {
+    return true;
+  }
+
+  if (zadnjaSinkronizacijaMs == 0) {
+    if (!jeVrijemeURasponuPouzdanosti(trenutnoVrijeme)) {
+      return true;
+    }
+
+    uint32_t starostSekunde = 0;
+    if (trenutnoVrijeme.unixtime() >= zadnjaSinkronizacija.unixtime()) {
+      starostSekunde = trenutnoVrijeme.unixtime() - zadnjaSinkronizacija.unixtime();
+    }
+
+    return starostSekunde > (TIMEOUT_SINKRONIZACIJE_MS / 1000UL);
+  }
+
   unsigned long sadaMs = millis();
-  // Zastarjela ako je prošlo više od 1 sata
+  // Zastarjela ako je proslo vise od 24 sata
   return (sadaMs - zadnjaSinkronizacijaMs) > TIMEOUT_SINKRONIZACIJE_MS;
 }
 

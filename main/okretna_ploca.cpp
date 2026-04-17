@@ -4,6 +4,7 @@
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
+#include "slavljenje_mrtvacko.h"
 #include "postavke.h"
 #include "eeprom_konstante.h"
 #include "wear_leveling.h"
@@ -289,7 +290,9 @@ void otkaziZakazanoSlavljenjeZbogIzvadenogCavla() {
 }
 
 void zaustaviAktivnoSlavljenjeZbogIzvadenogCavla() {
-  if (autoPosebniAktivniNacin != POSEBNI_NACIN_SLAVLJENJE && !jeSlavljenjeUTijeku()) {
+  // 5. cavao smije zaustaviti samo slavljenje koje je pokrenula automatika ploce.
+  // Rucno ili daljinski pokrenuto slavljenje ne smije pasti odmah nakon starta.
+  if (autoPosebniAktivniNacin != POSEBNI_NACIN_SLAVLJENJE) {
     return;
   }
 
@@ -424,7 +427,7 @@ void obradiUlazePloce(const DateTime& now,
                                                  : dohvatiTrajanjeZvonjenjaRadniMs();
   const unsigned long trajanjeSlavljenja = dohvatiTrajanjeSlavljenjaMs();
   const unsigned long odgodaSlavljenjaMs =
-      static_cast<unsigned long>(dohvatiOdgoduSlavljenjaMin()) * 60000UL;
+      static_cast<unsigned long>(dohvatiOdgoduSlavljenjaSekunde()) * 1000UL;
   const bool slavljenjeAktivno = jeCavaoAktivan(ulazi, brojMjestaZaCavle, cavaoSlavljenja);
 
   bool imaZvono = false;
@@ -447,7 +450,7 @@ void obradiUlazePloce(const DateTime& now,
                                false);
     if (autoZvonoAktivno[zvono - 1] || autoZvonoZakazano[zvono - 1]) {
       imaZvono = true;
-      String bellLog = F("Cavli: aktiviran BELL");
+      String bellLog = F("Cavli: aktiviran ZVONO");
       bellLog += zvono;
       bellLog += F(" preko cavla ");
       bellLog += cavao;

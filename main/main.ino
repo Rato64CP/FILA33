@@ -19,6 +19,7 @@
 #include "watchdog.h"
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
+#include "misna_automatika.h"
 
 void setup() {
   inicijalizirajLCD();
@@ -37,6 +38,7 @@ void setup() {
 
   inicijalizirajZvona();
   inicijalizirajSuncevuAutomatiku();
+  inicijalizirajMisnuAutomatiku();
   inicijalizirajOtkucavanje();
   inicijalizirajMrtvackoThumbwheel();
   inicijalizirajKazaljke();
@@ -63,9 +65,10 @@ void loop() {
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
 
   upravljajZvonom();
-  upravljajSuncevomAutomatikom();
-  osvjeziMrtvackoThumbwheel();
   upravljajOtkucavanjem();
+  upravljajSuncevomAutomatikom();
+  upravljajMisnomAutomatikom();
+  osvjeziMrtvackoThumbwheel();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();
   obradiAutomatskiNTPZahtjevESP();

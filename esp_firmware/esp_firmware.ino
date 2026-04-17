@@ -1,7 +1,17 @@
+#if defined(ESP8266)
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+using ToranjWebServer = ESP8266WebServer;
+#elif defined(ESP32)
+#include <WiFi.h>
+#include <WebServer.h>
+using ToranjWebServer = WebServer;
+#else
+#error "Ovaj firmware podrzava samo ESP8266 ili ESP32."
+#endif
+
 #include <WiFiUdp.h>
 #include <NTPClient.h>
-#include <ESP8266WebServer.h>
 #include <EEPROM.h>
 #include <time.h>
 
@@ -17,11 +27,18 @@ bool primljenaWifiKonfiguracija = false;
 bool wifiOmogucen = true;
 
 // Vrijednosti za privremenu setup mrezu toranjskog sata.
-// Setup AP se aktivira dugim drzanjem tipke na GPIO14 (NodeMCU D5) prema GND.
+// Pinovi ovise o odabranom ESP modulu.
 static const char WIFI_SETUP_AP_SSID[] = "FILA33_setup";
 static const char WIFI_SETUP_AP_LOZINKA[] = "toranj33";
+#if defined(ESP8266)
 static const uint8_t WIFI_SETUP_PIN = 14;       // GPIO14 / NodeMCU D5
 static const uint8_t WIFI_STATUS_LED_PIN = 12;  // GPIO12 / NodeMCU D6
+#elif defined(ESP32)
+static const uint8_t WIFI_SETUP_PIN = 27;       // Predlozeni tipkalo prema GND
+static const uint8_t WIFI_STATUS_LED_PIN = 26;  // Predlozena status LED
+static const int ESP_MEGA_RX_PIN = 16;          // ESP32 RX prema Mega TX1 preko djelitelja
+static const int ESP_MEGA_TX_PIN = 17;          // ESP32 TX prema Mega RX1
+#endif
 static const unsigned long WIFI_SETUP_DRZANJE_MS = 4000UL;
 static const unsigned long WIFI_SETUP_TRAJANJE_MS = 300000UL;
 static const unsigned long WIFI_SETUP_GASENJE_NAKON_SPREMANJA_MS = 15000UL;
@@ -34,20 +51,88 @@ static const unsigned long NTP_INTERVAL_MS = 60000;
 static const size_t SERIJSKI_BUFFER_MAX = 1280;
 static const size_t SERIJSKI_BUDZET_BAJTOVA_PO_POZIVU = 192;
 static const size_t WEB_LOZINKA_MAX = 33;
-static const size_t ESP_EEPROM_VELICINA = 256;
+static const size_t ESP_EEPROM_VELICINA = 512;
 static const uint16_t WEB_AUTH_POTPIS = 0x5741;
+static const uint16_t MISA_POTPIS = 0x4D53;
+static const uint8_t MISA_VERZIJA = 1;
+static const uint8_t BROJ_MISNIH_BLAGDANA = 16;
 static const int ESP_EEPROM_ADRESA_WEB = 0;
+static const int ESP_EEPROM_ADRESA_MISA = 64;
+static const unsigned long CMD_CEKANJE_NA_MEGU_MS = 1500UL;
 
 WiFiUDP ntpUDP;
 NTPClient ntpKlijent(ntpUDP, ntpPosluzitelj, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
 
-ESP8266WebServer webPosluzitelj(80);
+ToranjWebServer webPosluzitelj(80);
 
 String webLozinka = "cista2906";
 
 struct WebAuthConfig {
   uint16_t potpis;
   char lozinka[WEB_LOZINKA_MAX];
+};
+
+enum CmdOdgovorMegai {
+  CMD_ODGOVOR_CEKA = 0,
+  CMD_ODGOVOR_OK,
+  CMD_ODGOVOR_BUSY,
+  CMD_ODGOVOR_ERR,
+  CMD_ODGOVOR_TIMEOUT
+};
+
+enum TipMisnogBlagdanaESP {
+  MISNI_BLAGDAN_FIKSNI = 0,
+  MISNI_BLAGDAN_OD_USKRSA = 1
+};
+
+struct VrijemeMiseESP {
+  uint8_t aktivno;
+  uint8_t sat;
+  uint8_t minuta;
+};
+
+struct RadnaMisaESP {
+  uint8_t aktivno;
+  uint8_t sat;
+  uint8_t minuta;
+  uint8_t maskaDana;
+};
+
+struct MisnePostavkeESP {
+  uint16_t potpis;
+  uint8_t verzija;
+  uint8_t rasporedAktivan;
+  RadnaMisaESP radna;
+  VrijemeMiseESP nedjelja;
+  VrijemeMiseESP blagdani[BROJ_MISNIH_BLAGDANA];
+  uint16_t checksum;
+};
+
+struct DefinicijaMisnogBlagdanaESP {
+  const char* naziv;
+  uint8_t tip;
+  uint8_t mjesec;
+  uint8_t dan;
+  int8_t pomakOdUskrsaDana;
+};
+
+static const DefinicijaMisnogBlagdanaESP MISNI_BLAGDANI[BROJ_MISNIH_BLAGDANA] = {
+  {"Bogojavlje", MISNI_BLAGDAN_FIKSNI, 1, 6, 0},
+  {"Blagovij.", MISNI_BLAGDAN_FIKSNI, 3, 25, 0},
+  {"Cvjetnica", MISNI_BLAGDAN_OD_USKRSA, 0, 0, -7},
+  {"Vel.cetv.", MISNI_BLAGDAN_OD_USKRSA, 0, 0, -3},
+  {"Nova god.", MISNI_BLAGDAN_FIKSNI, 1, 1, 0},
+  {"Uskrs", MISNI_BLAGDAN_OD_USKRSA, 0, 0, 0},
+  {"Uskr.pon.", MISNI_BLAGDAN_OD_USKRSA, 0, 0, 1},
+  {"Tijelovo", MISNI_BLAGDAN_OD_USKRSA, 0, 0, 60},
+  {"Vel.Gospa", MISNI_BLAGDAN_FIKSNI, 8, 15, 0},
+  {"Svi sveti", MISNI_BLAGDAN_FIKSNI, 11, 1, 0},
+  {"Bezgrjesno", MISNI_BLAGDAN_FIKSNI, 12, 8, 0},
+  {"Bozic", MISNI_BLAGDAN_FIKSNI, 12, 25, 0},
+  {"Sv.Ante", MISNI_BLAGDAN_FIKSNI, 6, 13, 0},
+  {"Sv.Stjep.", MISNI_BLAGDAN_FIKSNI, 12, 26, 0},
+  {"Sv.Ivan", MISNI_BLAGDAN_FIKSNI, 12, 27, 0},
+  {"Srce Isus.", MISNI_BLAGDAN_OD_USKRSA, 0, 0, 68}
 };
 
 // Statusne zastavice za faze rada.
@@ -70,6 +155,14 @@ bool setupTipkaBilaPritisnuta = false;
 unsigned long setupTipkaPocetakMs = 0;
 unsigned long setupApPokrenutMs = 0;
 unsigned long setupApZakazanoGasenjeMs = 0;
+MisnePostavkeESP misnePostavke = {};
+uint32_t zadnjiObradeniMisniKljucMinute = 0xFFFFFFFFUL;
+bool megaVrijemeDostupno = false;
+time_t megaVrijemeEpoch = 0;
+unsigned long megaVrijemeMillis = 0;
+unsigned long zadnjiZahtjevMegaVremenaMs = 0;
+static const unsigned long MEGA_VRIJEME_INTERVAL_MS = 30000UL;
+CmdOdgovorMegai zadnjiCmdOdgovorMega = CMD_ODGOVOR_CEKA;
 
 void poveziNaWiFi();
 bool postaviStatickuKonfiguraciju();
@@ -92,22 +185,147 @@ void posaljiJsonStatus();
 void ucitajWebAutentikaciju();
 bool osigurajWebAutorizaciju();
 void posaljiApiKomanduMegai(const char* naredba, const char* odgovor);
+CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long timeoutMs);
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs);
+void ucitajMisnePostavke();
+bool spremiMisnePostavke();
+void postaviZadaneMisnePostavke();
+void obradiMisniRaspored();
+void odrzavajMegaVrijemeFallback();
+void posaljiMisaStranicu(const String &poruka, bool uspjeh);
+void posaljiMisaBlagdaniStranicu(const String &poruka, bool uspjeh);
+bool obradiMisaWebSpremanje(String &poruka);
+bool obradiMisaBlagdaniWebSpremanje(String &poruka);
+bool parsirajVrijemeHHMM(const String &tekst, uint8_t &sat, uint8_t &minuta);
+String formatirajVrijemeHHMM(uint8_t sat, uint8_t minuta);
+uint16_t izracunajChecksumMisnihPostavki(const MisnePostavkeESP &postavke);
+bool jesuMisnePostavkeIspravne(const MisnePostavkeESP &postavke);
+bool izracunajDatumUskrsa(int godina, uint8_t &mjesec, uint8_t &dan);
+bool dohvatiDatumMisnogBlagdana(uint8_t indeks, int godina, uint8_t &mjesec, uint8_t &dan);
+void sloziBlagdanePoDatumu(uint8_t indeksi[BROJ_MISNIH_BLAGDANA], int godina);
+int dohvatiTrenutnuGodinuMisa();
+bool dohvatiLokalniEpochZaMise(time_t &lokalniEpoch);
+bool parsirajIsoLokalnoVrijeme(const char* tekst, time_t &lokalniEpoch);
+bool odrediBlagdanZaDatum(int godina, int mjesec, int dan, uint8_t &blagdan);
+bool jeOdabraniRadniDan(uint8_t maskaDana, int danUTjednuTm);
+bool trebaOkinutiMisnuNajavuIstiDan(int trenutnaMinuta, int minutaMise, int odmakMinuta);
+bool trebaOkinutiMisnuNajavuPrekoPonoci(int trenutnaMinuta, int minutaMise, int odmakMinuta);
+void posaljiMisnuKomanduMegai(const char* naredba, const char* opis);
 void pokreniSetupPristupnuTocku();
 void zaustaviSetupPristupnuTocku(bool zbogTimeouta);
 void odrzavajSetupTipku();
 void odrzavajSetupPristupnuTocku();
 void osvjeziWiFiStatusLedicu();
+int brojDanaUMjesecu(int godina, int mjesec);
+void pomakniDatumZaJedanDanNaprijed(int &godina, int &mjesec, int &dan);
+
+static void inicijalizirajSerijskiPortPremaMegi() {
+#if defined(ESP8266)
+  Serial.begin(9600);
+#elif defined(ESP32)
+  // Na ESP32 runtime preusmjeravamo Serial na zasebne UART pinove prema Megi.
+  // Time USB ostaje koristan za upload, a komunikacija toranjskog sata ide preko 16/17.
+  Serial.begin(9600, SERIAL_8N1, ESP_MEGA_RX_PIN, ESP_MEGA_TX_PIN);
+#endif
+  delay(200);
+}
+
+static void postaviDhcpKonfiguraciju() {
+#if defined(ESP8266)
+  WiFi.config(0U, 0U, 0U);
+#elif defined(ESP32)
+  const IPAddress praznaAdresa(0U, 0U, 0U, 0U);
+  WiFi.config(praznaAdresa, praznaAdresa, praznaAdresa);
+#endif
+}
+
+uint16_t izracunajChecksumMisnihPostavki(const MisnePostavkeESP &postavke) {
+  const uint8_t* bajtovi = reinterpret_cast<const uint8_t*>(&postavke);
+  uint16_t suma = 0;
+  for (size_t i = 0; i < sizeof(MisnePostavkeESP) - sizeof(postavke.checksum); ++i) {
+    suma = static_cast<uint16_t>((suma + bajtovi[i]) & 0xFFFFU);
+  }
+  return suma;
+}
+
+void postaviZadaneMisnePostavke() {
+  memset(&misnePostavke, 0, sizeof(misnePostavke));
+  misnePostavke.potpis = MISA_POTPIS;
+  misnePostavke.verzija = MISA_VERZIJA;
+  misnePostavke.rasporedAktivan = 0;
+  misnePostavke.radna.aktivno = 0;
+  misnePostavke.radna.sat = 8;
+  misnePostavke.radna.minuta = 0;
+  misnePostavke.radna.maskaDana = 0x0F;
+  misnePostavke.nedjelja.aktivno = 0;
+  misnePostavke.nedjelja.sat = 9;
+  misnePostavke.nedjelja.minuta = 0;
+  for (uint8_t i = 0; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    misnePostavke.blagdani[i].aktivno = 0;
+    misnePostavke.blagdani[i].sat = 9;
+    misnePostavke.blagdani[i].minuta = 0;
+  }
+  misnePostavke.checksum = izracunajChecksumMisnihPostavki(misnePostavke);
+}
+
+bool jesuMisnePostavkeIspravne(const MisnePostavkeESP &postavke) {
+  if (postavke.potpis != MISA_POTPIS || postavke.verzija != MISA_VERZIJA) {
+    return false;
+  }
+
+  if (postavke.rasporedAktivan > 1 || postavke.radna.aktivno > 1 ||
+      postavke.nedjelja.aktivno > 1 || (postavke.radna.maskaDana & 0xC0U) != 0) {
+    return false;
+  }
+
+  if (postavke.radna.sat > 23 || postavke.radna.minuta > 59 ||
+      postavke.nedjelja.sat > 23 || postavke.nedjelja.minuta > 59) {
+    return false;
+  }
+
+  for (uint8_t i = 0; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    if (postavke.blagdani[i].aktivno > 1 ||
+        postavke.blagdani[i].sat > 23 ||
+        postavke.blagdani[i].minuta > 59) {
+      return false;
+    }
+  }
+
+  return postavke.checksum == izracunajChecksumMisnihPostavki(postavke);
+}
+
+void ucitajMisnePostavke() {
+  MisnePostavkeESP ucitano{};
+  EEPROM.get(ESP_EEPROM_ADRESA_MISA, ucitano);
+
+  if (jesuMisnePostavkeIspravne(ucitano)) {
+    misnePostavke = ucitano;
+    Serial.println("WEB MISA: ucitane spremljene postavke");
+    return;
+  }
+
+  postaviZadaneMisnePostavke();
+  spremiMisnePostavke();
+  Serial.println("WEB MISA: koristim zadane postavke");
+}
+
+bool spremiMisnePostavke() {
+  misnePostavke.potpis = MISA_POTPIS;
+  misnePostavke.verzija = MISA_VERZIJA;
+  misnePostavke.checksum = izracunajChecksumMisnihPostavki(misnePostavke);
+  EEPROM.put(ESP_EEPROM_ADRESA_MISA, misnePostavke);
+  return EEPROM.commit();
+}
 
 void setup() {
-  Serial.begin(9600);
-  delay(200);
+  inicijalizirajSerijskiPortPremaMegi();
   pinMode(WIFI_SETUP_PIN, INPUT_PULLUP);
   pinMode(WIFI_STATUS_LED_PIN, OUTPUT);
   digitalWrite(WIFI_STATUS_LED_PIN, LOW);
   EEPROM.begin(ESP_EEPROM_VELICINA);
   webLozinka.reserve(WEB_LOZINKA_MAX - 1);
   ucitajWebAutentikaciju();
+  ucitajMisnePostavke();
 
   Serial.println("ESP BOOT");
   Serial.println("CFGREQ");
@@ -145,6 +363,9 @@ void loop() {
 
     osvjeziNTPSat();
   }
+
+  odrzavajMegaVrijemeFallback();
+  obradiMisniRaspored();
 
   webPosluzitelj.handleClient();
   yield();
@@ -237,12 +458,12 @@ void poveziNaWiFi() {
     WiFi.mode(setupApAktivan ? WIFI_AP_STA : WIFI_STA);
 
     if (koristiDhcp) {
-      WiFi.config(0U, 0U, 0U);
+      postaviDhcpKonfiguraciju();
       Serial.println("WIFI: DHCP konfiguracija aktivna");
     } else if (!postaviStatickuKonfiguraciju()) {
       Serial.println("WIFI: Staticka konfiguracija neispravna, prelazim na DHCP");
       koristiDhcp = true;
-      WiFi.config(0U, 0U, 0U);
+      postaviDhcpKonfiguraciju();
     }
 
     Serial.print("WIFI: Spajam se na SSID: ");
@@ -281,7 +502,7 @@ bool postaviStatickuKonfiguraciju() {
 
   bool uspjeh = WiFi.config(ip, gateway, maska);
   if (!uspjeh) {
-    Serial.println("WIFI: ESP8266 nije prihvatio staticku konfiguraciju");
+    Serial.println("WIFI: ESP nije prihvatio staticku konfiguraciju");
   }
   return uspjeh;
 }
@@ -319,6 +540,7 @@ void osvjeziNTPSat() {
 void posaljiNTPPremaMegai() {
   time_t utcEpoch = ntpKlijent.getEpochTime();
   time_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
+  bool dstAktivan = jeLjetnoVrijemeEU(utcEpoch);
   struct tm lokalniTm;
   if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
     Serial.println("NTPLOG: konverzija lokalnog vremena nije uspjela, preskacem slanje");
@@ -332,7 +554,9 @@ void posaljiNTPPremaMegai() {
   Serial.println(isoBuffer);
 
   Serial.print("NTP:");
-  Serial.println(isoBuffer);
+  Serial.print(isoBuffer);
+  Serial.print(";DST=");
+  Serial.println(dstAktivan ? '1' : '0');
 }
 
 String ocistiJednolinijskiTekst(const String &ulaz, size_t maxDuljina) {
@@ -445,9 +669,27 @@ void obradiSerijskiUlaz() {
       if (linija[0] != '\0') {
         if (strncmp(linija, "STATUS:", 7) == 0) {
           // Status toranjskog sata se vise ne cachea na ESP-u.
+        } else if (strncmp(linija, "TIME:", 5) == 0) {
+          time_t lokalniEpoch = 0;
+          if (parsirajIsoLokalnoVrijeme(linija + 5, lokalniEpoch)) {
+            megaVrijemeEpoch = lokalniEpoch;
+            megaVrijemeMillis = millis();
+            megaVrijemeDostupno = true;
+            Serial.print("WEB MISA: primljeno vrijeme s Mege ");
+            Serial.println(linija + 5);
+          } else {
+            Serial.print("WEB MISA: neispravno TIME vrijeme ");
+            Serial.println(linija + 5);
+          }
         } else if (strcmp(linija, "ACK:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = false;
+        } else if (strcmp(linija, "ACK:CMD_OK") == 0) {
+          zadnjiCmdOdgovorMega = CMD_ODGOVOR_OK;
+        } else if (strcmp(linija, "ERR:CMD_BUSY") == 0) {
+          zadnjiCmdOdgovorMega = CMD_ODGOVOR_BUSY;
+        } else if (strcmp(linija, "ERR:CMD") == 0) {
+          zadnjiCmdOdgovorMega = CMD_ODGOVOR_ERR;
         } else if (strcmp(linija, "ERR:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = true;
@@ -684,6 +926,36 @@ int zadnjaNedjeljaUMjesecu(int godina, int mjesec) {
   return brojDana - pomakDoNedjelje;
 }
 
+int brojDanaUMjesecu(int godina, int mjesec) {
+  static const int daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (mjesec < 1 || mjesec > 12) {
+    return 31;
+  }
+
+  int brojDana = daniUMjesecu[mjesec - 1];
+  if (mjesec == 2 && jePrijestupnaGodina(godina)) {
+    brojDana = 29;
+  }
+  return brojDana;
+}
+
+void pomakniDatumZaJedanDanNaprijed(int &godina, int &mjesec, int &dan) {
+  ++dan;
+  const int zadnjiDan = brojDanaUMjesecu(godina, mjesec);
+  if (dan <= zadnjiDan) {
+    return;
+  }
+
+  dan = 1;
+  ++mjesec;
+  if (mjesec <= 12) {
+    return;
+  }
+
+  mjesec = 1;
+  ++godina;
+}
+
 int danUTjednu(int godina, int mjesec, int dan) {
   static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
   int g = godina;
@@ -734,6 +1006,349 @@ time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch) {
   return utcEpoch + ukupniOffset;
 }
 
+String formatirajVrijemeHHMM(uint8_t sat, uint8_t minuta) {
+  char buffer[6];
+  snprintf(buffer, sizeof(buffer), "%02u:%02u", sat, minuta);
+  return String(buffer);
+}
+
+bool parsirajVrijemeHHMM(const String &tekst, uint8_t &sat, uint8_t &minuta) {
+  if (tekst.length() != 5 || tekst.charAt(2) != ':') {
+    return false;
+  }
+
+  if (!isDigit(tekst.charAt(0)) || !isDigit(tekst.charAt(1)) ||
+      !isDigit(tekst.charAt(3)) || !isDigit(tekst.charAt(4))) {
+    return false;
+  }
+
+  sat = static_cast<uint8_t>((tekst.charAt(0) - '0') * 10 + (tekst.charAt(1) - '0'));
+  minuta = static_cast<uint8_t>((tekst.charAt(3) - '0') * 10 + (tekst.charAt(4) - '0'));
+  return sat <= 23 && minuta <= 59;
+}
+
+bool izracunajDatumUskrsa(int godina, uint8_t &mjesec, uint8_t &dan) {
+  if (godina < 2000) {
+    return false;
+  }
+
+  const int a = godina % 19;
+  const int b = godina / 100;
+  const int c = godina % 100;
+  const int d = b / 4;
+  const int e = b % 4;
+  const int f = (b + 8) / 25;
+  const int g = (b - f + 1) / 3;
+  const int h = (19 * a + b - d - g + 15) % 30;
+  const int i = c / 4;
+  const int k = c % 4;
+  const int l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const int m = (a + 11 * h + 22 * l) / 451;
+  const int mjesecInt = (h + l - 7 * m + 114) / 31;
+  const int danInt = ((h + l - 7 * m + 114) % 31) + 1;
+
+  mjesec = static_cast<uint8_t>(mjesecInt);
+  dan = static_cast<uint8_t>(danInt);
+  return true;
+}
+
+bool dohvatiDatumMisnogBlagdana(uint8_t indeks, int godina, uint8_t &mjesec, uint8_t &dan) {
+  if (indeks >= BROJ_MISNIH_BLAGDANA) {
+    return false;
+  }
+
+  const DefinicijaMisnogBlagdanaESP &blagdan = MISNI_BLAGDANI[indeks];
+  if (blagdan.tip == MISNI_BLAGDAN_FIKSNI) {
+    mjesec = blagdan.mjesec;
+    dan = blagdan.dan;
+    return true;
+  }
+
+  uint8_t uskrsMjesec = 0;
+  uint8_t uskrsDan = 0;
+  if (!izracunajDatumUskrsa(godina, uskrsMjesec, uskrsDan)) {
+    return false;
+  }
+
+  struct tm uskrsTm = {};
+  uskrsTm.tm_year = godina - 1900;
+  uskrsTm.tm_mon = uskrsMjesec - 1;
+  uskrsTm.tm_mday = uskrsDan + blagdan.pomakOdUskrsaDana;
+  uskrsTm.tm_hour = 12;
+  const time_t epoch = mktime(&uskrsTm);
+  if (epoch == static_cast<time_t>(-1)) {
+    return false;
+  }
+
+  struct tm rezultatTm;
+  if (localtime_r(&epoch, &rezultatTm) == nullptr) {
+    return false;
+  }
+
+  mjesec = static_cast<uint8_t>(rezultatTm.tm_mon + 1);
+  dan = static_cast<uint8_t>(rezultatTm.tm_mday);
+  return true;
+}
+
+int dohvatiTrenutnuGodinuMisa() {
+  time_t lokalniEpoch = 0;
+  if (!dohvatiLokalniEpochZaMise(lokalniEpoch)) {
+    return 0;
+  }
+
+  struct tm lokalniTm;
+  if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
+    return 0;
+  }
+
+  return lokalniTm.tm_year + 1900;
+}
+
+bool dohvatiLokalniEpochZaMise(time_t &lokalniEpoch) {
+  if (ntpKlijent.isTimeSet()) {
+    lokalniEpoch = konvertirajUTCuLokalnoVrijeme(ntpKlijent.getEpochTime());
+    return true;
+  }
+
+  if (!megaVrijemeDostupno) {
+    return false;
+  }
+
+  lokalniEpoch = megaVrijemeEpoch + static_cast<time_t>((millis() - megaVrijemeMillis) / 1000UL);
+  return true;
+}
+
+bool parsirajIsoLokalnoVrijeme(const char* tekst, time_t &lokalniEpoch) {
+  if (tekst == nullptr || strlen(tekst) != 19 ||
+      tekst[4] != '-' || tekst[7] != '-' || tekst[10] != 'T' ||
+      tekst[13] != ':' || tekst[16] != ':') {
+    return false;
+  }
+
+  for (uint8_t i = 0; i < 19; ++i) {
+    if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16) {
+      continue;
+    }
+    if (!isDigit(tekst[i])) {
+      return false;
+    }
+  }
+
+  struct tm lokalniTm = {};
+  lokalniTm.tm_year = (tekst[0] - '0') * 1000 + (tekst[1] - '0') * 100 +
+                      (tekst[2] - '0') * 10 + (tekst[3] - '0') - 1900;
+  lokalniTm.tm_mon = ((tekst[5] - '0') * 10 + (tekst[6] - '0')) - 1;
+  lokalniTm.tm_mday = (tekst[8] - '0') * 10 + (tekst[9] - '0');
+  lokalniTm.tm_hour = (tekst[11] - '0') * 10 + (tekst[12] - '0');
+  lokalniTm.tm_min = (tekst[14] - '0') * 10 + (tekst[15] - '0');
+  lokalniTm.tm_sec = (tekst[17] - '0') * 10 + (tekst[18] - '0');
+  lokalniTm.tm_isdst = -1;
+
+  const time_t epoch = mktime(&lokalniTm);
+  if (epoch == static_cast<time_t>(-1)) {
+    return false;
+  }
+
+  lokalniEpoch = epoch;
+  return true;
+}
+
+void sloziBlagdanePoDatumu(uint8_t indeksi[BROJ_MISNIH_BLAGDANA], int godina) {
+  for (uint8_t i = 0; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    indeksi[i] = i;
+  }
+
+  if (godina <= 0) {
+    return;
+  }
+
+  for (uint8_t i = 1; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    const uint8_t kandidat = indeksi[i];
+    uint8_t kandidatMjesec = 12;
+    uint8_t kandidatDan = 31;
+    dohvatiDatumMisnogBlagdana(kandidat, godina, kandidatMjesec, kandidatDan);
+
+    int j = static_cast<int>(i) - 1;
+    while (j >= 0) {
+      uint8_t prethodniMjesec = 12;
+      uint8_t prethodniDan = 31;
+      dohvatiDatumMisnogBlagdana(indeksi[j], godina, prethodniMjesec, prethodniDan);
+      const bool veciDatum =
+          (prethodniMjesec > kandidatMjesec) ||
+          (prethodniMjesec == kandidatMjesec && prethodniDan > kandidatDan);
+      if (!veciDatum) {
+        break;
+      }
+      indeksi[j + 1] = indeksi[j];
+      --j;
+    }
+    indeksi[j + 1] = kandidat;
+  }
+}
+
+bool odrediBlagdanZaDatum(int godina, int mjesec, int dan, uint8_t &blagdan) {
+  for (uint8_t i = 0; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    uint8_t mjesecBlagdana = 0;
+    uint8_t danBlagdana = 0;
+    if (!dohvatiDatumMisnogBlagdana(i, godina, mjesecBlagdana, danBlagdana)) {
+      continue;
+    }
+    if (mjesecBlagdana == mjesec && danBlagdana == dan) {
+      blagdan = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool jeOdabraniRadniDan(uint8_t maskaDana, int danUTjednuTm) {
+  if (danUTjednuTm < 1 || danUTjednuTm > 6) {
+    return false;
+  }
+  const uint8_t bit = static_cast<uint8_t>(1U << (danUTjednuTm - 1));
+  return (maskaDana & bit) != 0;
+}
+
+bool trebaOkinutiMisnuNajavuIstiDan(int trenutnaMinuta, int minutaMise, int odmakMinuta) {
+  const int minutaNajave = minutaMise - odmakMinuta;
+  return minutaNajave >= 0 && minutaNajave == trenutnaMinuta;
+}
+
+bool trebaOkinutiMisnuNajavuPrekoPonoci(int trenutnaMinuta, int minutaMise, int odmakMinuta) {
+  const int minutaNajave = minutaMise - odmakMinuta;
+  return minutaNajave < 0 && (minutaNajave + 1440) == trenutnaMinuta;
+}
+
+void posaljiMisnuKomanduMegai(const char* naredba, const char* opis) {
+  const CmdOdgovorMegai status = posaljiKomanduMegaiIPricekaj(naredba, CMD_CEKANJE_NA_MEGU_MS);
+  if (status == CMD_ODGOVOR_OK) {
+    Serial.print("WEB MISA: Mega prihvatila naredbu ");
+    Serial.println(opis);
+  } else if (status == CMD_ODGOVOR_BUSY) {
+    Serial.print("WEB MISA: Mega je zauzeta, misna naredba nije prihvacena ");
+    Serial.println(opis);
+  } else if (status == CMD_ODGOVOR_ERR) {
+    Serial.print("WEB MISA: Mega je odbila misnu naredbu ");
+    Serial.println(opis);
+  } else {
+    Serial.print("WEB MISA: nema odgovora Mege za misnu naredbu ");
+    Serial.println(opis);
+  }
+}
+
+void obradiMisniRaspored() {
+  if (!misnePostavke.rasporedAktivan) {
+    return;
+  }
+
+  time_t lokalniEpoch = 0;
+  if (!dohvatiLokalniEpochZaMise(lokalniEpoch)) {
+    return;
+  }
+
+  const uint32_t kljucMinute = static_cast<uint32_t>(lokalniEpoch / 60);
+  if (kljucMinute == zadnjiObradeniMisniKljucMinute) {
+    return;
+  }
+  zadnjiObradeniMisniKljucMinute = kljucMinute;
+
+  struct tm lokalniTm;
+  if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
+    return;
+  }
+
+  const int trenutnaMinuta = lokalniTm.tm_hour * 60 + lokalniTm.tm_min;
+  const int godina = lokalniTm.tm_year + 1900;
+  const int mjesec = lokalniTm.tm_mon + 1;
+  const int dan = lokalniTm.tm_mday;
+  int sutraGodina = godina;
+  int sutraMjesec = mjesec;
+  int sutraDan = dan;
+  pomakniDatumZaJedanDanNaprijed(sutraGodina, sutraMjesec, sutraDan);
+  const int sutraDanUTjednu = (lokalniTm.tm_wday + 1) % 7;
+
+  uint8_t sutrasnjiBlagdan = 0;
+  if (odrediBlagdanZaDatum(sutraGodina, sutraMjesec, sutraDan, sutrasnjiBlagdan)) {
+    const VrijemeMiseESP &sutrasnjaMisa = misnePostavke.blagdani[sutrasnjiBlagdan];
+    if (sutrasnjaMisa.aktivno) {
+      const int minutaMise = sutrasnjaMisa.sat * 60 + sutrasnjaMisa.minuta;
+      if (trebaOkinutiMisnuNajavuPrekoPonoci(trenutnaMinuta, minutaMise, 120) ||
+          trebaOkinutiMisnuNajavuPrekoPonoci(trenutnaMinuta, minutaMise, 60)) {
+        posaljiMisnuKomanduMegai("MISA_BLAGDAN", MISNI_BLAGDANI[sutrasnjiBlagdan].naziv);
+        return;
+      }
+    }
+  } else if (sutraDanUTjednu == 0) {
+    if (misnePostavke.nedjelja.aktivno) {
+      const int minutaMise = misnePostavke.nedjelja.sat * 60 + misnePostavke.nedjelja.minuta;
+      if (trebaOkinutiMisnuNajavuPrekoPonoci(trenutnaMinuta, minutaMise, 120) ||
+          trebaOkinutiMisnuNajavuPrekoPonoci(trenutnaMinuta, minutaMise, 60)) {
+        posaljiMisnuKomanduMegai("MISA_NEDJELJA", "nedjelja");
+        return;
+      }
+    }
+  } else if (misnePostavke.radna.aktivno &&
+             jeOdabraniRadniDan(misnePostavke.radna.maskaDana, sutraDanUTjednu)) {
+    const int minutaMise = misnePostavke.radna.sat * 60 + misnePostavke.radna.minuta;
+    if (trebaOkinutiMisnuNajavuPrekoPonoci(trenutnaMinuta, minutaMise, 30)) {
+      posaljiMisnuKomanduMegai("MISA_RADNA", "radni dan");
+      return;
+    }
+  }
+
+  uint8_t blagdan = 0;
+  if (odrediBlagdanZaDatum(godina, mjesec, dan, blagdan)) {
+    const VrijemeMiseESP &misa = misnePostavke.blagdani[blagdan];
+    if (!misa.aktivno) {
+      return;
+    }
+
+    const int minutaMise = misa.sat * 60 + misa.minuta;
+    if (trebaOkinutiMisnuNajavuIstiDan(trenutnaMinuta, minutaMise, 120) ||
+        trebaOkinutiMisnuNajavuIstiDan(trenutnaMinuta, minutaMise, 60)) {
+      posaljiMisnuKomanduMegai("MISA_BLAGDAN", MISNI_BLAGDANI[blagdan].naziv);
+    }
+    return;
+  }
+
+  if (lokalniTm.tm_wday == 0) {
+    if (!misnePostavke.nedjelja.aktivno) {
+      return;
+    }
+
+    const int minutaMise = misnePostavke.nedjelja.sat * 60 + misnePostavke.nedjelja.minuta;
+    if (trebaOkinutiMisnuNajavuIstiDan(trenutnaMinuta, minutaMise, 120) ||
+        trebaOkinutiMisnuNajavuIstiDan(trenutnaMinuta, minutaMise, 60)) {
+      posaljiMisnuKomanduMegai("MISA_NEDJELJA", "nedjelja");
+    }
+    return;
+  }
+
+  if (!misnePostavke.radna.aktivno ||
+      !jeOdabraniRadniDan(misnePostavke.radna.maskaDana, lokalniTm.tm_wday)) {
+    return;
+  }
+
+  const int minutaMise = misnePostavke.radna.sat * 60 + misnePostavke.radna.minuta;
+  if (trebaOkinutiMisnuNajavuIstiDan(trenutnaMinuta, minutaMise, 30)) {
+    posaljiMisnuKomanduMegai("MISA_RADNA", "radni dan");
+  }
+}
+
+void odrzavajMegaVrijemeFallback() {
+  if (!misnePostavke.rasporedAktivan || ntpKlijent.isTimeSet()) {
+    return;
+  }
+
+  const unsigned long sadaMs = millis();
+  if ((sadaMs - zadnjiZahtjevMegaVremenaMs) < MEGA_VRIJEME_INTERVAL_MS) {
+    return;
+  }
+
+  zadnjiZahtjevMegaVremenaMs = sadaMs;
+  Serial.println("TIME?");
+}
+
 void ucitajWebAutentikaciju() {
   WebAuthConfig cfg{};
   EEPROM.get(ESP_EEPROM_ADRESA_WEB, cfg);
@@ -755,9 +1370,45 @@ void posaljiApiKomanduMegai(const char* naredba, const char* odgovor) {
     return;
   }
 
+  const CmdOdgovorMegai status = posaljiKomanduMegaiIPricekaj(naredba, CMD_CEKANJE_NA_MEGU_MS);
+  if (status == CMD_ODGOVOR_OK) {
+    webPosluzitelj.send(200, "text/plain", odgovor);
+    return;
+  }
+
+  if (status == CMD_ODGOVOR_BUSY) {
+    webPosluzitelj.send(409, "text/plain", "Mega je zauzeta i nije prihvatila naredbu");
+    return;
+  }
+
+  if (status == CMD_ODGOVOR_ERR) {
+    webPosluzitelj.send(502, "text/plain", "Mega je odbila naredbu");
+    return;
+  }
+
+  webPosluzitelj.send(504, "text/plain", "Mega nije odgovorila na naredbu");
+}
+
+CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long timeoutMs) {
+  if (naredba == nullptr || naredba[0] == '\0') {
+    return CMD_ODGOVOR_ERR;
+  }
+
+  zadnjiCmdOdgovorMega = CMD_ODGOVOR_CEKA;
   Serial.print("CMD:");
   Serial.println(naredba);
-  webPosluzitelj.send(200, "text/plain", odgovor);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiCmdOdgovorMega != CMD_ODGOVOR_CEKA) {
+      return zadnjiCmdOdgovorMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return CMD_ODGOVOR_TIMEOUT;
 }
 
 bool osigurajWebAutorizaciju() {
@@ -780,6 +1431,234 @@ void posaljiJsonStatus() {
              ipBuffer,
              (WiFi.status() == WL_CONNECTED) ? "true" : "false");
   webPosluzitelj.send(200, "application/json", tijelo);
+}
+
+void posaljiMisaStranicu(const String &poruka, bool uspjeh) {
+  String html;
+  html.reserve(7000);
+
+  html += F(
+      "<!doctype html><html lang='hr'><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+      "<title>Mise toranjskog sata</title><style>"
+      ":root{color-scheme:light;--bg:#f3efe6;--panel:#fffaf1;--line:#c8baa1;--text:#2c2418;--soft:#e7dcc8;}"
+      "body{margin:0;font-family:Georgia,\"Times New Roman\",serif;background:linear-gradient(180deg,#efe6d3,#f7f3ea);color:var(--text);}"
+      ".wrap{max-width:900px;margin:0 auto;padding:18px;}"
+      ".panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 10px 24px rgba(77,52,24,0.08);}"
+      "h1,h2{margin-top:0;} .muted{color:#7a6a56;font-size:14px;line-height:1.5;}"
+      "label{display:block;margin-bottom:10px;color:#5f4a32;} .inline{display:inline-flex;align-items:center;gap:8px;margin-right:10px;margin-bottom:8px;}"
+      "input,button{border:1px solid var(--line);border-radius:10px;padding:10px 9px;background:#fff;color:var(--text);box-sizing:border-box;}"
+      "input[type='time']{width:130px;} button{font-weight:700;cursor:pointer;} button:hover{background:var(--soft);}"
+      "table{width:100%;border-collapse:collapse;} th,td{padding:8px 6px;border-top:1px solid #e5dac6;text-align:left;font-size:14px;}"
+      "th{border-top:none;color:#5f4a32;} .msg{padding:10px 12px;border-radius:10px;margin-bottom:14px;}"
+      ".ok{background:#e4f1df;border:1px solid #94b487;} .err{background:#f8e0dc;border:1px solid #cf8b7f;}"
+      ".nav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}"
+      "a{color:#5b4124;text-decoration:none;font-weight:700;} a:hover{text-decoration:underline;}"
+      "</style></head><body><div class='wrap'>");
+
+  html += F("<section class='panel'><div class='nav'><h1>Mise toranjskog sata</h1><a href='/'>Natrag na naslovnicu</a></div>");
+  html += F("<p class='muted'>ESP ovdje cuva raspored za radni dan, nedjelju i blagdane te po minuti salje naredbe Megi. Mega i dalje stiti zvona, cekice i ceka da otkucavanje zavrsi prije zvonjave.</p>");
+  html += F("<p class='muted'>Mise se vise ne podesavaju na Megi. Ovdje je jedino mjesto za raspored, a Mega ih samo izvrsava i stiti mehaniku toranjskog sata.</p></section>");
+
+  if (poruka.length() > 0) {
+    html += F("<div class='msg ");
+    html += (uspjeh ? F("ok") : F("err"));
+    html += F("'>");
+    html += poruka;
+    html += F("</div>");
+  }
+
+  html += F("<section class='panel'><div class='nav'><h2>Stranice postavki</h2><a href='/mise/blagdani'>Otvori blagdane</a></div>");
+  html += F("<p class='muted'>Ova stranica sluzi za opci prekidac, radni dan i nedjelju. Blagdani su odvojeni na posebnu, laksu stranicu da se ESP manje opterecuje pri spremanju.</p></section>");
+
+  html += F("<form method='post' action='/mise'>");
+  html += F("<section class='panel'><h2>Opce</h2>");
+  html += F("<label class='inline'><input type='checkbox' name='raspored_on'");
+  if (misnePostavke.rasporedAktivan) {
+    html += F(" checked");
+  }
+  html += F("> ESP raspored misa je aktivan</label>");
+  html += F("<p class='muted'>Ako je ovo iskljuceno, ESP samo cuva postavke i ne salje nikakve misne naredbe prema toranjskom satu.</p></section>");
+
+  html += F("<section class='panel'><h2>Radni dan</h2>");
+  html += F("<label class='inline'><input type='checkbox' name='radna_on'");
+  if (misnePostavke.radna.aktivno) {
+    html += F(" checked");
+  }
+  html += F("> Aktivna radna misa</label>");
+  html += F("<label>Vrijeme mise<br><input type='time' name='radna_time' value='");
+  html += formatirajVrijemeHHMM(misnePostavke.radna.sat, misnePostavke.radna.minuta);
+  html += F("'></label><div>");
+  static const char* OZNAKE_DANA[6] = {"P", "U", "S", "C", "P", "S"};
+  for (uint8_t i = 0; i < 6; ++i) {
+    html += F("<label class='inline'><input type='checkbox' name='radna_d");
+    html += String(i + 1);
+    html += F("'");
+    if ((misnePostavke.radna.maskaDana & (1U << i)) != 0) {
+      html += F(" checked");
+    }
+    html += F(">");
+    html += OZNAKE_DANA[i];
+    html += F("</label>");
+  }
+  html += F("</div><p class='muted'>Radna misa zvoni pola sata prije odabranog termina i to samo na zvono 1.</p></section>");
+
+  html += F("<section class='panel'><h2>Nedjelja</h2>");
+  html += F("<label class='inline'><input type='checkbox' name='nedjelja_on'");
+  if (misnePostavke.nedjelja.aktivno) {
+    html += F(" checked");
+  }
+  html += F("> Aktivna nedjeljna misa</label>");
+  html += F("<label>Vrijeme mise<br><input type='time' name='nedjelja_time' value='");
+  html += formatirajVrijemeHHMM(misnePostavke.nedjelja.sat, misnePostavke.nedjelja.minuta);
+  html += F("'></label><p class='muted'>Nedjeljom ESP salje najavu dva sata prije i sat prije, a Mega ukljucuje oba zvona.</p></section>");
+  html += F("<section class='panel'><button type='submit'>Spremi radni dan i nedjelju</button></section></form></div></body></html>");
+  webPosluzitelj.send(uspjeh ? 200 : 422, "text/html; charset=utf-8", html);
+}
+
+bool obradiMisaWebSpremanje(String &poruka) {
+  MisnePostavkeESP novo = misnePostavke;
+  novo.rasporedAktivan = webPosluzitelj.hasArg("raspored_on") ? 1 : 0;
+
+  uint8_t sat = 0;
+  uint8_t minuta = 0;
+
+  if (!webPosluzitelj.hasArg("radna_time") ||
+      !parsirajVrijemeHHMM(webPosluzitelj.arg("radna_time"), sat, minuta)) {
+    poruka = "Vrijeme radne mise nije valjano.";
+    return false;
+  }
+  novo.radna.aktivno = webPosluzitelj.hasArg("radna_on") ? 1 : 0;
+  novo.radna.sat = sat;
+  novo.radna.minuta = minuta;
+  novo.radna.maskaDana = 0;
+  for (uint8_t i = 0; i < 6; ++i) {
+    if (webPosluzitelj.hasArg(String("radna_d") + String(i + 1))) {
+      novo.radna.maskaDana |= static_cast<uint8_t>(1U << i);
+    }
+  }
+
+  if (!webPosluzitelj.hasArg("nedjelja_time") ||
+      !parsirajVrijemeHHMM(webPosluzitelj.arg("nedjelja_time"), sat, minuta)) {
+    poruka = "Vrijeme nedjeljne mise nije valjano.";
+    return false;
+  }
+  novo.nedjelja.aktivno = webPosluzitelj.hasArg("nedjelja_on") ? 1 : 0;
+  novo.nedjelja.sat = sat;
+  novo.nedjelja.minuta = minuta;
+
+  const MisnePostavkeESP staro = misnePostavke;
+  misnePostavke = novo;
+  if (!spremiMisnePostavke()) {
+    misnePostavke = staro;
+    poruka = "ESP nije uspio spremiti misne postavke u EEPROM.";
+    return false;
+  }
+
+  poruka = "Postavke za radni dan i nedjelju su spremljene na ESP-u.";
+  return true;
+}
+
+void posaljiMisaBlagdaniStranicu(const String &poruka, bool uspjeh) {
+  String html;
+  html.reserve(9000);
+
+  html += F(
+      "<!doctype html><html lang='hr'><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+      "<title>Blagdani toranjskog sata</title><style>"
+      ":root{color-scheme:light;--bg:#f3efe6;--panel:#fffaf1;--line:#c8baa1;--text:#2c2418;--soft:#e7dcc8;}"
+      "body{margin:0;font-family:Georgia,\"Times New Roman\",serif;background:linear-gradient(180deg,#efe6d3,#f7f3ea);color:var(--text);}"
+      ".wrap{max-width:900px;margin:0 auto;padding:18px;}"
+      ".panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 10px 24px rgba(77,52,24,0.08);}"
+      "h1,h2{margin-top:0;} .muted{color:#7a6a56;font-size:14px;line-height:1.5;}"
+      "label{display:block;margin-bottom:10px;color:#5f4a32;} .inline{display:inline-flex;align-items:center;gap:8px;margin-right:10px;margin-bottom:8px;}"
+      "input,button{border:1px solid var(--line);border-radius:10px;padding:10px 9px;background:#fff;color:var(--text);box-sizing:border-box;}"
+      "input[type='time']{width:130px;} button{font-weight:700;cursor:pointer;} button:hover{background:var(--soft);}"
+      "table{width:100%;border-collapse:collapse;} th,td{padding:8px 6px;border-top:1px solid #e5dac6;text-align:left;font-size:14px;}"
+      "th{border-top:none;color:#5f4a32;} .msg{padding:10px 12px;border-radius:10px;margin-bottom:14px;}"
+      ".ok{background:#e4f1df;border:1px solid #94b487;} .err{background:#f8e0dc;border:1px solid #cf8b7f;}"
+      ".nav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}"
+      "a{color:#5b4124;text-decoration:none;font-weight:700;} a:hover{text-decoration:underline;}"
+      "</style></head><body><div class='wrap'>");
+
+  html += F("<section class='panel'><div class='nav'><h1>Blagdani toranjskog sata</h1><a href='/mise'>Natrag na radni dan i nedjelju</a></div>");
+  html += F("<p class='muted'>Na ovoj stranici su samo blagdani, kako bi spremanje bilo lakse za ESP. Ako je na blagdanu odabrano NE, taj dan nema mise i nema zvonjave, cak ni ako pada u nedjelju.</p></section>");
+
+  if (poruka.length() > 0) {
+    html += F("<div class='msg ");
+    html += (uspjeh ? F("ok") : F("err"));
+    html += F("'>");
+    html += poruka;
+    html += F("</div>");
+  }
+
+  html += F("<form method='post' action='/mise/blagdani'>");
+  html += F("<section class='panel'><h2>Blagdani</h2><table><tr><th>Blagdan</th><th>Vrijeme</th><th>DA/NE</th></tr>");
+  const int godina = dohvatiTrenutnuGodinuMisa();
+  uint8_t poredak[BROJ_MISNIH_BLAGDANA];
+  sloziBlagdanePoDatumu(poredak, godina);
+  for (uint8_t red = 0; red < BROJ_MISNIH_BLAGDANA; ++red) {
+    const uint8_t indeks = poredak[red];
+    uint8_t mjesec = 0;
+    uint8_t dan = 0;
+    char datum[8];
+    if (godina > 0 && dohvatiDatumMisnogBlagdana(indeks, godina, mjesec, dan)) {
+      snprintf(datum, sizeof(datum), "%02u.%02u", dan, mjesec);
+    } else {
+      snprintf(datum, sizeof(datum), "--.--");
+    }
+
+    html += F("<tr><td>");
+    html += MISNI_BLAGDANI[indeks].naziv;
+    html += F(" ");
+    html += datum;
+    html += F("</td><td><input type='time' name='blagdan_time_");
+    html += String(indeks);
+    html += F("' value='");
+    html += formatirajVrijemeHHMM(misnePostavke.blagdani[indeks].sat,
+                                  misnePostavke.blagdani[indeks].minuta);
+    html += F("'></td><td><input type='checkbox' name='blagdan_on_");
+    html += String(indeks);
+    html += F("'");
+    if (misnePostavke.blagdani[indeks].aktivno) {
+      html += F(" checked");
+    }
+    html += F("></td></tr>");
+  }
+  html += F("</table></section>");
+  html += F("<section class='panel'><button type='submit'>Spremi blagdane</button></section></form></div></body></html>");
+  webPosluzitelj.send(uspjeh ? 200 : 422, "text/html; charset=utf-8", html);
+}
+
+bool obradiMisaBlagdaniWebSpremanje(String &poruka) {
+  MisnePostavkeESP novo = misnePostavke;
+  uint8_t sat = 0;
+  uint8_t minuta = 0;
+
+  for (uint8_t i = 0; i < BROJ_MISNIH_BLAGDANA; ++i) {
+    const String argVrijeme = String("blagdan_time_") + String(i);
+    const String argAktivno = String("blagdan_on_") + String(i);
+    if (!webPosluzitelj.hasArg(argVrijeme) ||
+        !parsirajVrijemeHHMM(webPosluzitelj.arg(argVrijeme), sat, minuta)) {
+      poruka = String("Vrijeme za blagdan nije valjano: ") + MISNI_BLAGDANI[i].naziv;
+      return false;
+    }
+    novo.blagdani[i].aktivno = webPosluzitelj.hasArg(argAktivno) ? 1 : 0;
+    novo.blagdani[i].sat = sat;
+    novo.blagdani[i].minuta = minuta;
+  }
+
+  const MisnePostavkeESP staro = misnePostavke;
+  misnePostavke = novo;
+  if (!spremiMisnePostavke()) {
+    misnePostavke = staro;
+    poruka = "ESP nije uspio spremiti blagdanske postavke u EEPROM.";
+    return false;
+  }
+
+  poruka = "Blagdanske postavke su spremljene na ESP-u.";
+  return true;
 }
 
 static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
@@ -808,8 +1687,10 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
   <div class="wrap">
     <section class="panel">
       <h1>ESP servis toranjskog sata</h1>
-      <p class="muted">Ovaj ESP8266 vodi samo mrezu toranjskog sata: WiFi, NTP, setup WiFi i kratke API naredbe prema Arduino Megi. Postavke kazaljki, okretne ploce, zvona, cekica, sinkronizacije vremena i recovery logike ostaju na Megi.</p>
+      <p class="muted">Ovaj ESP vodi mrezu toranjskog sata: WiFi, NTP, setup WiFi, lagane web postavke misa i kratke API naredbe prema Arduino Megi. Postavke kazaljki, okretne ploce, zvona, cekica, sinkronizacije vremena i recovery logike ostaju na Megi.</p>
       <div class="links">
+        <a href="/mise">Radni dan i nedjelja</a>
+        <a href="/mise/blagdani">Blagdani</a>
         <a href="/setup">Setup WiFi</a>
         <a href="/status">JSON status</a>
       </div>
@@ -817,11 +1698,13 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
     <section class="panel">
       <h2>Sto je ostalo na ESP-u</h2>
       <ul>
+        <li><code>/mise</code> za opci prekidac, radni dan i nedjelju.</li>
+        <li><code>/mise/blagdani</code> za odvojeno spremanje blagdana.</li>
         <li><code>/setup</code> za unos nove WiFi mreze.</li>
         <li><code>/status</code> za kratki JSON pregled mreze.</li>
         <li><code>/api/...</code> za rucne naredbe prema Megi.</li>
       </ul>
-      <p class="muted">API i web koriste istu Basic Auth prijavu. ESP vise ne sprema ni ne uredjuje radne postavke samog sata.</p>
+      <p class="muted">API i web koriste istu Basic Auth prijavu. ESP cuva samo misni raspored, a sva zastita mehanike i dalje ostaje na Megi.</p>
     </section>
   </div>
 </body>
@@ -968,8 +1851,43 @@ void konfigurirajWebPosluzitelj() {
     webPosluzitelj.send(200, "text/plain", odgovor);
   });
 
+  Serial.println("WEB: Registriram /mise rutu");
+  webPosluzitelj.on("/mise", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiMisaStranicu("", true);
+  });
+  webPosluzitelj.on("/mise", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    String poruka;
+    const bool uspjeh = obradiMisaWebSpremanje(poruka);
+    posaljiMisaStranicu(poruka, uspjeh);
+  });
+  webPosluzitelj.on("/mise/blagdani", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiMisaBlagdaniStranicu("", true);
+  });
+  webPosluzitelj.on("/mise/blagdani", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    String poruka;
+    const bool uspjeh = obradiMisaBlagdaniWebSpremanje(poruka);
+    posaljiMisaBlagdaniStranicu(poruka, uspjeh);
+  });
+
   Serial.println("WEB: Registriram /status rutu");
   webPosluzitelj.on("/status", []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
     posaljiJsonStatus();
   });
 

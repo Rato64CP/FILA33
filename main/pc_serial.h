@@ -1,4 +1,4 @@
-// pc_serial.h – Komunikacija sa PC-om via Serial0 (USB)
+// pc_serial.h - Komunikacija s PC-om preko Serial0 (USB)
 #pragma once
 
 void inicijalizirajPCSerijsku();

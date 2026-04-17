@@ -2,27 +2,36 @@
 
 #include <RTClib.h>
 
+enum RezultatProvjereSinkronizacije {
+  SINKRONIZACIJA_ODBIJENA = 0,
+  SINKRONIZACIJA_CEKA_DODATNU_POTVRDU = 1,
+  SINKRONIZACIJA_PRIHVACENA = 2
+};
+
 void inicijalizirajRTC();
 
 DateTime dohvatiTrenutnoVrijeme();
 uint32_t dohvatiRtcSekundniBrojac();
 
-void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme);
-void azurirajVrijemeIzDCF(const DateTime& dcfVrijeme);
+void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
+                          bool imaEksplicitanDST = false,
+                          bool dstAktivanIzvori = false);
+RezultatProvjereSinkronizacije azurirajVrijemeIzDCF(
+    const DateTime& dcfVrijeme,
+    bool imaEksplicitanDST = false,
+    bool dstAktivanIzvori = false);
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 
-String dohvatiIzvorVremena();
 const char* dohvatiOznakuIzvoraVremena();
-char dohvatiOznakuDana();
-void azurirajOznakuDana();
+bool jeZadnjaSvjezaSinkronizacijaIzNTP();
 
 bool jeRTCPouzdan();
 bool jeRtcSqwAktivan();
-bool fallbackImaPouzdanuReferencu();
 bool jeVrijemePotvrdjenoZaAutomatiku();
+DateTime dohvatiDatumUskrsaZaGodinu(int godina);
 bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
 int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme);
 
-DateTime getZadnjeSinkroniziranoVrijeme();
 void oznaciPovratakNaRTC();
+void razvojnoResetirajIzvorSinkronizacijeNaRTC();
 bool jeSinkronizacijaZastarjela();

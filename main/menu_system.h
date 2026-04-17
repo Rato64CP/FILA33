@@ -6,24 +6,16 @@
 typedef enum {
   MENU_STATE_DISPLAY_TIME,        // Glavni prikaz toranjskog sata
   MENU_STATE_MAIN_MENU,           // Glavni meni
-  MENU_STATE_SETTINGS,            // Postavke
   MENU_STATE_CLOCK_SETTINGS,      // Maticni sat
-  MENU_STATE_DCF_CONFIG,          // DCF postavke
-  MENU_STATE_NTP_CONFIG,          // NTP postavke
   MENU_STATE_HAND_SETTINGS,       // Kazaljke
-  MENU_STATE_PLATE_SETTINGS,      // Okretna ploca
-  MENU_STATE_PLATE_ADJUST,        // Namjestanje okretne ploce
+  MENU_STATE_PLATE_SETTINGS,      // Kompaktne postavke okretne ploce
   MENU_STATE_NETWORK_SETTINGS,    // Mreza
   MENU_STATE_SYSTEM_SETTINGS,     // Sustav
-  MENU_STATE_HAND_CORRECTION,     // Rucno namjestanje kazaljki
-  MENU_STATE_TIME_ADJUST,         // Rucno namjestanje maticnog sata
   MENU_STATE_WIFI_IP_DISPLAY,     // Prikaz lokalne WiFi IP adrese
-  MENU_STATE_INFO_DISPLAY,        // Informacije o toranjskom satu
   MENU_STATE_CONFIRMATION,        // Potvrda akcije
   MENU_STATE_QUIET_HOURS,         // Uredjivanje tihih sati
-  MENU_STATE_NAIL_SETTINGS,       // Uredjivanje trajanja cavala
-  MENU_STATE_SUNCE_SETTINGS,      // Uredjivanje suncevih dogadaja
-  MENU_STATE_MODE_SELECT          // Odabir moda otkucavanja
+  MENU_STATE_NAIL_SETTINGS,       // Uredjivanje postavki stapica
+  MENU_STATE_SUNCE_SETTINGS       // Uredjivanje suncevih dogadaja
 } MenuState;
 
 typedef enum {
@@ -33,6 +25,16 @@ typedef enum {
   KEY_RIGHT,
   KEY_SELECT,
   KEY_BACK,
+  KEY_DIGIT_0,
+  KEY_DIGIT_1,
+  KEY_DIGIT_2,
+  KEY_DIGIT_3,
+  KEY_DIGIT_4,
+  KEY_DIGIT_5,
+  KEY_DIGIT_6,
+  KEY_DIGIT_7,
+  KEY_DIGIT_8,
+  KEY_DIGIT_9,
   KEY_NONE
 } KeyEvent;
 

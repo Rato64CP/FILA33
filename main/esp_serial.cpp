@@ -1,4 +1,4 @@
-// esp_serial.cpp
+// esp_serial.cpp - Serijska veza prema mreznom mostu toranjskog sata
 #include <Arduino.h>
 #include <RTClib.h>
 #include <stdlib.h>
@@ -8,23 +8,32 @@
 #include "zvonjenje.h"
 #include "podesavanja_piny.h"
 #include "otkucavanje.h"
+#include "slavljenje_mrtvacko.h"
 #include "pc_serial.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "postavke.h"
 #include "lcd_display.h"
 #include "dcf_sync.h"
+#include "misna_automatika.h"
 #include "sunceva_automatika.h"
 
-// Always use Serial3 (for Mega 2560 tower clock)
-static HardwareSerial& espSerijskiPort = Serial3;
+// UART prema mreznom mostu toranjskog sata bira se kroz main/podesavanja_piny.h.
+static HardwareSerial& espSerijskiPort = ESP_SERIJSKI_PORT;
 
 static const unsigned long ESP_BRZINA = 9600;
 static const size_t ESP_ULAZNI_BUFFER_MAX = 160;
+static const unsigned long WIFI_POCETNA_ODGODA_NAKON_NAPAJANJA_MS = 120000UL;
 static const unsigned long WIFI_STATUS_DRUGI_UPIT_ODGODA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_RECOVERY_INTERVAL_MS = 300000UL;
 static const uint8_t NTP_SIGURNA_SEKUNDA_MIN = 12;
 static const uint8_t NTP_SIGURNA_SEKUNDA_MAX = 50;
+
+// RTC + NTP tok toranjskog sata mora ostati uskladen s time_glob.cpp:
+// - boot krece iz RTC-a
+// - NTP ide tek kad je mreza spremna i mehanika miruje
+// - nakon povratka napajanja modem/WiFi dobivaju pocetnu odgodu
+// - automatski NTP ne smije remetiti osnovni rad sata ni prikaz izvora vremena
 
 static char ulazniBuffer[ESP_ULAZNI_BUFFER_MAX + 1];
 static size_t ulazniBufferDuljina = 0;
@@ -32,11 +41,39 @@ static bool ntpCekanjePrijavljeno = false;
 static bool wifiPovezanNaESP = false;
 static char zadnjaLokalnaWiFiIP[16] = "";
 static char zadnjaWiFiMACAdresa[18] = "";
+static bool wifiPocetnaOdgodaAktivna = false;
+static unsigned long wifiPocetnaOdgodaDoMs = 0;
 static unsigned long vrijemePrvogWiFiStatusUpitaMs = 0;
 static unsigned long zadnjiWiFiStatusRecoveryUpitMs = 0;
 static bool drugiWiFiStatusUpitPoslan = false;
+static bool prioritetniNtpZahtjevNaCekanju = false;
 static uint32_t zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
 static uint32_t zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+
+static bool jeResetNakonGubitkaNapajanja() {
+  const uint8_t mcusr = MCUSR;
+  const bool imaBrownOutIliPowerOn = (mcusr & ((1 << BORF) | (1 << PORF))) != 0;
+  const bool imaVanjskiReset = (mcusr & (1 << EXTRF)) != 0;
+  return imaBrownOutIliPowerOn && !imaVanjskiReset;
+}
+
+static bool jeAktivnaPocetnaOdgodaWiFi() {
+  if (!wifiPocetnaOdgodaAktivna) {
+    return false;
+  }
+
+  if (millis() < wifiPocetnaOdgodaDoMs) {
+    return true;
+  }
+
+  wifiPocetnaOdgodaAktivna = false;
+  wifiPocetnaOdgodaDoMs = 0;
+  vrijemePrvogWiFiStatusUpitaMs = 0;
+  zadnjiWiFiStatusRecoveryUpitMs = 0;
+  drugiWiFiStatusUpitPoslan = false;
+  posaljiPCLog(F("WiFi/NTP: istekla pocetna odgoda nakon povratka napajanja, krecem s provjerom mreze"));
+  return false;
+}
 
 static bool jeValjanaIPv4AdresaZaLCD(const char* tekst) {
   if (tekst == nullptr || tekst[0] == '\0') {
@@ -87,6 +124,7 @@ void posaljiESPKomandu(const char* komanda);
 void posaljiESPKomandu(const String& komanda);
 static void zatraziWiFiStatusESP();
 static bool spremiSetupWiFiPostavkeIzESPa(const char* payload);
+static void posaljiVrijemeESPU();
 
 static void posaljiStatusESPU() {
   const DateTime sada = dohvatiTrenutnoVrijeme();
@@ -124,6 +162,22 @@ static void posaljiStatusESPU() {
              jeZvonoAktivno(1) ? 1 : 0,
              jeZvonoAktivno(2) ? 1 : 0);
   espSerijskiPort.println(statusLinija);
+}
+
+static void posaljiVrijemeESPU() {
+  const DateTime sada = dohvatiTrenutnoVrijeme();
+  char vrijemeIso[21];
+  snprintf_P(vrijemeIso,
+             sizeof(vrijemeIso),
+             PSTR("%04d-%02d-%02dT%02d:%02d:%02d"),
+             sada.year(),
+             sada.month(),
+             sada.day(),
+             sada.hour(),
+             sada.minute(),
+             sada.second());
+  espSerijskiPort.print(F("TIME:"));
+  espSerijskiPort.println(vrijemeIso);
 }
 
 static void resetirajUlazniBuffer() {
@@ -168,6 +222,7 @@ static bool jePrepoznataESPLinija(const char* linija) {
          strncmp(linija, "SETUPWIFI:", 10) == 0 ||
          strncmp(linija, "STATUS:", 7) == 0 ||
          strcmp(linija, "STATUS?") == 0 ||
+         strcmp(linija, "TIME?") == 0 ||
          strncmp(linija, "NTP:", 4) == 0 ||
          strncmp(linija, "CMD:", 4) == 0 ||
          strncmp(linija, "NTPLOG:", 7) == 0;
@@ -186,14 +241,14 @@ static void obradiNTPLogLinijuESP(const char* linija) {
 
   if (strcmp(poruka, "jos nije postavljeno vrijeme, cekam...") == 0) {
     if (!ntpCekanjePrijavljeno) {
-      posaljiPCLog(F("ESP NTP: jos nije postavljeno vrijeme"));
+      posaljiPCLog(F("Mrezni most NTP: jos nije postavljeno vrijeme"));
       ntpCekanjePrijavljeno = true;
     }
     return;
   }
 
   ntpCekanjePrijavljeno = false;
-  logirajLinijuESP("ESP NTP: ", poruka);
+  logirajLinijuESP("Mrezni most NTP: ", poruka);
 }
 
 static void obradiWiFiLogLinijuESP(const char* linija) {
@@ -202,7 +257,7 @@ static void obradiWiFiLogLinijuESP(const char* linija) {
     ++poruka;
   }
 
-  logirajLinijuESP("ESP WiFi: ", poruka);
+  logirajLinijuESP("Mrezni most WiFi: ", poruka);
 }
 
 static void posaljiKonfiguracijuESPuNakonZahtjeva() {
@@ -210,7 +265,7 @@ static void posaljiKonfiguracijuESPuNakonZahtjeva() {
   posaljiWiFiStatusESP();
   posaljiNTPPostavkeESP();
   zatraziWiFiStatusESP();
-  posaljiPCLog(F("ESP zatrazio osvjezavanje konfiguracije"));
+  posaljiPCLog(F("Mrezni most zatrazio osvjezavanje konfiguracije"));
 }
 
 static bool spremiSetupWiFiPostavkeIzESPa(const char* payload) {
@@ -259,7 +314,7 @@ static bool spremiSetupWiFiPostavkeIzESPa(const char* payload) {
   zatraziWiFiStatusESP();
 
   char log[96];
-  snprintf(log, sizeof(log), "Setup WiFi: spremljen novi SSID=%s preko ESP setup mreze", ssid);
+  snprintf(log, sizeof(log), "Setup WiFi: spremljen novi SSID=%s preko mreznog mosta", ssid);
   posaljiPCLog(log);
   return true;
 }
@@ -270,17 +325,28 @@ void inicijalizirajESP() {
   wifiPovezanNaESP = false;
   zadnjaLokalnaWiFiIP[0] = '\0';
   zadnjaWiFiMACAdresa[0] = '\0';
+  wifiPocetnaOdgodaAktivna = false;
+  wifiPocetnaOdgodaDoMs = 0;
   vrijemePrvogWiFiStatusUpitaMs = 0;
   zadnjiWiFiStatusRecoveryUpitMs = 0;
   drugiWiFiStatusUpitPoslan = false;
+  prioritetniNtpZahtjevNaCekanju = false;
   zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
   zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
   postaviWiFiStatus(false);
-  posaljiPCLog(F("ESP serijska veza inicijalizirana"));
+  posaljiPCLog(F("Serijska veza prema mreznom mostu inicijalizirana"));
   delay(50);
   posaljiWifiPostavkeESP();
   posaljiWiFiStatusESP();
   posaljiNTPPostavkeESP();
+
+  if (jeWiFiOmogucen() && jeResetNakonGubitkaNapajanja()) {
+    wifiPocetnaOdgodaAktivna = true;
+    wifiPocetnaOdgodaDoMs = millis() + WIFI_POCETNA_ODGODA_NAKON_NAPAJANJA_MS;
+    posaljiPCLog(F("WiFi/NTP: povratak napajanja detektiran, cekam 120 s prije prve provjere mreze"));
+    return;
+  }
+
   zatraziWiFiStatusESP();
 }
 
@@ -302,15 +368,15 @@ void posaljiWifiPostavkeESP() {
   espSerijskiPort.print('|');
   espSerijskiPort.println(dohvatiZadaniGateway());
 
-  posaljiPCLog(F("Poslane WiFi postavke ESP-u"));
+  posaljiPCLog(F("Poslane WiFi postavke mreznom mostu"));
 }
 
 void posaljiWiFiStatusESP() {
   espSerijskiPort.print(F("WIFIEN:"));
   espSerijskiPort.println(jeWiFiOmogucen() ? '1' : '0');
   posaljiPCLog(jeWiFiOmogucen()
-                   ? F("Poslana naredba ESP-u: WiFi ukljucen")
-                   : F("Poslana naredba ESP-u: WiFi iskljucen"));
+                   ? F("Poslana naredba mreznom mostu: mreza ukljucena")
+                   : F("Poslana naredba mreznom mostu: mreza iskljucena"));
 }
 
 void posaljiNTPPostavkeESP() {
@@ -318,7 +384,7 @@ void posaljiNTPPostavkeESP() {
   espSerijskiPort.println(dohvatiNTPServer());
 
   char log[96];
-  snprintf(log, sizeof(log), "Poslan NTP server ESP-u: %s", dohvatiNTPServer());
+  snprintf(log, sizeof(log), "Poslan NTP server mreznom mostu: %s", dohvatiNTPServer());
   posaljiPCLog(log);
 }
 
@@ -327,8 +393,16 @@ static bool jeSiguranProzorZaNTPZahtjev(const DateTime& sada) {
          sada.second() <= NTP_SIGURNA_SEKUNDA_MAX;
 }
 
+static bool jeSigurnaMinutaZaNTPZahtjev(const DateTime& sada) {
+  return sada.minute() != 0;
+}
+
 static bool mehanikaTornjskogSataMirujeZaNTP() {
   if (jeDCFSinkronizacijaUTijeku()) {
+    return false;
+  }
+
+  if (jeOtkucavanjeUTijeku()) {
     return false;
   }
 
@@ -353,29 +427,46 @@ void posaljiNTPZahtjevESP() {
   zadnjiAutomatskiNtpZahtjevMinutniKljuc = sada.unixtime() / 60UL;
   zadnjiAutomatskiNtpZahtjevSatniKljuc = sada.unixtime() / 3600UL;
   espSerijskiPort.println(F("NTPREQ:SYNC"));
-  posaljiPCLog(F("Poslan zahtjev ESP-u za NTP osvjezavanje toranjskog sata"));
+  posaljiPCLog(F("Poslan zahtjev mreznom mostu za NTP osvjezavanje toranjskog sata"));
+}
+
+void zatraziPrioritetnuNTPSinkronizaciju() {
+  prioritetniNtpZahtjevNaCekanju = true;
+  zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
+  zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+  posaljiPCLog(F("NTP: zabiljezen prioritetni zahtjev nakon rucne promjene vremena"));
 }
 
 void obradiAutomatskiNTPZahtjevESP() {
-  if (!jeNTPOmogucen() || !jeWiFiPovezanNaESP()) {
+  if (!jeNTPOmogucen() || !jeWiFiPovezanNaESP() || jeAktivnaPocetnaOdgodaWiFi()) {
     return;
   }
 
   const DateTime sada = dohvatiTrenutnoVrijeme();
-  if (!jeSiguranProzorZaNTPZahtjev(sada) || !mehanikaTornjskogSataMirujeZaNTP()) {
+  if (!jeSigurnaMinutaZaNTPZahtjev(sada) ||
+      !jeSiguranProzorZaNTPZahtjev(sada) ||
+      !mehanikaTornjskogSataMirujeZaNTP()) {
     return;
   }
 
   const uint32_t minutniKljuc = sada.unixtime() / 60UL;
   const uint32_t satniKljuc = sada.unixtime() / 3600UL;
 
-  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (!jeVrijemePotvrdjenoZaAutomatiku() || jeSinkronizacijaZastarjela()) {
+    prioritetniNtpZahtjevNaCekanju = true;
+  }
+
+  if (prioritetniNtpZahtjevNaCekanju) {
     if (minutniKljuc == zadnjiAutomatskiNtpZahtjevMinutniKljuc) {
       return;
     }
 
     posaljiNTPZahtjevESP();
-    posaljiPCLog(F("Automatski NTP zahtjev: cekam prvu potvrdu vremena za toranjski sat"));
+    if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+      posaljiPCLog(F("Automatski NTP zahtjev: cekam prvu potvrdu vremena za toranjski sat"));
+    } else {
+      posaljiPCLog(F("Automatski NTP zahtjev: obnavljam svjezu NTP sinkronizaciju toranjskog sata"));
+    }
     return;
   }
 
@@ -470,9 +561,48 @@ static bool parsirajISOVrijeme(const char* iso, DateTime& dt) {
   return true;
 }
 
+static bool parsirajNTPPayload(const char* payload,
+                               DateTime& dt,
+                               bool& imaEksplicitanDST,
+                               bool& dstAktivanIzvori) {
+  imaEksplicitanDST = false;
+  dstAktivanIzvori = false;
+
+  const char* dstSuffix = strstr(payload, ";DST=");
+  if (dstSuffix == nullptr) {
+    return parsirajISOVrijeme(payload, dt);
+  }
+
+  const size_t isoDuljina = static_cast<size_t>(dstSuffix - payload);
+  if (!(isoDuljina == 19 || (isoDuljina == 20 && payload[19] == 'Z'))) {
+    return false;
+  }
+
+  if ((dstSuffix[5] != '0' && dstSuffix[5] != '1') || dstSuffix[6] != '\0') {
+    return false;
+  }
+
+  char isoBuffer[21];
+  if (isoDuljina >= sizeof(isoBuffer)) {
+    return false;
+  }
+
+  memcpy(isoBuffer, payload, isoDuljina);
+  isoBuffer[isoDuljina] = '\0';
+  if (!parsirajISOVrijeme(isoBuffer, dt)) {
+    return false;
+  }
+
+  imaEksplicitanDST = true;
+  dstAktivanIzvori = (dstSuffix[5] == '1');
+  return true;
+}
+
 static bool jeStrogiNTPPayload(const char* payload) {
   DateTime ignorirano;
-  return parsirajISOVrijeme(payload, ignorirano);
+  bool imaEksplicitanDST = false;
+  bool dstAktivanIzvori = false;
+  return parsirajNTPPayload(payload, ignorirano, imaEksplicitanDST, dstAktivanIzvori);
 }
 
 static void obradiESPRedak() {
@@ -484,13 +614,19 @@ static void obradiESPRedak() {
   }
 
   if (!jePrepoznataESPLinija(ulazniBuffer) && !jeStatusnaLogLinijaESP(ulazniBuffer)) {
-    logirajLinijuESP("ESP linija: ", ulazniBuffer);
+    logirajLinijuESP("Mrezni most linija: ", ulazniBuffer);
   }
 
   if (strcmp(ulazniBuffer, "WIFI:CONNECTED") == 0) {
+    const bool bioSpojen = wifiPovezanNaESP;
     wifiPovezanNaESP = true;
     postaviWiFiStatus(true);
-    posaljiPCLog(F("ESP WiFi status: spojeno"));
+    if (!bioSpojen) {
+      prioritetniNtpZahtjevNaCekanju = true;
+      zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
+      zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+    }
+    posaljiPCLog(F("Mrezni most status mreze: spojeno"));
     resetirajUlazniBuffer();
     return;
   }
@@ -498,9 +634,10 @@ static void obradiESPRedak() {
   if (strcmp(ulazniBuffer, "WIFI:DISCONNECTED") == 0) {
     wifiPovezanNaESP = false;
     postaviWiFiStatus(false);
+    prioritetniNtpZahtjevNaCekanju = false;
     zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
     zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
-    posaljiPCLog(F("ESP WiFi status: odspojeno"));
+    posaljiPCLog(F("Mrezni most status mreze: odspojeno"));
     resetirajUlazniBuffer();
     return;
   }
@@ -510,7 +647,10 @@ static void obradiESPRedak() {
     if (!wifiPovezanNaESP) {
       wifiPovezanNaESP = true;
       postaviWiFiStatus(true);
-      posaljiPCLog(F("ESP WiFi status: spojeno (potvrda preko lokalne IP)"));
+      prioritetniNtpZahtjevNaCekanju = true;
+      zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
+      zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+      posaljiPCLog(F("Mrezni most status mreze: spojeno (potvrda preko lokalne IP)"));
     }
 
     if (jeValjanaIPv4AdresaZaLCD(ipAdresa)) {
@@ -519,10 +659,10 @@ static void obradiESPRedak() {
       prikaziLokalnuWiFiIP(ipAdresa);
 
       char log[64];
-      snprintf(log, sizeof(log), "ESP WiFi lokalna IP: %s", ipAdresa);
+      snprintf(log, sizeof(log), "Mrezni most lokalna IP: %s", ipAdresa);
       posaljiPCLog(log);
     } else {
-      logirajLinijuESP("ESP WiFi: neispravna lokalna IP iz ESP-a: ", ipAdresa);
+      logirajLinijuESP("Mrezni most: neispravna lokalna IP: ", ipAdresa);
     }
     resetirajUlazniBuffer();
     return;
@@ -535,10 +675,10 @@ static void obradiESPRedak() {
       zadnjaWiFiMACAdresa[sizeof(zadnjaWiFiMACAdresa) - 1] = '\0';
 
       char log[64];
-      snprintf(log, sizeof(log), "ESP WiFi MAC adresa: %s", zadnjaWiFiMACAdresa);
+      snprintf(log, sizeof(log), "Mrezni most MAC adresa: %s", zadnjaWiFiMACAdresa);
       posaljiPCLog(log);
     } else {
-      logirajLinijuESP("ESP WiFi: neispravna MAC adresa iz ESP-a: ", macAdresa);
+      logirajLinijuESP("Mrezni most: neispravna MAC adresa: ", macAdresa);
     }
     resetirajUlazniBuffer();
     return;
@@ -568,20 +708,26 @@ static void obradiESPRedak() {
 
   if (strcmp(ulazniBuffer, "WEBCFG?") == 0) {
     espSerijskiPort.println(F("ERR:WEBCFGDISABLED"));
-    posaljiPCLog(F("ESP web konfiguracija je onemogucena; postavke toranjskog sata uredjuju se na Megi"));
+      posaljiPCLog(F("Web konfiguracija na mreznom mostu je onemogucena; postavke toranjskog sata uredjuju se na Megi"));
     resetirajUlazniBuffer();
     return;
   }
 
   if (strncmp(ulazniBuffer, "WEBCFGSET:", 10) == 0) {
     espSerijskiPort.println(F("ERR:WEBCFGDISABLED"));
-    posaljiPCLog(F("ESP je pokusao spremiti web postavke sata, ali je konfiguracija vracena na Megu"));
+      posaljiPCLog(F("Mrezni most je pokusao spremiti web postavke sata, ali je konfiguracija vracena na Megu"));
     resetirajUlazniBuffer();
     return;
   }
 
   if (strcmp(ulazniBuffer, "STATUS?") == 0) {
     posaljiStatusESPU();
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strcmp(ulazniBuffer, "TIME?") == 0) {
+    posaljiVrijemeESPU();
     resetirajUlazniBuffer();
     return;
   }
@@ -601,17 +747,23 @@ static void obradiESPRedak() {
     }
 
     DateTime ntpVrijeme;
-    if (parsirajISOVrijeme(iso, ntpVrijeme)) {
+    bool imaEksplicitanDST = false;
+    bool dstAktivanIzvori = false;
+    if (parsirajNTPPayload(iso, ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori)) {
       if (!wifiPovezanNaESP) {
         wifiPovezanNaESP = true;
         postaviWiFiStatus(true);
-        posaljiPCLog(F("ESP WiFi status: spojeno (potvrda preko NTP sinkronizacije)"));
+        prioritetniNtpZahtjevNaCekanju = true;
+        zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
+        zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+        posaljiPCLog(F("Mrezni most status mreze: spojeno (potvrda preko NTP sinkronizacije)"));
       }
 
-        if (jeNTPOmogucen()) {
-          azurirajVrijemeIzNTP(ntpVrijeme);
-        }
-        espSerijskiPort.println(F("ACK:NTP"));
+      if (jeNTPOmogucen()) {
+        prioritetniNtpZahtjevNaCekanju = false;
+        azurirajVrijemeIzNTP(ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori);
+      }
+      espSerijskiPort.println(F("ACK:NTP"));
       if (jeNTPOmogucen()) {
         logirajLinijuESP("Primljen NTP iz ESP-a: ", iso);
       } else {
@@ -626,6 +778,7 @@ static void obradiESPRedak() {
   if (strncmp(ulazniBuffer, "CMD:", 4) == 0) {
     const char* komanda = ulazniBuffer + 4;
     bool uspjeh = true;
+    bool prepoznataKomanda = true;
 
     if      (strcmp(komanda, "ZVONO1_ON") == 0)       ukljuciZvono(1);
     else if (strcmp(komanda, "ZVONO1_OFF") == 0)      iskljuciZvono(1);
@@ -679,15 +832,21 @@ static void obradiESPRedak() {
           false,
           dohvatiZvonoZaSuncevDogadaj(SUNCEVI_DOGADAJ_VECER),
           dohvatiOdgoduSuncevogDogadajaMin(SUNCEVI_DOGADAJ_VECER));
+    else if (strcmp(komanda, "MISA_RADNA") == 0)     uspjeh = pokreniESPMisnuNajavuRadniDan();
+    else if (strcmp(komanda, "MISA_NEDJELJA") == 0)  uspjeh = pokreniESPMisnuNajavuNedjelja();
+    else if (strcmp(komanda, "MISA_BLAGDAN") == 0)   uspjeh = pokreniESPMisnuNajavuBlagdan();
     else if (strcmp(komanda, "DCF_START") == 0)       pokreniRucniDCFPrijem();
-    else uspjeh = false;
+    else prepoznataKomanda = false;
 
-    if (uspjeh) {
+    if (!prepoznataKomanda) {
+      espSerijskiPort.println(F("ERR:CMD"));
+      logirajLinijuESP("Nepoznata CMD naredba: ", komanda);
+    } else if (uspjeh) {
       espSerijskiPort.println(F("ACK:CMD_OK"));
       logirajLinijuESP("Izvrsena CMD naredba: ", komanda);
     } else {
-      espSerijskiPort.println(F("ERR:CMD"));
-      logirajLinijuESP("Nepoznata CMD naredba: ", komanda);
+      espSerijskiPort.println(F("ERR:CMD_BUSY"));
+      logirajLinijuESP("CMD naredba odbijena jer je toranjski sat zauzet: ", komanda);
     }
 
     resetirajUlazniBuffer();
@@ -700,7 +859,7 @@ static void obradiESPRedak() {
     return;
   }
 
-  logirajLinijuESP("ESP LOG: ", ulazniBuffer);
+    logirajLinijuESP("Mrezni most log: ", ulazniBuffer);
   resetirajUlazniBuffer();
 }
 
@@ -721,7 +880,7 @@ void obradiESPSerijskuKomunikaciju() {
       ulazniBuffer[ulazniBufferDuljina++] = znak;
       ulazniBuffer[ulazniBufferDuljina] = '\0';
     } else {
-      posaljiPCLog(F("ESP RX: preduga linija, odbacujem buffer"));
+    posaljiPCLog(F("Mrezni most RX: preduga linija, odbacujem buffer"));
       resetirajUlazniBuffer();
     }
   }
@@ -734,6 +893,10 @@ void obradiESPSerijskuKomunikaciju() {
   }
 
   if (!jeWiFiOmogucen()) {
+    return;
+  }
+
+  if (jeAktivnaPocetnaOdgodaWiFi()) {
     return;
   }
 

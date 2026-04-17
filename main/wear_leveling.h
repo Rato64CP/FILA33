@@ -11,6 +11,7 @@ namespace WearLeveling {
 int odrediSlotZaCitanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota);
 int odrediSlotZaPisanje(int baznaAdresa, int brojSlotova, size_t velicinaSlota);
 void zapamtiZadnjiSlot(int baznaAdresa, int brojSlotova, size_t velicinaSlota, uint8_t slot);
+bool obrisiSveMetapodatke();
 
 template <typename T>
 constexpr size_t velicinaSlota() {

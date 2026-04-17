@@ -1,6 +1,6 @@
 # 🕰️ Automatika Toranjskog Sata
 
-Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i `ESP8266`.
+Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i vanjskog mreznog sloja (`ESP8266`, `ESP32` ili `Raspberry Pi` most).
 
 ## ✨ Sto sustav radi
 
@@ -14,7 +14,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 ## 🧭 Arhitektura
 
 - `Arduino Mega 2560` upravlja kazaljkama, okretnom plocom, zvonima, cekicima, lokalnim postavkama i recovery logikom
-- `ESP8266` sluzi kao mrezni modul za `WiFi`, `NTP`, `setup WiFi` i servisni API
+- vanjski mrezni sloj (`ESP8266`, `ESP32` ili `Raspberry Pi`) sluzi za `WiFi`, `NTP`, `Home Assistant` integraciju i servisni API
 - `Mega 2560` je jedino mjesto istine za stanje toranjskog sata
 - osnovni rad sata mora ostati moguc i bez mreze
 
@@ -23,20 +23,21 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 - Mega inicira kriticne operacije vezane uz rad toranjskog sata
 - ESP ne donosi odluke o mehanici kazaljki, ploce, zvona ni cekica
 - `NTP` sinkronizacija ide samo kad `Mega` procijeni da je trenutak siguran
-- kvar ili restart `ESP8266` ne smije zaustaviti osnovni rad sata
+- kvar ili restart vanjskog mreznog sloja ne smije zaustaviti osnovni rad sata
 
 ## 🔌 Serijska komunikacija
 
-- Mega koristi `Serial3` za komunikaciju s ESP modulom
+- Mega trenutno koristi `Serial3` za ugradeni `ESP8266`, a `Serial1` je pripremljen za buduci `Raspberry Pi` most
 - aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
-- `ESP8266` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
+- `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
 - stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`
 
 ## 🧩 Struktura Projekta
 
 - `main/` - glavni firmware toranjskog sata za `Arduino Mega 2560`
-- `esp_firmware/` - pomocni firmware za `ESP8266`
+- `esp_firmware/` - pomocni firmware za `ESP8266` i `ESP32`
+- `pi_bridge/` - Python serijski most za `Raspberry Pi` i `Home Assistant`
 - `main/main.ino` - inicijalizacija i glavna petlja
 - `main/time_glob.*` - RTC, NTP, DCF i prioriteti izvora vremena
 - `main/esp_serial.*` - serijska komunikacija s ESP modulom
@@ -85,12 +86,13 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 - `LCD 16x2` preko `I2C`
 - `DCF77` prijemnik
 - relejni izlazi za kazaljke, plocu, zvona i cekice
-- tipke za lokalni izbornik i servisne funkcije
+- 4x5 matricna tipkovnica za lokalni izbornik, servisne funkcije i brojcani unos `HH:MM`
 
 ## 📚 Dodatni README
 
 - [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
 - [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
+- [README za Raspberry Pi most](/C:/Users/Rato/Documents/GitHub/FILA33/pi_bridge/README.md)
 
 ## 🛠️ Napomene Za Razvoj
 

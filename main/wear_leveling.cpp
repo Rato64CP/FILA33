@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <string.h>
 
 #include "wear_leveling.h"
 
@@ -226,6 +227,24 @@ void zapamtiZadnjiSlot(int baznaAdresa, int brojSlotova, size_t velicinaSlota, u
   meta.velicinaSlota = static_cast<uint16_t>(velicinaSlota);
   meta.checksum = izracunajChecksumMeta(meta);
   zapisiMeta(metaIndex, meta);
+}
+
+bool obrisiSveMetapodatke() {
+  uint8_t prazno[32];
+  memset(prazno, 0xFF, sizeof(prazno));
+
+  const int krajMeta = BAZA_META + BROJ_META_ZAPISA * static_cast<int>(sizeof(MetaWearLeveling));
+  for (int adresa = BAZA_META; adresa < krajMeta; adresa += static_cast<int>(sizeof(prazno))) {
+    const size_t blok =
+        static_cast<size_t>(min(static_cast<int>(sizeof(prazno)), krajMeta - adresa));
+    if (!VanjskiEEPROM::zapisi(adresa, prazno, blok)) {
+      posaljiPCLog(F("WearLeveling: brisanje metapodataka nije uspjelo"));
+      return false;
+    }
+  }
+
+  posaljiPCLog(F("WearLeveling: razvojni metapodaci obrisani"));
+  return true;
 }
 
 }  // namespace WearLeveling

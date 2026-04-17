@@ -95,6 +95,7 @@ struct PostavkeSpremnik {
   bool lcdPozadinskoOsvjetljenje;
   uint8_t modSlavljenja;
   uint8_t modOtkucavanja;
+  uint8_t modMrtvackog;
   char statickaIp[16];
   char mreznaMaska[16];
   char zadaniGateway[16];
@@ -110,7 +111,7 @@ struct PostavkeSpremnik {
 };
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
-constexpr uint8_t POSTAVKE_VERZIJA = 11;
+constexpr uint8_t POSTAVKE_VERZIJA = 15;
 
 constexpr int BAZA_POSTAVKE =
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);
@@ -198,7 +199,7 @@ struct SunceviDogadajiSpremnik {
 };
 
 constexpr uint16_t SUNCEVI_DOGADAJI_POTPIS = 0x5344;
-constexpr uint8_t SUNCEVI_DOGADAJI_VERZIJA = 1;
+constexpr uint8_t SUNCEVI_DOGADAJI_VERZIJA = 2;
 
 constexpr int BAZA_SUNCEVI_DOGADAJI =
   BAZA_EEPROM_DIJAGNOSTIKA + VELICINA_EEPROM_DIJAGNOSTIKA;

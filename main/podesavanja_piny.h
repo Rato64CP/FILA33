@@ -22,11 +22,8 @@
 #define PIN_ZVONO_1                   26  // Zvono 1
 #define PIN_ZVONO_2                   27  // Zvono 2
 
-// Cekici 3 i 4 su pripremljeni za drugu fazu prosirenja.
 #define PIN_CEKIC_MUSKI               28  // Cekic 1 - muski
 #define PIN_CEKIC_ZENSKI              29  // Cekic 2 - zenski
-#define PIN_CEKIC_3                   48  // Cekic 3
-#define PIN_CEKIC_4                   49  // Cekic 4
 
 // ==================== ULAZI OKRETNE PLOCE ====================
 // Mehanicki ulazi ploce koriste 5 cavala.
@@ -51,15 +48,20 @@
 #define PIN_SDA                       20  // I2C SDA - serial data
 #define PIN_SCL                       21  // I2C SCL - serial clock
 
-// ==================== KEYPAD CONTROL ====================
-// 6-key navigation keypad for LCD menu system
+// ==================== MATRICNA TIPKOVNICA 4x5 ====================
+// Lokalni LCD izbornik toranjskog sata koristi matricu od 20 tipki s 9 vodova.
+// Preporuceno mapiranje logickih naredbi definira main/tipke.cpp:
+// strelice = navigacija, Ent = SELECT, ESC = BACK.
 
-#define PIN_KEY_UP                    36  // UP navigation
-#define PIN_KEY_DOWN                  37  // DOWN navigation
-#define PIN_KEY_LEFT                  38  // LEFT navigation
-#define PIN_KEY_RIGHT                 39  // RIGHT navigation
-#define PIN_KEY_SELECT                40  // SELECT confirmation
-#define PIN_KEY_BACK                  41  // BACK/MENU exit
+#define PIN_KEYPAD_ROW_0              3   // Vod 0 matrice
+#define PIN_KEYPAD_ROW_1              12  // Vod 1 matrice - testni premjestaj
+#define PIN_KEYPAD_ROW_2              5   // Vod 2 matrice
+#define PIN_KEYPAD_ROW_3              16  // Vod 3 matrice - testni premjestaj
+#define PIN_KEYPAD_COL_0              7   // Vod 4 matrice
+#define PIN_KEYPAD_COL_1              8   // Vod 5 matrice
+#define PIN_KEYPAD_COL_2              9   // Vod 6 matrice
+#define PIN_KEYPAD_COL_3              10  // Vod 7 matrice
+#define PIN_KEYPAD_COL_4              11  // Vod 8 matrice
 
 // ==================== CELEBRATION AND FUNERAL BUTTONS ====================
 // New buttons for celebration and funeral modes with mutual exclusion
@@ -90,7 +92,13 @@
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
-// Serial3:        9600 baud   - ESP8266 WiFi/NTP/web modul (Rx3=pin15, Tx3=pin14)
+// Serial1:        9600 baud   - priprema za vanjski Raspberry Pi 4B / HA serijski most
+//                              (Rx1=pin19, Tx1=pin18)
+// Serial3:        9600 baud   - ugradeni ESP8266 na Mega+WiFi R3 plocici (Rx3=pin15, Tx3=pin14)
+
+// Dok Raspberry Pi most nije spreman, toranjski sat zadano ostaje na ugradenom ESP8266.
+// Za migraciju na Raspberry Pi kasnije promijeni na Serial1.
+#define ESP_SERIJSKI_PORT            Serial3
 
 // All PIN assignments consolidated in this single header file
 // No duplicate definitions allowed in other source files
