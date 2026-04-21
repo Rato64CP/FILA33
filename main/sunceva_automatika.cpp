@@ -153,7 +153,12 @@ static bool izracunajSunceveMinuteZaDatum(const DateTime& datum,
   }
 
   const float kutniSatStupnjevi = radijaniUStupnjeve(acosf(cosKutnogSata));
-  const int utcOffsetMinute = dohvatiUTCOffsetMinuteZaLokalnoVrijeme(datum);
+  // Za sunceve dogadaje trebamo civilni UTC offset koji vrijedi za taj dan
+  // u trenutku stvarnog dogadaja. Referentno lokalno podne daje stabilan
+  // odgovor i na dan prijelaza CET/CEST, pa jutro/vecer ne ovise o tome je li
+  // raspored racunat prije ili nakon samog DST prijelaza.
+  const DateTime referentnoPodne(datum.year(), datum.month(), datum.day(), 12, 0, 0);
+  const int utcOffsetMinute = dohvatiUTCOffsetMinuteZaLokalnoVrijeme(referentnoPodne);
   const float solarnoPodne = 720.0f - (4.0f * duzina) - jednadzbaVremena + utcOffsetMinute;
   const float delta = kutniSatStupnjevi * 4.0f;
 
