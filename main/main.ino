@@ -8,6 +8,7 @@
 #include "postavke.h"
 #include "tipke.h"
 #include "esp_serial.h"
+#include "podesavanja_piny.h"
 #include "debouncing.h"
 #include "zvonjenje.h"
 #include "otkucavanje.h"
@@ -22,7 +23,36 @@
 #include "misna_automatika.h"
 #include "prekidac_tisine.h"
 
+namespace {
+
+void inicijalizirajSigurnaPocetnaStanjaIzlaza() {
+  const uint8_t izlazniPinovi[] = {
+      PIN_RELEJ_PARNE_KAZALJKE,
+      PIN_RELEJ_NEPARNE_KAZALJKE,
+      PIN_RELEJ_PARNE_PLOCE,
+      PIN_RELEJ_NEPARNE_PLOCE,
+      PIN_ZVONO_1,
+      PIN_ZVONO_2,
+      PIN_CEKIC_MUSKI,
+      PIN_CEKIC_ZENSKI,
+      PIN_LAMPICA_ZVONO_1,
+      PIN_LAMPICA_ZVONO_2,
+      PIN_LAMPICA_SLAVLJENJE,
+      PIN_LAMPICA_MRTVACKO,
+      PIN_LAMPICA_TIHI_REZIM
+  };
+
+  for (uint8_t i = 0; i < (sizeof(izlazniPinovi) / sizeof(izlazniPinovi[0])); ++i) {
+    digitalWrite(izlazniPinovi[i], LOW);
+    pinMode(izlazniPinovi[i], OUTPUT);
+  }
+}
+
+}  // namespace
+
 void setup() {
+  inicijalizirajSigurnaPocetnaStanjaIzlaza();
+
   inicijalizirajLCD();
   inicijalizirajPCSerijsku();
 
@@ -43,6 +73,17 @@ void setup() {
   inicijalizirajOtkucavanje();
   inicijalizirajPrekidacTisine();
   inicijalizirajMrtvackoThumbwheel();
+
+  // Watchdog i boot recovery moraju odraditi prije inicijalizacije
+  // izlaza kazaljki i ploce. U suprotnom toranjski sat moze kratko
+  // podici relej iz starog aktivnog stanja prije nego sto recovery
+  // resetira prekinuti korak za pravilno 6-sekundno ponavljanje.
+  inicijalizirajWatchdog();
+  oznaciWatchdogReset(jeWatchdogResetDetektiran());
+  oznaciGubitakNapajanja(jePowerLossResetDetektiran());
+  inicijalizirajPowerRecovery();
+  odradiBootRecovery();
+
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
   if (jeDCFOmogucen()) {
@@ -50,12 +91,6 @@ void setup() {
   } else {
     posaljiPCLog(F("DCF77: onemogucen u postavkama, inicijalizacija preskocena"));
   }
-
-  inicijalizirajWatchdog();
-  oznaciWatchdogReset(jeWatchdogResetDetektiran());
-  oznaciGubitakNapajanja(jePowerLossResetDetektiran());
-  inicijalizirajPowerRecovery();
-  odradiBootRecovery();
 }
 
 void loop() {

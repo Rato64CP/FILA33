@@ -172,6 +172,12 @@ Za redovno otkucavanje sekvenca koristi:
 - `slavljenje 2` koristi fiksni slijed: `C1 110 ms -> pauza 90 ms -> C2 110 ms -> pauza 190 ms`
 - `mrtvacko 2` koristi fiksni slijed: `C1 300 ms -> pauza 700 ms -> C2 300 ms -> pauza 3700 ms`
 
+### Lokalni ulazi za slavljenje i mrtvacko
+- `slavljenje` je spojeno na fizicki kip-prekidac
+- stanje `LOW` na ulazu znaci da slavljenje treba biti ukljuceno
+- povratak prekidaca u `HIGH` gasi slavljenje
+- `mrtvacko` ostaje zasebno tipkalo i radi kao `toggle` pri pritisku
+
 ### Thumbwheel za mrtvacko
 Mrtvacko koristi dvoznamenkasti `BCD` thumbwheel `00-99`:
 - `00` znaci radi stalno do rucnog gasenja
@@ -283,7 +289,7 @@ Watchdog se podize na `8 s` timeout i odmah biljezi razlog prethodnog reseta (`W
 Power recovery cita kruzni skup backup slotova i trazi zadnji valjani zapis. Ako ga nade, vraca:
 - poziciju kazaljki
 - poziciju ploce
-- dovrsava eventualni prekinuti aktivni korak kao jedan logicki korak
+- vraca eventualni prekinuti aktivni korak u neaktivno stanje iz iste pozicije, tako da se pri ponovnom radu korak odradi ponovno fizicki
 
 `offset` ploce vise nije dio recovery modela.
 

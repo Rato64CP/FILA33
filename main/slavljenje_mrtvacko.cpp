@@ -300,7 +300,7 @@ void azurirajMrtvacko(unsigned long sadaMs) {
   }
 }
 
-void provjeriDugmeSlavljenja() {
+void provjeriPrekidacSlavljenja() {
   SwitchState novoStanje = SWITCH_RELEASED;
   if (!obradiDebouncedInput(PIN_KEY_CELEBRATION, 30, &novoStanje)) {
     return;
@@ -309,11 +309,11 @@ void provjeriDugmeSlavljenja() {
   if (novoStanje == SWITCH_PRESSED) {
     if (!slavljenje.aktivno) {
       zapocniSlavljenje();
-      posaljiPCLog(F("Dugme: slavljenje pokrenuto"));
+      posaljiPCLog(F("Prekidac slavljenja: ukljuceno"));
     }
   } else if (slavljenje.aktivno) {
     zaustaviSlavljenje();
-    posaljiPCLog(F("Dugme: slavljenje zaustavljeno"));
+    posaljiPCLog(F("Prekidac slavljenja: iskljuceno"));
   }
 }
 
@@ -365,7 +365,7 @@ void inicijalizirajSlavljenjeIMrtvacko() {
 
 void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs) {
   uskladiStanjeNakonSigurnosnogLimita(sadaMs);
-  provjeriDugmeSlavljenja();
+  provjeriPrekidacSlavljenja();
   provjeriDugmeMrtvackog();
   azurirajSlavljenje(sadaMs);
   azurirajMrtvacko(sadaMs);

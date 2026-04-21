@@ -11,6 +11,7 @@
 #include "unified_motion_state.h"
 #include "debouncing.h"
 #include "prekidac_tisine.h"
+#include "watchdog.h"
 
 namespace {
 constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
@@ -24,9 +25,7 @@ constexpr uint8_t FAZA_PRVI_RELEJ = 1;
 constexpr uint8_t FAZA_DRUGI_RELEJ = 2;
 
 unsigned long pocetakFazeMs = 0;
-unsigned long zadnjaProvjeraMs = 0;
 uint32_t zadnjiObradeniRtcTick = 0;
-uint32_t pocetakFazeTick = 0;
 
 uint32_t zadnjiKljucCitanjaCavala = 0;
 bool zadnjiKljucCitanjaCavalaValjan = false;
@@ -57,14 +56,6 @@ unsigned long autoPosebniStart = 0;
 unsigned long autoPosebniTrajanje = 0;
 PosebniAutomatskiNacin autoPosebniAktivniNacin = POSEBNI_NACIN_NONE;
 unsigned long autoPosebniKraj = 0;
-
-bool jeBootRecoveryAktivan() {
-  const uint8_t resetFlags = MCUSR;
-  const bool watchdogReset = (resetFlags & (1 << WDRF)) != 0;
-  const bool powerLossReset = (resetFlags & ((1 << BORF) | (1 << PORF))) != 0;
-  const bool vanjskiReset = (resetFlags & (1 << EXTRF)) != 0;
-  return watchdogReset || (powerLossReset && !vanjskiReset);
-}
 
 void resetirajAutomatskiPosebniNacin() {
   autoPosebniZakazaniNacin = POSEBNI_NACIN_NONE;
@@ -170,16 +161,11 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
 }
 
 void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
-  const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
-  const bool istekPoRtcTicku =
-      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL);
   const bool istekPoMillis =
       (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS;
-  if (stanje.plate_phase == FAZA_PRVI_RELEJ &&
-      (istekPoRtcTicku || istekPoMillis)) {
+  if (stanje.plate_phase == FAZA_PRVI_RELEJ && istekPoMillis) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
-    pocetakFazeTick = rtcTick;
     aktivirajRelejePoFazi(stanje);
     UnifiedMotionStateStore::spremiAkoPromjena(stanje);
     posaljiPCLog(F("Ploca: faza 2"));
@@ -187,8 +173,7 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
     return;
   }
 
-  if (stanje.plate_phase == FAZA_DRUGI_RELEJ &&
-      (istekPoRtcTicku || istekPoMillis)) {
+  if (stanje.plate_phase == FAZA_DRUGI_RELEJ && istekPoMillis) {
     stanje.plate_position = static_cast<uint8_t>((stanje.plate_position + 1) % BROJ_POZICIJA);
     stanje.plate_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
@@ -211,7 +196,6 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   if ((rtcVrijeme.second() % 6) != 0) {
     return;
   }
-  zadnjaProvjeraMs = sadaMs;
 
   const int cilj = izracunajCiljnuPoziciju(rtcVrijeme);
   if (stanje.plate_position == cilj) {
@@ -220,7 +204,6 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
 
   stanje.plate_phase = FAZA_PRVI_RELEJ;
   pocetakFazeMs = sadaMs;
-  pocetakFazeTick = rtcTick;
   aktivirajRelejePoFazi(stanje);
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
   posaljiPCLog(F("Ploca: start"));
@@ -503,7 +486,14 @@ void inicijalizirajPlocu() {
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
 
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
-  if (jeBootRecoveryAktivan()) {
+  if (stanje.plate_phase != FAZA_STABILNO) {
+    // Aktivna faza iz stare sesije ne smije se vratiti direktno na releje pri bootu,
+    // nego je treba odraditi ponovno punim korakom na sljedecoj 6-sekundnoj granici.
+    stanje.plate_phase = FAZA_STABILNO;
+    UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+    posaljiPCLog(F("Ploca: pronaden aktivni korak iz stare sesije, vracam u mirno stanje"));
+  }
+  if (jeBootRecoveryResetDetektiran()) {
     posaljiPCLog(F("Ploca: zadrzavam spremljeno stanje za boot recovery"));
   } else {
     posaljiPCLog(F("Ploca: zadrzavam spremljenu poziciju pri normalnom restartu"));
@@ -511,9 +501,7 @@ void inicijalizirajPlocu() {
   aktivirajRelejePoFazi(stanje);
 
   pocetakFazeMs = millis();
-  zadnjaProvjeraMs = millis();
   zadnjiObradeniRtcTick = 0;
-  pocetakFazeTick = 0;
   zadnjiKljucCitanjaCavala = 0;
   zadnjiKljucCitanjaCavalaValjan = false;
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) {
@@ -542,7 +530,6 @@ void upravljajPlocom() {
     }
     zaustaviAutomatikuPloceZbogNepotvrdenogVremena();
     zadnjiObradeniRtcTick = 0;
-    pocetakFazeTick = 0;
     zadnjiKljucCitanjaCavalaValjan = false;
     aktivirajRelejePoFazi(stanje);
     return;
@@ -578,7 +565,6 @@ void upravljajPlocom() {
       aktivirajRelejePoFazi(stanje);
     }
     zadnjiObradeniRtcTick = 0;
-    pocetakFazeTick = 0;
     zadnjiKljucCitanjaCavalaValjan = false;
     return;
   }
@@ -643,7 +629,6 @@ void postaviRucnuBlokaduPloce(bool blokirano) {
 
   rucnaBlokadaPloce = blokirano;
   zadnjiObradeniRtcTick = 0;
-  pocetakFazeTick = 0;
   zadnjiKljucCitanjaCavalaValjan = false;
 
   posaljiPCLog(blokirano ? F("Ploca: ukljucena rucna blokada za namjestanje")

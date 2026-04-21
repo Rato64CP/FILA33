@@ -18,3 +18,6 @@ bool jeWatchdogResetDetektiran();
 
 // True ako je zadnji reset najvjerojatnije povezan s gubitkom napajanja.
 bool jePowerLossResetDetektiran();
+
+// True ako zadnji reset treba tretirati kao boot recovery scenarij.
+bool jeBootRecoveryResetDetektiran();

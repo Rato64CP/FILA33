@@ -147,20 +147,16 @@ void odradiBootRecovery() {
   EepromLayout::UnifiedMotionState jedinstvenoStanje{};
   if (UnifiedMotionStateStore::ucitaj(jedinstvenoStanje)) {
     if (jedinstvenoStanje.hand_active != PowerRecoveryLayout::HAND_NEAKTIVNO) {
-      jedinstvenoStanje.hand_position =
-        static_cast<uint16_t>((jedinstvenoStanje.hand_position + 1) % PowerRecoveryLayout::BROJ_MINUTA_CIKLUS);
       jedinstvenoStanje.hand_active = PowerRecoveryLayout::HAND_NEAKTIVNO;
       jedinstvenoStanje.hand_relay = PowerRecoveryLayout::HAND_RELEJ_NIJEDAN;
       jedinstvenoStanje.hand_start_ms = 0;
       UnifiedMotionStateStore::spremiAkoPromjena(jedinstvenoStanje);
-      posaljiPCLog(F("Power Recovery: Dovrsen prekinuti impuls kazaljki kao jedan korak"));
+      posaljiPCLog(F("Power Recovery: Prekinuti impuls kazaljki vracen u mirno stanje iz iste pozicije"));
     }
     if (jedinstvenoStanje.plate_phase != PowerRecoveryLayout::PLATE_FAZA_STABILNO) {
-      jedinstvenoStanje.plate_position =
-        static_cast<uint8_t>((jedinstvenoStanje.plate_position + 1) % PowerRecoveryLayout::BROJ_POZICIJA_PLOCE);
       jedinstvenoStanje.plate_phase = PowerRecoveryLayout::PLATE_FAZA_STABILNO;
       UnifiedMotionStateStore::spremiAkoPromjena(jedinstvenoStanje);
-      posaljiPCLog(F("Power Recovery: Dovrsen prekinuti korak ploce kao jedan korak"));
+      posaljiPCLog(F("Power Recovery: Prekinuti korak ploce vracen u mirno stanje iz iste pozicije"));
     }
     posaljiPCLog(F("Power Recovery: Zadrzavam novije jedinstveno stanje kretanja"));
   } else {

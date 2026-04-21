@@ -62,3 +62,7 @@ bool jePowerLossResetDetektiran() {
   const bool imaVanjskiReset = (zadnje_reset_zastavice & (1 << EXTRF)) != 0;
   return imaBrownOutIliPowerOn && !imaVanjskiReset;
 }
+
+bool jeBootRecoveryResetDetektiran() {
+  return jeWatchdogResetDetektiran() || jePowerLossResetDetektiran();
+}

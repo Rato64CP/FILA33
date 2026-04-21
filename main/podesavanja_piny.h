@@ -63,11 +63,11 @@
 #define PIN_KEYPAD_COL_3              10  // Vod 7 matrice
 #define PIN_KEYPAD_COL_4              11  // Vod 8 matrice
 
-// ==================== CELEBRATION AND FUNERAL BUTTONS ====================
-// New buttons for celebration and funeral modes with mutual exclusion
+// ==================== SLAVLJENJE I MRTVACKO ULAZI ====================
+// Slavljenje koristi kip-prekidac, a mrtvacko zasebno tipkalo.
 
-#define PIN_KEY_CELEBRATION           43  // Celebration button toggle (PIN 43)
-#define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
+#define PIN_KEY_CELEBRATION           43  // Kip-prekidac slavljenja (LOW=ukljuceno)
+#define PIN_KEY_FUNERAL               42  // Tipkalo mrtvackog (pritisak=toggle)
 
 // ==================== GLOBALNI PREKIDAC TISINE ====================
 // Kip prekidac za tihi rad: LOW=aktivna tisina, blokira zvona i cekice,
