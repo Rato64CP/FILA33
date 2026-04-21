@@ -34,6 +34,8 @@ static unsigned long dcfPocetakSesijeMs = 0;
 static unsigned long dcfKrajSesijeMs = 0;
 static unsigned long dcfPocetakPulsaMs = 0;
 static unsigned long dcfZadnjiKrajPulsaMs = 0;
+static unsigned long dcfPocetakCekanjaNaWiFiMs = 0;
+static bool dcfCekanjeNaWiFiAktivno = false;
 static uint32_t zadnjiSatniPokusajKljuc = 0;
 static uint32_t zadnjaUspjesnaNocDcfKljuc = 0;
 static uint32_t dcfVizualniBrojac = 0;
@@ -43,6 +45,15 @@ static bool rucniDcfAktivan = false;
 
 static void oznaciPromjenuDcfVizualizacije() {
   dcfVizualniBrojac++;
+}
+
+static bool vrijemeProslo(unsigned long sadaMs, unsigned long ciljMs) {
+  return static_cast<long>(sadaMs - ciljMs) >= 0;
+}
+
+static void resetirajCekanjeNaWiFiZaDCF() {
+  dcfPocetakCekanjaNaWiFiMs = 0;
+  dcfCekanjeNaWiFiAktivno = false;
 }
 
 static bool jeNocniDCFInterval(const DateTime& sada) {
@@ -126,22 +137,33 @@ static void pokreniRucniPokusaj() {
 
 static bool trebaNocniFallback() {
   if (!jeDCFOmogucen()) {
+    resetirajCekanjeNaWiFiZaDCF();
     return false;
   }
 
   if (jeZadnjaSvjezaSinkronizacijaIzNTP()) {
+    resetirajCekanjeNaWiFiZaDCF();
     return false;
   }
 
   if (!jeWiFiOmogucen()) {
+    resetirajCekanjeNaWiFiZaDCF();
     return true;
   }
 
   if (jeWiFiPovezanNaESP()) {
+    resetirajCekanjeNaWiFiZaDCF();
     return false;
   }
 
-  return millis() >= DCF_CEKANJE_WIFI_MS;
+  const unsigned long sadaMs = millis();
+  if (!dcfCekanjeNaWiFiAktivno) {
+    dcfCekanjeNaWiFiAktivno = true;
+    dcfPocetakCekanjaNaWiFiMs = sadaMs;
+    return false;
+  }
+
+  return (sadaMs - dcfPocetakCekanjaNaWiFiMs) >= DCF_CEKANJE_WIFI_MS;
 }
 
 static bool dcfJeStabiliziran() {
@@ -270,8 +292,11 @@ static void pokreniSatniPokusaj(const DateTime& sada, uint32_t satniKljuc) {
 }
 
 static void produziSesijuZaDruguPotvrdu() {
-  const unsigned long predlozeniKraj = millis() + DCF_PRODUZENJE_ZA_DRUGU_POTVRDU_MS;
-  if (predlozeniKraj > dcfKrajSesijeMs) {
+  const unsigned long sadaMs = millis();
+  const unsigned long predlozeniKraj = sadaMs + DCF_PRODUZENJE_ZA_DRUGU_POTVRDU_MS;
+  const long preostaloDoTrenutnogKraja = static_cast<long>(dcfKrajSesijeMs - sadaMs);
+  const long preostaloDoPredlozenogKraja = static_cast<long>(predlozeniKraj - sadaMs);
+  if (preostaloDoPredlozenogKraja > preostaloDoTrenutnogKraja) {
     dcfKrajSesijeMs = predlozeniKraj;
   }
 }
@@ -422,7 +447,7 @@ void osvjeziDCFSinkronizaciju() {
       return;
     }
 
-    if (millis() >= dcfKrajSesijeMs) {
+    if (vrijemeProslo(millis(), dcfKrajSesijeMs)) {
       resetirajDcfSesiju(true);
       rucniDcfAktivan = false;
       posaljiPCLog(F("DCF77: rucni prijem istekao bez valjane sinkronizacije"));
@@ -472,7 +497,7 @@ void osvjeziDCFSinkronizaciju() {
     return;
   }
 
-  if (millis() >= dcfKrajSesijeMs) {
+  if (vrijemeProslo(millis(), dcfKrajSesijeMs)) {
     char log[80];
     snprintf(
         log,

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include "zvonjenje.h"
 #include "slavljenje_mrtvacko.h"
@@ -19,6 +20,11 @@ static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
 static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
   PIN_ZVONO_1,
   PIN_ZVONO_2
+};
+
+static const uint8_t PINOVI_LAMPICA_ZVONA[BROJ_ZVONA_MAX] = {
+  PIN_LAMPICA_ZVONO_1,
+  PIN_LAMPICA_ZVONO_2
 };
 
 static const uint8_t PINOVI_RUCNIH_SKLOPKI[BROJ_RUCNIH_SKLOPKI_ZVONA] = {
@@ -47,6 +53,7 @@ static struct {
 } manualnoUpravljanje = {{false, false}};
 
 static bool dozvoliPaljenjeZvonaIzRucneSklopke = false;
+static bool globalnaBlokadaZvona = false;
 
 // ==================== RELAY CONTROL ====================
 
@@ -76,16 +83,11 @@ static void prekiniPosebneNacineZbogZvona(int indeks) {
     return;
   }
 
-  String log = F("Zvono");
-  log += (indeks + 1);
-  log += F(": ima prioritet i prekida ");
-  if (prekinutoSlavljenje && prekinutoMrtvacko) {
-    log += F("slavljenje i mrtvacko");
-  } else if (prekinutoSlavljenje) {
-    log += F("slavljenje");
-  } else {
-    log += F("mrtvacko");
-  }
+  char log[88];
+  snprintf_P(log, sizeof(log), PSTR("Zvono%d: ima prioritet i prekida %s"),
+             indeks + 1,
+             (prekinutoSlavljenje && prekinutoMrtvacko) ? "slavljenje i mrtvacko"
+             : (prekinutoSlavljenje ? "slavljenje" : "mrtvacko"));
   posaljiPCLog(log);
 }
 
@@ -97,12 +99,12 @@ static void aktivirajBell_Relej(int indeks) {
   // Zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
   prekiniPosebneNacineZbogZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
+  digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], HIGH);
   inercija.inercija_aktivna = true;
   inercija.vrijeme_pocetka = millis();
 
-  String log = F("Zvono");
-  log += (indeks + 1);
-  log += F(": aktivirana, inercija (90s) poceta");
+  char log[56];
+  snprintf_P(log, sizeof(log), PSTR("Zvono%d: aktivirana, inercija (90s) poceta"), indeks + 1);
   posaljiPCLog(log);
   signalizirajZvono_Ringing(indeks + 1);
 }
@@ -113,9 +115,9 @@ static void deaktivirajBell_Relej(int indeks) {
   }
 
   digitalWrite(PINOVI_ZVONA[indeks], LOW);
-  String log = F("Zvono");
-  log += (indeks + 1);
-  log += F(": deaktivirana");
+  digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], LOW);
+  char log[32];
+  snprintf_P(log, sizeof(log), PSTR("Zvono%d: deaktivirana"), indeks + 1);
   posaljiPCLog(log);
 }
 
@@ -130,6 +132,10 @@ static void ukljuciZvonoIzRucneSklopke(int zvono) {
 void ukljuciZvono(int zvono) {
   const int indeks = zvono - 1;
   if (!jeValjanIndeksZvona(indeks) || !jeZvonoOmogucenoPoPostavkama(zvono)) {
+    return;
+  }
+
+  if (globalnaBlokadaZvona) {
     return;
   }
 
@@ -217,12 +223,38 @@ void deaktivirajZvonjenje(int zvono) {
   iskljuciZvono(zvono);
 }
 
+void postaviGlobalnuBlokaduZvona(bool blokiraj) {
+  if (globalnaBlokadaZvona == blokiraj) {
+    return;
+  }
+
+  globalnaBlokadaZvona = blokiraj;
+
+  if (globalnaBlokadaZvona) {
+    for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+      if (!zvona.aktivan[i]) {
+        continue;
+      }
+
+      deaktivirajBell_Relej(i);
+      zvona.aktivan[i] = false;
+      zvona.start_ms[i] = 0UL;
+      zvona.duration_ms[i] = 0UL;
+    }
+    posaljiPCLog(F("Globalna blokada zvona: UKLJUCENA"));
+  } else {
+    posaljiPCLog(F("Globalna blokada zvona: ISKLJUCENA"));
+  }
+}
+
 // ==================== INITIALIZATION ====================
 
 void inicijalizirajZvona() {
   for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
     pinMode(PINOVI_ZVONA[i], OUTPUT);
     digitalWrite(PINOVI_ZVONA[i], LOW);
+    pinMode(PINOVI_LAMPICA_ZVONA[i], OUTPUT);
+    digitalWrite(PINOVI_LAMPICA_ZVONA[i], LOW);
     zvona.aktivan[i] = false;
     zvona.start_ms[i] = 0;
     zvona.duration_ms[i] = 0;
@@ -251,17 +283,21 @@ void upravljajZvonom() {
 
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     if (obradiDebouncedInput(PINOVI_RUCNIH_SKLOPKI[i], 30, &novoStanje)) {
-        String log = F("Rucno ZVONO");
-      log += (i + 1);
-      log += (novoStanje == SWITCH_PRESSED) ? F(" ON") : F(" OFF");
+      char log[80];
+      snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d %s"), i + 1,
+                 (novoStanje == SWITCH_PRESSED) ? "ON" : "OFF");
 
       if (novoStanje == SWITCH_PRESSED) {
         if (jeZvonoOmogucenoPoPostavkama(i + 1)) {
           manualnoUpravljanje.override_aktivan[i] = true;
-          ukljuciZvonoIzRucneSklopke(i + 1);
+          if (!globalnaBlokadaZvona) {
+            ukljuciZvonoIzRucneSklopke(i + 1);
+          } else {
+            snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d ON (blokirano globalnom tisinom)"), i + 1);
+          }
         } else {
           manualnoUpravljanje.override_aktivan[i] = false;
-          log += F(" (preskoceno)");
+          snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d ON (preskoceno)"), i + 1);
         }
       } else {
         manualnoUpravljanje.override_aktivan[i] = false;
@@ -269,6 +305,20 @@ void upravljajZvonom() {
       }
       posaljiPCLog(log);
     }
+  }
+
+  if (globalnaBlokadaZvona) {
+    for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+      if (zvona.aktivan[i]) {
+        deaktivirajBell_Relej(i);
+        zvona.aktivan[i] = false;
+        zvona.start_ms[i] = 0UL;
+        zvona.duration_ms[i] = 0UL;
+      }
+    }
+
+    jeLiInerciaAktivna();
+    return;
   }
 
   // Ako je rucni override aktivan, ima prioritet nad web/API automatikom.
@@ -287,9 +337,8 @@ void upravljajZvonom() {
       const unsigned long proteklo = sadaMs - zvona.start_ms[i];
       if (proteklo >= zvona.duration_ms[i]) {
         iskljuciZvono(i + 1);
-        String log = F("Zvono");
-        log += (i + 1);
-        log += F(": trajanje isteklo");
+        char log[40];
+        snprintf_P(log, sizeof(log), PSTR("Zvono%d: trajanje isteklo"), i + 1);
         posaljiPCLog(log);
       }
     }

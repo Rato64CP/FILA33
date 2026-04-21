@@ -50,6 +50,10 @@ static bool prioritetniNtpZahtjevNaCekanju = false;
 static uint32_t zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
 static uint32_t zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
 
+static bool vrijemeProslo(unsigned long sadaMs, unsigned long ciljMs) {
+  return static_cast<long>(sadaMs - ciljMs) >= 0;
+}
+
 static bool jeResetNakonGubitkaNapajanja() {
   const uint8_t mcusr = MCUSR;
   const bool imaBrownOutIliPowerOn = (mcusr & ((1 << BORF) | (1 << PORF))) != 0;
@@ -62,7 +66,7 @@ static bool jeAktivnaPocetnaOdgodaWiFi() {
     return false;
   }
 
-  if (millis() < wifiPocetnaOdgodaDoMs) {
+  if (!vrijemeProslo(millis(), wifiPocetnaOdgodaDoMs)) {
     return true;
   }
 
@@ -121,7 +125,6 @@ static bool jeValjanaIPv4AdresaZaLCD(const char* tekst) {
 }
 
 void posaljiESPKomandu(const char* komanda);
-void posaljiESPKomandu(const String& komanda);
 static void zatraziWiFiStatusESP();
 static bool spremiSetupWiFiPostavkeIzESPa(const char* payload);
 static void posaljiVrijemeESPU();
@@ -479,10 +482,6 @@ void obradiAutomatskiNTPZahtjevESP() {
 }
 
 void posaljiESPKomandu(const char* komanda) {
-  espSerijskiPort.println(komanda);
-}
-
-void posaljiESPKomandu(const String& komanda) {
   espSerijskiPort.println(komanda);
 }
 

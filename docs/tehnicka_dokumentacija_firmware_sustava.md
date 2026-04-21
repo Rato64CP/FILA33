@@ -1,305 +1,343 @@
-# 📘 Tehnička dokumentacija firmware sustava toranjskog sata
+# 📘 Tehnicka dokumentacija firmware sustava toranjskog sata
 
-Ovaj dokument opisuje **kako sustav radi u pogonu**: mehaničko kretanje kazaljki, okretne ploče, zvona i čekića, sinkronizaciju vremena te sigurnosne mehanizme. Fokus je na ponašanju i razlozima dizajna, ne na prepisivanju implementacije.
+Ovaj dokument opisuje kako sustav danas stvarno radi u pogonu: mehanicko kretanje kazaljki, okretne ploce, zvona i cekica, sinkronizaciju vremena te sigurnosne mehanizme. Fokus je na ponasanju i razlozima dizajna, ne na prepisivanju implementacije.
 
 ---
 
-## 1. SYSTEM OVERVIEW
+## 1. System Overview
 
-### Što sustav kontrolira
-Firmware upravlja četirima glavnim podsustavima toranjskog sata:
-- **Kazaljke sata** (minutni koraci kroz releje PARNI/NEPARNI).
-- **Okretna ploča** (diskretne pozicije koje predstavljaju raspored mehaničkih događaja).
-- **Zvona** (dulji rad releja zvona, uključujući ručni override i automatske ulaze s ploče).
-- **Čekiće / otkucavanje** (kratki impulsi za puni sat, pola sata, slavljenje i mrtvačko).
+### Sto sustav kontrolira
+Firmware upravlja cetirima glavnim podsustavima toranjskog sata:
+- **Kazaljke sata**: minutni koraci kroz releje `PARNI` i `NEPARNI`.
+- **Okretna ploca**: diskretne pozicije koje predstavljaju raspored mehanickih dogadaja.
+- **Zvona**: dulji rad releja zvona, ukljucujuci rucne sklopke i automatske ulaze s ploce.
+- **Cekice / otkucavanje**: kratki impulsi za puni sat, pola sata, slavljenje i mrtvacko.
 
 ### Koncept glavne runtime petlje
-Glavna `loop()` petlja je organizirana kao **kooperativni scheduler** bez blokiranja:
-1. osvježi watchdog,
-2. obradi komunikacije i UI (ESP, meni, tipke),
-3. obradi mehaniku (zvona, otkucavanje, kazaljke, ploča),
-4. obradi dodatnu sinkronizaciju (DCF),
-5. periodički spremi kritično stanje,
-6. ponovno osvježi watchdog.
+Glavna `loop()` petlja je organizirana kao kooperativni scheduler bez blokiranja:
+1. osvjezi watchdog
+2. obradi komunikacije i UI (`ESP`, meni, tipke)
+3. obradi mehaniku (zvona, otkucavanje, kazaljke, ploca)
+4. obradi dodatnu sinkronizaciju (`DCF`)
+5. periodicki spremi kriticno stanje
+6. ponovno osvjezi watchdog
 
-Time se osigurava da nijedan podsustav ne „gladuje“, a svi rade ciklički u malim koracima.
+Time se osigurava da nijedan podsustav ne gladuje, a svi rade ciklicki u malim koracima.
 
 ### Arhitektura na visokoj razini
-- **Vrijeme i sinkronizacija:** `time_glob.*`, `esp_serial.*`, `dcf_sync.*`.
-- **Kretanje mehanike:** `kazaljke_sata.*`, `okretna_ploca.*`, `unified_motion_state.*`.
-- **Udari i zvona:** `otkucavanje.*`, `zvonjenje.*`.
-- **UI i postavke:** `tipke.*`, `menu_system.*`, `postavke.*`.
-- **Otpornost i oporavak:** `watchdog.*`, `power_recovery.*`, `wear_leveling.*`, `i2c_eeprom.*`.
+- **Vrijeme i sinkronizacija**: [main/time_glob.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp), [main/esp_serial.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp), [main/dcf_sync.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/dcf_sync.cpp)
+- **Kretanje mehanike**: [main/kazaljke_sata.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/kazaljke_sata.cpp), [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp)
+- **Udari i zvona**: [main/otkucavanje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/otkucavanje.cpp), [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp), [main/slavljenje_mrtvacko.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/slavljenje_mrtvacko.cpp)
+- **UI i postavke**: [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp), [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp), [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp)
+- **Otpornost i oporavak**: [main/watchdog.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/watchdog.cpp), [main/power_recovery.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp), [main/wear_leveling.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/wear_leveling.cpp), [main/i2c_eeprom.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/i2c_eeprom.cpp)
 
 ---
 
-## 2. UNIFIED STATE MODEL
+## 2. Unified State Model
 
 ### Uloga `UnifiedMotionState`
-`UnifiedMotionState` je jedinstveni zapis stanja za **kazaljke + okretnu ploču**. Ideja je da oba mehanizma dijele isti model i isto spremanje, pa se nakon restarta točno zna:
-- gdje je sustav stao,
-- je li impuls bio aktivan,
-- koja je faza koraka bila u tijeku.
+`UnifiedMotionState` je jedinstveni zapis stanja za kazaljke i okretnu plocu. Ideja je da oba mehanizma dijele isti model i isto spremanje, pa se nakon restarta tocno zna:
+- gdje je sustav stao
+- je li impuls bio aktivan
+- koja je faza koraka bila u tijeku
 
-### Značenje polja
-- **`hand_position`**: logička pozicija kazaljki u rasponu 0–719 (12 h × 60 min).
-- **`hand_active`**: `0/1` zastavica je li trenutno aktivan impuls kazaljki.
-- **`hand_relay`**: koji relej vodi impuls kazaljki (`nijedan`, `PARNI`, `NEPARNI`).
-- **`plate_position`**: trenutna pozicija okretne ploče (0–63).
-- **`plate_phase`**: faza ploče (`stabilno`, `prvi relej`, `drugi relej`).
+### Znacenje polja
+- `hand_position`: logicka pozicija kazaljki u rasponu `0-719`
+- `hand_active`: je li trenutno aktivan impuls kazaljki
+- `hand_relay`: koji relej vodi impuls kazaljki (`nijedan`, `PARNI`, `NEPARNI`)
+- `hand_start_ms`: lokalni `millis()` trenutak starta aktivne faze
+- `plate_position`: trenutna pozicija okretne ploce `0-63`
+- `plate_phase`: faza ploce (`stabilno`, `prvi relej`, `drugi relej`)
 
 ### Cache vs EEPROM
 Sloj `UnifiedMotionStateStore` koristi dvije razine:
-- **RAM cache (`cacheStanje`)** za brzo čitanje bez nepotrebnog I2C prometa.
-- **EEPROM (wear-leveling)** za trajnost kroz nestanak napajanja.
+- RAM cache za brzo citanje bez nepotrebnog `I2C` prometa
+- EEPROM za trajnost kroz nestanak napajanja
+
+Za testnu reviziju toranjskog sata `UnifiedMotionState` koristi **24 rotirajuca slota** u vlastitom EEPROM bloku. Pri citanju se skeniraju svi konfigurirani slotovi, a najnoviji zapis bira se po internoj sekvenci bez zajednickog meta-zapisa.
 
 Tok rada:
-1. kod čitanja prvo pokušava cache,
-2. ako cache nije inicijaliziran, čita iz EEPROM-a,
-3. ako EEPROM nije valjan, radi migraciju/rekonstrukciju inicijalnog stanja i odmah ga zapisuje.
+1. kod citanja prvo pokusava cache
+2. ako cache nije inicijaliziran, cita iz EEPROM-a
+3. ako EEPROM nije valjan, radi migraciju ili rekonstrukciju inicijalnog stanja i odmah ga zapisuje
 
 ### Kada se stanje sprema
-Stanje se sprema **samo kad postoji promjena** (memcmp provjera):
-- pri startu/stopu impulsa kazaljki,
-- pri promjeni faze ploče,
-- pri dovršetku koraka i promjeni pozicije,
-- pri ručnom postavljanju pozicija.
+Stanje se sprema samo kad postoji promjena:
+- pri startu i stopu impulsa kazaljki
+- pri promjeni faze ploce
+- pri dovrsetku koraka i promjeni pozicije
+- pri rucnom postavljanju pozicija
 
-To smanjuje trošenje EEPROM-a i zadržava konzistentnost mehanike.
+To smanjuje trosenje EEPROM-a i zadrzava konzistentnost mehanike.
 
 ---
 
-## 3. CLOCK HANDS (KAZALJKE)
+## 3. Clock Hands
 
-### Minutni korak: jedan impuls = jedna minuta
-Kazaljke ne „skaču“ na cilj odmah. Svaki fizički korak radi ovako:
-- aktivira se odgovarajući relej,
-- drži se aktivnim **6 sekundi**,
-- zatim se korak zaključuje i `hand_position` se poveća za 1.
+### Minutni korak
+Kazaljke ne skacu na cilj odmah. Svaki fizicki korak radi ovako:
+- aktivira se odgovarajuci relej
+- drzi se aktivnim oko `6 s`
+- zatim se korak zakljucuje i `hand_position` se poveca za `1`
 
-### Parni/neparni relejni model
-Relej se bira prema paritetu trenutne logičke pozicije:
-- parna pozicija → PARNI relej,
-- neparna pozicija → NEPARNI relej.
+### Parni i neparni relejni model
+Relej se bira prema paritetu trenutne logicke pozicije:
+- parna pozicija -> `PARNI` relej
+- neparna pozicija -> `NEPARNI` relej
 
-Tako je svaki idući minutni korak električki konzistentan s mehanikom pogona.
+### Zavrsavanje aktivne faze
+Primarni autoritet za ritam i dalje je `RTC SQW`, ali završetak aktivne faze ima i `millis()` fallback. Time relej ne moze ostati trajno ukljucen ako `RTC SQW` privremeno nestane.
 
-### 6-sekundni impulsni model
-Sustav periodički provjerava treba li novi korak tek nakon isteka faznog vremena. U praksi to znači:
-- dok je impuls aktivan, ne pokreće se novi,
-- tek nakon 6 s impuls se gasi i pozicija napreduje.
-
-### Kako se ispravlja mismatch prema RTC-u (korak-po-korak)
-Cilj je uvijek `RTC vrijeme -> (sat % 12)*60 + minuta`.
+### Kako se ispravlja mismatch prema RTC-u
+Cilj je uvijek `RTC vrijeme -> (sat % 12) * 60 + minuta`.
 Ako `hand_position != cilj`:
-1. pokrene se jedan korak,
-2. pričeka završetak koraka,
-3. ponovno izračuna cilj,
-4. po potrebi ponovi.
+1. pokrene se jedan korak
+2. priceka zavrsetak koraka
+3. ponovno izracuna cilj
+4. po potrebi ponovi
 
-**Primjer:**
-- RTC kaže 10:15 (cilj 615),
-- kazaljke su na 10:12 (612),
-- sustav odradi 3 uzastopna koraka (svaki 6 s),
-- nakon trećeg koraka stanje je sinkronizirano.
-
-Ovo je namjerno „meka“ korekcija radi zaštite mehanike.
+Ako su kazaljke malo naprijed, sustav ne forsira puni krug nego pusta da ih stvarno vrijeme sustigne.
 
 ---
 
-## 4. ROTATING PLATE (OKRETNA PLOČA)
+## 4. Rotating Plate
 
 ### Logika koraka svakih 15 minuta
-Ciljna pozicija ploče se računa iz vremena u 15-minutnim blokovima. Aktivni dnevni prozor je po postavkama konfigurabilan, a zadani prozor je:
-- **od 05:00 do 20:45**,
-- izvan tog prozora cilj je noćna pozicija 63.
+Ciljna pozicija ploce racuna se iz vremena u `15`-minutnim blokovima. Aktivni dnevni prozor je po postavkama konfigurabilan, a zadani prozor je:
+- od `04:59` do `20:44` kao logicki raspon pozicija
+- citanje cavala ide minutu kasnije, na `HH:MM:30 + 1 min`
 
-### Dvofazni model (PARNI + NEPARNI)
-Jedan korak ploče nije trenutan, nego ide kroz dvije faze:
-1. faza 1: prvi relej aktivan 6 s,
-2. faza 2: drugi relej aktivan 6 s,
-3. završetak: `plate_position = (plate_position + 1) % 64`, faza vraćena na stabilno.
+### Dvofazni model
+Jedan korak ploce nije trenutan, nego ide kroz dvije faze:
+1. faza 1: prvi relej aktivan `6 s`
+2. faza 2: drugi relej aktivan `6 s`
+3. zavrsetak: `plate_position = (plate_position + 1) % 64`, faza vracena na stabilno
 
-### Mapiranje pozicija 0–63
-- `0` odgovara početku dnevnog prozora,
-- svaka iduća pozicija predstavlja +15 min,
-- `63` je zadnja/noćna referenca.
+### Mapiranje pozicija `0-63`
+- `0` odgovara pocetku dnevnog prozora
+- svaka iduca pozicija predstavlja `+15 min`
+- `63` je zadnja ili nocna referenca
 
-### Čavli okretne ploče i raspored zvona
-- Sustav sada podržava **5-10 čavala** i do **4 zvona** toranjskog sata.
-- U postavkama se posebno sprema:
-  broj mjesta za čavle,
-  broj aktivnih zvona,
-  raspored čavala za radne dane (`RD`) za zvona 1-4,
-  raspored čavala za nedjelje (`NED`) za zvona 1-4,
-  poseban čavao za `SLAVLJENJE`,
-  poseban čavao za `MRTVAČKO`.
-- Vrijednost `0` znači da određeno zvono ili poseban način rada nema dodijeljen čavao.
-- Trajanja `BELL1`-`BELL4` i `SLAVLJENJA` podešavaju se u postavkama toranjskog sata u rasponu **1-4 minute**.
-- Postavka `SLAVLJENJE prije/poslije` određuje ide li slavljenje prije zvona ili nakon završetka zvona.
+### Cavli i raspored zvona
+Aktualni firmware podrzava:
+- `5` mjesta za cavle
+- `2` zvona
+- poseban cavao za `SLAVLJENJE`
+- nema vise zasebnog aktivnog modela za `MRTVACKO` cavao u postavkama
 
-### Sinkronizacija ploče nakon nestanka napajanja
-Kod boota sustav učitava zadnje poznato stanje iz EEPROM-a (pozicija + faza). Nakon toga u runtime-u:
-- ako je ploča već na cilju, nema pokreta,
-- ako nije, korigira se korak-po-korak dok ne dođe do cilja.
+Za radne dane i nedjelju posebno se sprema:
+- raspored cavala za `ZVONO 1`
+- raspored cavala za `ZVONO 2`
+- cavao za `SLAVLJENJE`
 
-Time se izbjegava agresivno „premotavanje“ ploče.
+Vrijednost `0` znaci da određeno zvono ili slavljenje nema dodijeljen cavao.
+
+### Kada se cavli citaju
+Cavli se ne citaju tijekom pomaka ploce. Citanje je dozvoljeno samo kad:
+- vrijeme je potvrdeno
+- ploca je konfigurirana
+- ploca je u `FAZA_STABILNO`
+- ploca je na ciljnoj poziciji za aktualni termin
+
+Referentni trenutak citanja je pomaknut na **minutu nakon logickog termina**, u sekundi `:30`.
+
+Primjer sa zadanim pocetkom:
+- slot `04:59` cita se u `05:00:30`
+- slot `05:14` cita se u `05:15:30`
+- slot `05:29` cita se u `05:30:30`
+- slot `05:44` cita se u `05:45:30`
+
+### Sinkronizacija ploce nakon nestanka napajanja
+Kod boota sustav ucitava zadnje poznato stanje iz EEPROM-a. Nakon toga u runtime-u:
+- ako je ploca vec na cilju, nema pokreta
+- ako nije, korigira se korak-po-korak dok ne dode do cilja
+
+Time se izbjegava agresivno premotavanje ploce.
 
 ---
 
-## 5. HAMMER STRIKING (OTKUCAVANJE)
+## 5. Hammer Striking
 
-### Puni sat vs pola sata
-- **Puni sat (`minute == 00`)**: broj udaraca 1–12 (12-satni format), muški čekić.
-- **Pola sata (`minute == 30`)**: jedan udarac, ženski čekić.
+### Puni sat i pola sata
+- puni sat (`minute == 00`): broj udaraca `1-12`, muski cekic
+- pola sata (`minute == 30`): jedan udarac, zenski cekic
 
 ### Tajming
-Za satno otkucavanje sekvenca je fiksirana:
-- **150 ms impuls** čekića,
-- **2 s pauza** između udaraca.
+Za redovno otkucavanje sekvenca koristi:
+- impuls cekica iz postavki, ogranicen sigurnosnim limitom
+- definirane pauze izmedu udaraca
 
-Za ostale načine mogu se koristiti postavke, ali puni sat ostaje fiksan radi predvidljivog mehaničkog ritma.
+### Posebni nacini rada cekica
+- `slavljenje 1`, `mrtvacko 1` i redovno otkucavanje i dalje koriste zajednicki impuls iz postavki
+- `slavljenje 2` koristi fiksni slijed: `C1 110 ms -> pauza 90 ms -> C2 110 ms -> pauza 190 ms`
+- `mrtvacko 2` koristi fiksni slijed: `C1 300 ms -> pauza 700 ms -> C2 300 ms -> pauza 3700 ms`
 
-### Quiet hours logika
-Prije automatskog otkucavanja provjeravaju se:
-- dopušteni satni raspon (`satOd`–`satDo`),
-- tihi period (`tihiSatiOd`–`tihiSatiDo`, uključujući raspon preko ponoći).
+### Thumbwheel za mrtvacko
+Mrtvacko koristi dvoznamenkasti `BCD` thumbwheel `00-99`:
+- `00` znaci radi stalno do rucnog gasenja
+- `01-99` znaci auto-stop nakon toliko minuta
+- vrijednost se stabilizira u pozadini
+- ako se vrijednost promijeni tijekom aktivnog mrtvackog, nova vrijednost odmah postaje autoritet i restartira lokalno odbrojavanje
 
-Ako je aktivan tihi period, otkucavanje se preskače i samo se logira događaj.
+### BAT i tihi sati
+`BAT / tihi sati` iz postavki blokiraju samo redovno otkucavanje. Ne blokiraju:
+- suncevu automatiku
+- cavao-zvonjenja s ploce
 
-### Interakcija s inercijom i blokadom
-Ako su zvona aktivna ili je svježe završilo zvonjenje, aktivna je inercijska blokada i čekići se ne pokreću. Također postoji korisnička globalna blokada otkucavanja. Ako blokada nastupi usred sekvence, sekvenca se sigurno prekida.
+Ako je jutarnje suncevo zvono odradeno, ono moze otvoriti otkucavanje i prije regularnog kraja `BAT` raspona.
+
+### Tihi rezim
+Jedinstveni tihi rezim blokira:
+- zvona
+- cekice
+- slavljenje
+- mrtvacko
+
+Kazaljke i okretna ploca ostaju aktivne.
 
 ---
 
-## 6. BELLS (ZVONA)
+## 6. Bells
 
-### Razlika između zvona i čekića
-- **Zvona**: dulja aktivacija releja (sekunde/minute), vezana uz ulaze ploče, ručne sklopke i automatsko trajanje.
-- **Čekići**: kratki impulsni udari (stotine ms) za otkucavanje i posebne načine.
+### Razlika izmedu zvona i cekica
+- zvona: dulja aktivacija releja, vezana uz ulaze ploce, rucne sklopke i automatsko trajanje
+- cekici: kratki impulsni udari za otkucavanje i posebne nacine
 
-### Ručno upravljanje preko sklopki
-Postoje fizičke sklopke za BELL1 i BELL2 (debounce ~30 ms). Kada je ručni override aktivan, on ima prioritet nad automatikom.
+### Rucno upravljanje preko sklopki
+Postoje fizicke sklopke za `ZVONO 1` i `ZVONO 2`. Kada je rucni override aktivan, on ima prioritet nad automatikom.
 
 ### Inercija
-Nakon uključivanja/isključivanja zvona aktivira se inercija od **90 s**. U tom periodu se blokiraju udari čekića da se ne preklapa mehaničko gibanje.
+Nakon ukljucivanja ili iskljucivanja zvona aktivira se inercija od `90 s`. U tom periodu se blokiraju udari cekica kako se ne bi preklapala mehanicka gibanja.
 
-### Zašto se zvona više ne koriste za satno otkucavanje
-Satno otkucavanje je sada prebačeno na čekiće jer traži precizan impulsni ritam (150 ms + pauza). Zvona ostaju za duže liturgijske/rasporedne događaje i ručne intervencije.
-
----
-
-## 7. NTP / RTC SINKRONIZACIJA
-
-### RTC (DS3231) kao primarni izvor
-Sustav kontinuirano čita DS3231 i to je lokalni autoritet vremena tijekom normalnog rada.
-
-### ESP NTP kao periodička korekcija
-NTP dolazi serijski od ESP-a u strogom ISO formatu (`NTP:YYYY-MM-DDTHH:MM:SS[Z]`). ESP pošalje prvi valjani NTP odmah nakon uspostave WiFi veze, a zatim još jednom za svaki novi lokalni sat. Kad je prihvaćen, vrijeme se upisuje i u RTC.
-
-### `ACK:NTP`
-- **`ACK:NTP`**: NTP je valjan i prihvaćen.
-
-Nakon `ACK:NTP`, sustav pokreće „budnu“ korekciju kazaljki ako nisu sinkronizirane.
+### Tihi rezim i zvona
+Kad je aktivan tihi rezim:
+- automatska zvonjenja ne rade
+- rucne sklopke ne mogu ukljuciti zvona
+- cavli se mogu ocitati, ali ne mogu pokrenuti zvonjenje
 
 ---
 
-## 8. MENU I SUSTAV POSTAVKI
+## 7. NTP / RTC / DCF Sinkronizacija
+
+### RTC kao primarni izvor
+Sustav kontinuirano cita `DS3231` i to je lokalni autoritet vremena tijekom normalnog rada.
+
+### NTP kao kontrolirana korekcija
+`ESP` vise ne gura `NTP` po svom rasporedu. Mega sama trazi `NTP` samo u sigurnom prozoru kad:
+- mehanika miruje
+- nije aktivan osjetljiv trenutak otkucavanja ili korekcije
+- mreza je spremna
+
+Prihvacena `NTP` sinkronizacija se, kad god je moguce, poravnava na sljedeci `RTC SQW` tik sekunde.
+
+### DCF kao dodatni izvor
+`DCF77` ostaje dodatni sinkronizacijski izvor i fallback kad mreza nije dostupna ili se zeli druga potvrda vremena.
+
+### Zastita od sumnjivog skoka vremena
+Ako novo vrijeme napravi prevelik skok, sustav ga ne prihvaca odmah nego trazi dodatnu potvrdu. Time se izbjegava upis krivog vremena u `RTC`.
+
+### DST
+Firmware sam vodi `CET/CEST` status, sprema ga u EEPROM i automatski primjenjuje prijelaz.
+
+---
+
+## 8. Menu I Sustav Postavki
 
 ### Jasna podjela odgovornosti
-- **`tipke.cpp`**: fizičko skeniranje tipki + debounce + pretvorba u `KeyEvent`.
-- **`menu_system.cpp`**: stanje UI-a, ekrani, navigacija, logika potvrde i poziv poslovnih funkcija.
-- **`postavke.cpp`**: trajna pohrana, validacija, fallback na default i zapis u EEPROM.
+- [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp): fizicko skeniranje tipki i pretvorba u `KeyEvent`
+- [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp): stanje UI-a, ekrani, navigacija i poziv poslovnih funkcija
+- [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp): trajna pohrana, validacija, fallback na default i zapis u EEPROM
 
 ### Kako se postavke mijenjaju i spremaju
-1. korisnik promijeni vrijednost kroz meni,
-2. `menu_system` pozove API iz `postavke` (npr. tihi sati, WiFi, NTP),
-3. `postavke` validira, pripremi integritet (potpis/verzija/checksum),
-4. zapis ide kroz wear-leveling slotove u EEPROM.
+1. korisnik promijeni vrijednost kroz meni
+2. `menu_system` pozove API iz `postavke`
+3. `postavke` validira, pripremi integritet i zapis
+4. promjena se sprema u EEPROM
 
 ### EEPROM verzioniranje i validacija
-Postavke imaju trostruku zaštitu:
-- **potpis** (`POSTAVKE_POTPIS`),
-- **verziju layouta** (`POSTAVKE_VERZIJA`),
-- **checksum** cijele strukture.
+Postavke imaju trostruku zastitu:
+- potpis
+- verziju layouta
+- checksum cijele strukture
 
-Ako bilo što ne prođe validaciju, sustav se vraća na zadane vrijednosti i ponovno ih snima.
+Ako validacija ne prode, sustav se vraca na zadane vrijednosti i ponovno ih snima.
 
 ---
 
-## 9. BOOT SEQUENCE
+## 9. Boot Sequence
 
 ### Redoslijed inicijalizacije
 `setup()` redom inicijalizira:
-1. LCD + PC serial,
-2. vanjski EEPROM,
-3. RTC + učitavanje postavki,
-4. tipke, ESP, meni,
-5. zvona, otkucavanje, kazaljke, ploču, DCF,
-6. watchdog,
-7. power-recovery oznake i boot recovery.
+1. LCD i PC serial
+2. vanjski EEPROM
+3. RTC i ucitavanje postavki
+4. tipke, ESP i meni
+5. zvona, otkucavanje, kazaljke, plocu i `DCF`
+6. watchdog
+7. power-recovery oznake i boot recovery
 
 ### Watchdog inicijalizacija
-Watchdog se podiže na 8 s timeout i odmah bilježi razlog prethodnog reseta (WDT/BOR/POR/EXTRF).
+Watchdog se podize na `8 s` timeout i odmah biljezi razlog prethodnog reseta (`WDT`, `BOR`, `POR`, `EXTRF`).
 
 ### Oporavak nakon nestanka napajanja
-Power recovery čita kružni skup backup slotova i traži zadnji valjani zapis (checksum). Ako ga nađe, vraća:
-- poziciju kazaljki,
-- poziciju ploče,
-- offset ploče.
+Power recovery cita kruzni skup backup slotova i trazi zadnji valjani zapis. Ako ga nade, vraca:
+- poziciju kazaljki
+- poziciju ploce
+- dovrsava eventualni prekinuti aktivni korak kao jedan logicki korak
+
+`offset` ploce vise nije dio recovery modela.
 
 ### Obnova stanja iz EEPROM-a
-Kritično stanje se periodički sprema svakih 60 s u rotirajuće slotove. To ograničava gubitak stanja na najviše posljednju minutu prije ispada.
+Kriticno stanje se periodicki sprema svakih `60 s` u rotirajuce slotove. To ogranicava gubitak stanja na najvise posljednju minutu prije ispada.
 
-### Inicijalno sinkronizacijsko ponašanje
-Nakon boota sustav ne radi „hard jump“ mehanike. Umjesto toga, mehanizmi uđu u redovni korak-po-korak režim i sami dođu do ciljnog vremena/pozicije.
+### Inicijalno sinkronizacijsko ponasanje
+Nakon boota sustav ne radi hard jump mehanike. Umjesto toga, mehanizmi ulaze u redovni korak-po-korak rezim i sami dolaze do ciljnog vremena i pozicije.
 
 ---
 
-## 10. ERROR HANDLING I SIGURNOST
+## 10. Error Handling I Sigurnost
 
 ### Watchdog
-Dvaput u glavnoj petlji se radi `wdt_reset()`. Ako petlja zapne, MCU se resetira i reset-uzrok ostaje logiran za recovery dijagnostiku.
+Dvaput u glavnoj petlji radi se `wdt_reset()`. Ako petlja zapne, `MCU` se resetira i razlog reseta ostaje dostupan za recovery dijagnostiku.
 
-### EEPROM validacija (potpis/verzija/checksum)
-- Postavke: potpis + verzija + checksum.
-- Backup kritičnog stanja: checksum.
-- Unified stanje: rasponi polja + verzija.
+### EEPROM validacija
+- postavke: potpis + verzija + checksum
+- backup kriticnog stanja: checksum
+- unified stanje: rasponi polja + verzija + sekvenca
 
-### Rukovanje oštećenim postavkama
+### Rukovanje ostecenim postavkama
 Ako su podaci nevaljani:
-- vraća se sigurni default,
-- string polja se sanitiziraju i null-terminiraju,
-- ispravljena struktura se ponovo zapisuje.
+- vracaju se sigurni defaulti
+- string polja se sanitiziraju i `null`-terminiraju
+- ispravljena struktura se ponovno zapisuje
 
-### Sprječavanje neispravnih stanja
-- vrijednosti se `constrain`-aju (npr. 0–719, 0–63, 0–14),
-- međusobno isključivi načini (slavljenje vs mrtvačko),
-- zabrana paralelnih sekvenci otkucavanja,
-- sigurno gašenje releja kod prekida i pri inicijalizaciji.
-
----
-
-## 11. POZNATE DIZAJNERSKE ODLUKE
-
-### Zašto korekcija ide korak-po-korak, a ne agresivni skok
-Mehanika toranjskog sata ima masu i inertnost. Postupna korekcija smanjuje udarna opterećenja, pregrijavanje releja i rizik od mehaničkog preskoka.
-
-### Zašto se koristi unified state
-Jedan izvor istine za kazaljke i ploču smanjuje race-condition scenarije i pojednostavljuje recovery jer se oba pogona oporavljaju iz istog koncepta stanja.
-
-### Zašto je dopušten „blokirajući“ boot recovery
-Kratko determinističko kašnjenje pri bootu je prihvatljivo jer je važnije vratiti mehaniku u konzistentno stanje prije normalnog cikličkog rada. Time se izbjegava start u polu-nepoznatom stanju releja.
-
-### Zašto je NTP ograničen na satne točke
-Satna granularnost (minuta 00) smanjuje jitter i nepotrebne mikrokorekcije kroz dan, a i dalje redovito „zaključava“ vrijeme prema mrežnom izvoru.
+### Sprjecavanje neispravnih stanja
+- vrijednosti se ogranicavaju na validne raspone
+- medusobno iskljucivi nacini (`slavljenje` vs `mrtvacko`)
+- zabrana paralelnih sekvenci otkucavanja
+- sigurno gasenje releja kod prekida i pri inicijalizaciji
 
 ---
 
-## 🛠️ Developer notes (ključne zamke)
+## 11. Poznate Dizajnerske Odluke
 
-- `WearLeveling::spremi` koristi statički brojač po tipu/predlošku; pri većim refaktorima paziti na neočekivane obrasce raspodjele zapisa.
-- `okretna_ploca.cpp` očekuje da su početak i kraj prozora rada poravnani na 15-minutne blokove; web i spremanje postavki zato ih normaliziraju na četvrt sata.
-- `power_recovery.cpp` ima vlastitu lokalnu strukturu backupa; kod promjena layouta obavezno uskladiti i `eeprom_konstante.h` i recovery logiku.
-- Ručni override zvona ima prioritet nad automatikom; pri dijagnostici „zašto zvono ne staje“ prvo provjeriti stanje fizičkih sklopki.
+### Zasto korekcija ide korak-po-korak
+Mehanika toranjskog sata ima masu i inerciju. Postupna korekcija smanjuje udarna opterecenja, pregrijavanje releja i rizik od mehanickog preskoka.
 
+### Zasto se koristi unified state
+Jedan izvor istine za kazaljke i plocu smanjuje race-condition scenarije i pojednostavljuje recovery jer se oba pogona oporavljaju iz istog koncepta stanja.
+
+### Zasto je dopusten blokirajuci boot recovery
+Kratko deterministicko kasnjenje pri bootu je prihvatljivo jer je vaznije vratiti mehaniku u konzistentno stanje prije normalnog ciklickog rada.
+
+### Zasto Mega bira trenutak za NTP
+Time se izbjegava nepotrebna mikrokorekcija usred aktivnog mehanickog ciklusa i cuva se ritam toranjskog sata.
+
+---
+
+## 🛠️ Developer Notes
+
+- [main/wear_leveling.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/wear_leveling.cpp) i dalje postoji za sporije EEPROM segmente, ali glavno stanje kazaljki i ploce vodi [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp)
+- [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp) ocekuje da su pocetak i kraj prozora rada poravnani na `15`-minutne blokove
+- kod promjena layouta obavezno zajedno provjeriti [main/eeprom_konstante.h](C:/Users/Rato/Documents/GitHub/FILA33/main/eeprom_konstante.h), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp) i [main/power_recovery.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp)
+- rucni override zvona ima prioritet nad automatikom; pri dijagnostici zasto zvono ne staje prvo provjeriti stanje fizickih sklopki i tihi rezim

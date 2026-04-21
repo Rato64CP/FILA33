@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <string.h>
 
 #include "wear_leveling.h"
@@ -64,9 +65,6 @@ bool jeMetaZaAktivniSegment(const MetaWearLeveling& meta) {
   }
 
   return
-    (meta.baznaAdresa == EepromLayout::BAZA_OFFSET_MINUTA &&
-     meta.brojSlotova == EepromLayout::SLOTOVI_OFFSET_MINUTA &&
-     meta.velicinaSlota == EepromLayout::SLOT_SIZE_OFFSET_MINUTA) ||
     (meta.baznaAdresa == EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA &&
      meta.brojSlotova == EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA &&
      meta.velicinaSlota == EepromLayout::SLOT_SIZE_ZADNJA_SINKRONIZACIJA) ||
@@ -149,10 +147,9 @@ bool procitajSlot(int adresa, void* cilj, size_t duljina) {
 
   const bool uspjeh = VanjskiEEPROM::procitaj(adresa, cilj, duljina);
   if (!uspjeh) {
-    String log = F("WearLeveling: procitaj FAILED adresa=");
-    log += adresa;
-    log += F(" duljina=");
-    log += duljina;
+    char log[72];
+    snprintf_P(log, sizeof(log), PSTR("WearLeveling: procitaj FAILED adresa=%d duljina=%u"),
+               adresa, static_cast<unsigned>(duljina));
     posaljiPCLog(log);
   }
   return uspjeh;
@@ -165,10 +162,9 @@ bool napisiSlot(int adresa, const void* izvor, size_t duljina) {
 
   const bool uspjeh = VanjskiEEPROM::zapisi(adresa, izvor, duljina);
   if (!uspjeh) {
-    String log = F("WearLeveling: zapisi FAILED adresa=");
-    log += adresa;
-    log += F(" duljina=");
-    log += duljina;
+    char log[72];
+    snprintf_P(log, sizeof(log), PSTR("WearLeveling: zapisi FAILED adresa=%d duljina=%u"),
+               adresa, static_cast<unsigned>(duljina));
     posaljiPCLog(log);
   }
   return uspjeh;

@@ -13,7 +13,6 @@ void pomakniKazaljkeNaMinutu(int ciljMinuta, bool pametanMod);
 void pomakniKazaljkeZa(int brojMinuta);
 bool suKazaljkeUSinkronu();
 int dohvatiMemoriraneKazaljkeMinuta();
-void oznaciKazaljkeKaoSinkronizirane();
 void obavijestiKazaljkeDSTPromjena(int pomakMinuta);
 
 // Ručna pozicija i brza korekcija kazaljki

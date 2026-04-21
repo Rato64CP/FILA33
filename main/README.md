@@ -11,24 +11,27 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - pohrana postavki i stanja u `24C32 EEPROM`
 - recovery nakon watchdog i power-loss reseta
 - obrada DCF, RTC i NTP izvora vremena
+- jedinstveni tihi rezim, BAT logika i lokalni overridei
 
 ## 🧭 Podjela poslova Mega / ESP
 
-- `Mega 2560` vodi sve radne odluke toranjskog sata.
-- `ESP8266`, `ESP32` ili `Raspberry Pi` je samo pomocni mrezni sloj.
-- Vanjski mrezni sloj donosi WiFi, NTP, setup WiFi, Home Assistant integraciju i servisni API.
-- Postavke rada sata vise se ne uredjuju preko ESP weba.
-- Stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`.
+- `Mega 2560` vodi sve radne odluke toranjskog sata
+- `ESP8266`, `ESP32` ili `Raspberry Pi` je samo pomocni mrezni sloj
+- vanjski mrezni sloj donosi WiFi, NTP, setup WiFi, Home Assistant integraciju i servisni API
+- postavke rada sata vise se ne uredjuju preko ESP weba
+- stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`
 
 ## 🧩 Najvazniji moduli
 
 - `main.ino` - inicijalizacija i glavna petlja
-- `time_glob.*` - upravljanje izvorima vremena i sinkronizacijom
+- `time_glob.*` - upravljanje izvorima vremena, DST-om i sinkronizacijom
 - `esp_serial.*` - UART protokol prema vanjskom mreznom mostu
 - `kazaljke_sata.*` - kretanje i sinkronizacija kazaljki
-- `okretna_ploca.*` - polozaj, koraci i faze ploce
+- `okretna_ploca.*` - polozaj, koraci, faze i cavli ploce
 - `zvonjenje.*` - zvona i pripadna stanja
-- `otkucavanje.*` - satno i polusatno otkucavanje, slavljenje i mrtvacko
+- `otkucavanje.*` - satno i polusatno otkucavanje
+- `slavljenje_mrtvacko.*` - slavljenje, mrtvacko i thumbwheel timer
+- `prekidac_tisine.*` - jedinstveni tihi rezim i lampica
 - `menu_system.*`, `lcd_display.*`, `tipke.*` - lokalni korisnicki sloj
 - `postavke.*` - trajne postavke toranjskog sata
 - `unified_motion_state.*` - zajednicko stanje gibanja
@@ -43,7 +46,7 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - automatski prijelaz CET/CEST ostaje pod kontrolom firmwarea toranjskog sata
 - `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
 
-## 🔌 Serijska komunikacija s ESP-om
+## 🔄 Serijska komunikacija s ESP-om
 
 - Mega trenutno koristi `Serial3` za ugradeni `ESP8266` na Mega+WiFi R3 plocici
 - `Serial1` ostaje pripremljen za buduci vanjski `Raspberry Pi` most
@@ -55,8 +58,9 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 ## 💾 EEPROM i recovery
 
 - `24C32 EEPROM` cuva postavke i kriticno radno stanje
-- `wear_leveling` smanjuje trosenje kroz kruzno spremanje
-- `unified_motion_state.*` i `power_recovery.*` vracaju kazaljke i plocu u dosljedno stanje nakon restarta
+- `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
+- `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
+- `offset` ploce i MQTT tragovi vise nisu dio aktivnog modela
 - pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
 - `eeprom_konstante.h`
 - `unified_motion_state.*`
@@ -70,6 +74,9 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - DS3231 RTC i 24C32 EEPROM preko I2C
 - LCD 16x2 preko I2C
 - DCF77 prijemnik
+- thumbwheel `00-99` za trajanje mrtvackog zvona
+- kip-prekidac tihog moda i lampica tihog moda
+- LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - 4x5 matricna tipkovnica, servisni ulazi i brojcani unos `HH:MM`
 
 ## ✅ Smjernice za razvoj

@@ -14,7 +14,3 @@ bool jeMrtvackoThumbwheelValjan();
 
 // Vraca ukupnu vrijednost 0-99 iz stabilnog ocitanja; u suprotnom vraca 0.
 uint8_t dohvatiMrtvackoThumbwheelVrijednost();
-
-// Pojedinacne znamenke stabilnog ocitanja za buduce povezivanje s logikom mrtvackog zvona.
-uint8_t dohvatiMrtvackoThumbwheelDesetice();
-uint8_t dohvatiMrtvackoThumbwheelJedinice();

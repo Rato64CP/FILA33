@@ -6,6 +6,7 @@
 // - provjera valjanosti stanja i osnovne provjere zdravlja EEPROM-a
 
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 #include "power_recovery.h"
 #include "podesavanja_piny.h"
@@ -42,14 +43,7 @@ static unsigned long last_state_save_time = 0;
 static uint32_t reset_counter = 0;
 static bool boot_recovery_odraden = false;
 static uint32_t save_sequence = 1;
-
-struct SystemStateBackup {
-  uint32_t hand_position_k_minuta;
-  uint32_t plate_position;
-  uint32_t offset_minuta;
-  uint32_t rtc_timestamp;
-  uint16_t checksum;
-};
+using SystemStateBackup = EepromLayout::SystemStateBackup;
 
 static uint16_t izracunajChecksum(const SystemStateBackup& stanje) {
   uint16_t checksum = 0;
@@ -57,8 +51,6 @@ static uint16_t izracunajChecksum(const SystemStateBackup& stanje) {
   checksum += stanje.hand_position_k_minuta & 0xFFFF;
   checksum += (stanje.plate_position >> 16) & 0xFFFF;
   checksum += stanje.plate_position & 0xFFFF;
-  checksum += (stanje.offset_minuta >> 16) & 0xFFFF;
-  checksum += stanje.offset_minuta & 0xFFFF;
   checksum += (stanje.rtc_timestamp >> 16) & 0xFFFF;
   checksum += stanje.rtc_timestamp & 0xFFFF;
   return checksum;
@@ -139,10 +131,11 @@ void odradiBootRecovery() {
   int ucitaniSlot = -1;
   const bool stanjeUcitano = ucitajNajnovijiBackup(backup, &ucitaniSlot);
   if (stanjeUcitano) {
-    String log = F("Power Recovery: Valid state loaded from slot ");
-    log += ucitaniSlot;
-    log += jeLegacyBackupPoVremenu(backup) ? F(" ts=") : F(" seq=");
-    log += backup.rtc_timestamp;
+    char log[80];
+    snprintf_P(log, sizeof(log), PSTR("Power Recovery: Valid state loaded from slot %d %s%lu"),
+               ucitaniSlot,
+               jeLegacyBackupPoVremenu(backup) ? "ts=" : "seq=",
+               backup.rtc_timestamp);
     posaljiPCLog(log);
   }
 
@@ -176,9 +169,6 @@ void odradiBootRecovery() {
     }
     if (backup.plate_position <= 63UL) {
       postaviTrenutniPolozajPloce(static_cast<int>(backup.plate_position));
-    }
-    if (backup.offset_minuta <= 14UL) {
-      postaviOffsetMinuta(static_cast<int>(backup.offset_minuta));
     }
     posaljiPCLog(F("Power Recovery: Vraceno stanje iz periodickog backupa"));
   }
@@ -224,7 +214,6 @@ void spremiKriticalnoStanje() {
   SystemStateBackup backup;
   backup.hand_position_k_minuta = static_cast<uint32_t>(dohvatiMemoriraneKazaljkeMinuta());
   backup.plate_position = static_cast<uint32_t>(dohvatiPozicijuPloce());
-  backup.offset_minuta = static_cast<uint32_t>(dohvatiOffsetMinuta());
   // Novi backup koristi monotono rastucu sekvencu kako recovery toranjskog sata
   // ne bi ovisio o tome je li RTC/NTP vrijeme naknadno vraceno unatrag.
   backup.rtc_timestamp = save_sequence;
@@ -268,12 +257,12 @@ void inicijalizirajPowerRecovery() {
   watchdog_reset = jeWatchdogResetDetektiran();
   power_loss_detected = jePowerLossResetDetektiran();
 
-  String logReset = F("Power Recovery: reset flags MCUSR=0x");
-  logReset += String(dohvatiResetFlags(), HEX);
-  logReset += F(" watchdog=");
-  logReset += watchdog_reset ? F("DA") : F("NE");
-  logReset += F(" power_loss=");
-  logReset += power_loss_detected ? F("DA") : F("NE");
+  char logReset[96];
+  snprintf_P(logReset, sizeof(logReset),
+             PSTR("Power Recovery: reset flags MCUSR=0x%X watchdog=%s power_loss=%s"),
+             dohvatiResetFlags(),
+             watchdog_reset ? "DA" : "NE",
+             power_loss_detected ? "DA" : "NE");
   posaljiPCLog(logReset);
 
   if (!provjeriZdravostEEPROM()) {

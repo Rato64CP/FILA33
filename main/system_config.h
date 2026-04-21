@@ -7,8 +7,6 @@
 // zive u main/main.ino kroz eksplicitne includeove i izravne pozive modula.
 //
 // Vazno:
-// - MQTT runtime vise nije dio aktivnog firmwarea.
-// - EEPROM polja za MQTT i dalje ostaju u eeprom_konstante.h i postavke.cpp
-//   radi kompatibilnosti sa starim zapisima.
+// - MQTT runtime i pripadna EEPROM polja vise nisu dio aktivnog firmwarea.
 // - Ovdje se namjerno vise ne odrzavaju zastarjeli makroi inicijalizacije,
 //   kako ne bi odudarali od stvarnog ponasanja toranjskog sata.

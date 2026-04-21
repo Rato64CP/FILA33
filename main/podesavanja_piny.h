@@ -69,6 +69,21 @@
 #define PIN_KEY_CELEBRATION           43  // Celebration button toggle (PIN 43)
 #define PIN_KEY_FUNERAL               42  // Funeral button toggle (PIN 42)
 
+// ==================== GLOBALNI PREKIDAC TISINE ====================
+// Kip prekidac za tihi rad: LOW=aktivna tisina, blokira zvona i cekice,
+// a ostavlja kazaljke toranjskog sata aktivnima.
+
+#define PIN_PREKIDAC_TISINE           41  // Globalni tihi rad (LOW=ON)
+#define PIN_LAMPICA_TIHI_REZIM        46  // Lampica tihog rezima (HIGH=upali)
+
+// ==================== SIGNALNE LAMPICE STANJA ====================
+// Pojedinacne LED lampice za lokalnu signalizaciju rada zvona i posebnih nacina.
+
+#define PIN_LAMPICA_ZVONO_1           36  // LED za ZVONO 1 (HIGH=upali)
+#define PIN_LAMPICA_ZVONO_2           37  // LED za ZVONO 2 (HIGH=upali)
+#define PIN_LAMPICA_SLAVLJENJE        38  // LED za slavljenje (HIGH=upali)
+#define PIN_LAMPICA_MRTVACKO          39  // LED za mrtvacko (HIGH=upali)
+
 // ==================== MANUAL BELL TOGGLE INPUTS ====================
 // Fizicke sklopke na GND za rucno upravljanje zvonima toranjskog sata
 

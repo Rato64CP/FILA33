@@ -1,6 +1,7 @@
 #include "unified_motion_state.h"
 
 #include <Arduino.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "i2c_eeprom.h"
@@ -81,8 +82,8 @@ bool zapisiDirektnoSlot(int slot, const EepromLayout::UnifiedMotionState& stanje
 
   const bool uspjeh = VanjskiEEPROM::zapisi(adresaSlota(slot), &stanje, sizeof(stanje));
   if (!uspjeh) {
-    String log = F("UnifiedMotionState: EEPROM zapis nije uspio, slot=");
-    log += slot;
+    char log[64];
+    snprintf(log, sizeof(log), "UnifiedMotionState: EEPROM zapis nije uspio, slot=%d", slot);
     posaljiPCLog(log);
   }
   return uspjeh;
@@ -139,18 +140,17 @@ EepromLayout::UnifiedMotionState inicijalnoStanje() {
   return stanje;
 }
 
-String formatStanja(const EepromLayout::UnifiedMotionState& stanje) {
-  String log = F("STANJE: hand=");
-  log += stanje.hand_position;
-  log += F(" active=");
-  log += stanje.hand_active;
-  log += F(" relay=");
-  log += stanje.hand_relay;
-  log += F(" plate=");
-  log += stanje.plate_position;
-  log += F(" phase=");
-  log += stanje.plate_phase;
-  return log;
+void formatirajStanje(const EepromLayout::UnifiedMotionState& stanje,
+                     char* odrediste,
+                     size_t velicina) {
+  snprintf(odrediste,
+           velicina,
+           "STANJE: hand=%u active=%u relay=%u plate=%u phase=%u",
+           stanje.hand_position,
+           stanje.hand_active,
+           stanje.hand_relay,
+           stanje.plate_position,
+           stanje.plate_phase);
 }
 }  // namespace
 
@@ -207,7 +207,7 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
     (zadnjaSekvenca == 0) ? RESERVED_SEKVENCA_POCETNA : static_cast<uint8_t>(zadnjaSekvenca + 1);
 
   // UnifiedMotionState vec ima vlastitu sekvencu (`reserved`) i skeniranje
-  // svih 8 slotova pri citanju, pa ovdje namjerno ne koristimo zajednicki
+  // svih konfiguriranih slotova pri citanju, pa ovdje namjerno ne koristimo zajednicki
   // wear-leveling meta-zapis. Time cuvamo 24C32 od pregrijavanja istog
   // meta bloka bez promjene recovery logike toranjskog sata.
   const int sljedeciSlot =
@@ -221,7 +221,9 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
 }
 
 void logirajStanje(const EepromLayout::UnifiedMotionState& stanje) {
-  posaljiPCLog(formatStanja(stanje));
+  char log[80];
+  formatirajStanje(stanje, log, sizeof(log));
+  posaljiPCLog(log);
 }
 
 }  // namespace UnifiedMotionStateStore

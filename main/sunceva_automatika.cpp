@@ -1,6 +1,7 @@
 #include "sunceva_automatika.h"
 
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include <math.h>
 #include "otkucavanje.h"
@@ -8,11 +9,14 @@
 #include "time_glob.h"
 #include "zvonjenje.h"
 #include "pc_serial.h"
+#include "prekidac_tisine.h"
 
 namespace {
 
 constexpr float PI_F = 3.14159265f;
 constexpr float SUNCEV_ZENIT_RAD = 90.833f * (PI_F / 180.0f);
+constexpr int32_t SUNCEVA_LOKACIJA_SIRINA_E5 = 4350000L;
+constexpr int32_t SUNCEVA_LOKACIJA_DUZINA_E5 = 1695000L;
 constexpr int FIKSNO_PODNE_MINUTA = 12 * 60;
 constexpr uint8_t FIKSNO_PODNE_SEKUNDA = 30;
 constexpr unsigned long ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS = 1000UL;
@@ -37,6 +41,8 @@ static ZakazanoSuncevoZvonjenje zakazanoZvonjenje = {false, 0, 0, 0, 0, 0};
 static uint32_t zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
 static uint32_t zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
 static uint32_t zadnjiOkinutiDatum[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
+static uint32_t datumJutarnjegStartaOtkucavanja = 0;
+static int minutaJutarnjegStartaOtkucavanja = -1;
 static int32_t zadnjaSirinaE5 = 0x7FFFFFFFL;
 static int32_t zadnjaDuzinaE5 = 0x7FFFFFFFL;
 static uint8_t zadnjaMaskaDogadaja = 0xFF;
@@ -157,8 +163,8 @@ static bool izracunajSunceveMinuteZaDatum(const DateTime& datum,
 }
 
 static bool jeKonfiguracijaPromijenjena() {
-  if (zadnjaSirinaE5 != dohvatiZemljopisnuSirinuE5() ||
-      zadnjaDuzinaE5 != dohvatiZemljopisnuDuzinuE5()) {
+  if (zadnjaSirinaE5 != SUNCEVA_LOKACIJA_SIRINA_E5 ||
+      zadnjaDuzinaE5 != SUNCEVA_LOKACIJA_DUZINA_E5) {
     return true;
   }
 
@@ -177,8 +183,8 @@ static bool jeKonfiguracijaPromijenjena() {
 }
 
 static void zapamtiKonfiguraciju() {
-  zadnjaSirinaE5 = dohvatiZemljopisnuSirinuE5();
-  zadnjaDuzinaE5 = dohvatiZemljopisnuDuzinuE5();
+  zadnjaSirinaE5 = SUNCEVA_LOKACIJA_SIRINA_E5;
+  zadnjaDuzinaE5 = SUNCEVA_LOKACIJA_DUZINA_E5;
   zadnjaMaskaDogadaja = 0;
   for (uint8_t i = 0; i < SUNCEVI_DOGADAJ_BROJ; ++i) {
     if (jeSuncevDogadajOmogucen(i)) {
@@ -189,14 +195,14 @@ static void zapamtiKonfiguraciju() {
   }
 }
 
-static const __FlashStringHelper* nazivDogadaja(uint8_t dogadaj) {
+static const char* nazivDogadajaTekst(uint8_t dogadaj) {
   if (dogadaj == SUNCEVI_DOGADAJ_JUTRO) {
-    return F("jutro");
+    return "jutro";
   }
   if (dogadaj == SUNCEVI_DOGADAJ_PODNE) {
-    return F("podne");
+    return "podne";
   }
-  return F("vecer");
+  return "vecer";
 }
 
 static bool vrijemeProslo(unsigned long ciljMs) {
@@ -228,11 +234,22 @@ static void zakaziSuncevoZvonjenje(uint8_t dogadaj,
   zakazanoZvonjenje.startMs = millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
   zakazanoZvonjenje.trajanjeMs = trajanjeMs;
 
-  String log = F("Suncevo zvonjenje odgodeno do kraja otkucavanja: ");
-  log += nazivDogadaja(dogadaj);
-  log += F(" -> ZVONO");
-  log += zvono;
+  char log[96];
+  snprintf_P(log, sizeof(log),
+             PSTR("Suncevo zvonjenje odgodeno do kraja otkucavanja: %s -> ZVONO%u"),
+             nazivDogadajaTekst(dogadaj),
+             zvono);
   posaljiPCLog(log);
+}
+
+static void evidentirajJutarnjiStartOtkucavanja(uint8_t dogadaj, const DateTime& sada) {
+  if (dogadaj != SUNCEVI_DOGADAJ_JUTRO) {
+    return;
+  }
+
+  datumJutarnjegStartaOtkucavanja = napraviDatumKljuc(sada);
+  minutaJutarnjegStartaOtkucavanja = sada.hour() * 60 + sada.minute();
+  posaljiPCLog(F("Suncevo jutro: otkucavanje prelazi u dnevni rezim"));
 }
 
 static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
@@ -255,12 +272,13 @@ static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
   }
 
   aktivirajZvonjenjeNaTrajanje(zakazanoZvonjenje.zvono, zakazanoZvonjenje.trajanjeMs);
+  evidentirajJutarnjiStartOtkucavanja(zakazanoZvonjenje.dogadaj, sada);
 
-  String log = F("Suncevo zvonjenje: ");
-  log += nazivDogadaja(zakazanoZvonjenje.dogadaj);
-  log += F(" -> ZVONO");
-  log += zakazanoZvonjenje.zvono;
-  log += F(" nakon odgode zbog otkucavanja");
+  char log[96];
+  snprintf_P(log, sizeof(log),
+             PSTR("Suncevo zvonjenje: %s -> ZVONO%u nakon odgode zbog otkucavanja"),
+             nazivDogadajaTekst(zakazanoZvonjenje.dogadaj),
+             zakazanoZvonjenje.zvono);
   posaljiPCLog(log);
 
   zakazanoZvonjenje.aktivno = false;
@@ -277,8 +295,8 @@ static void osvjeziDnevniRaspored(const DateTime& sada) {
   int zalazMinute = -1;
   if (!izracunajSunceveMinuteZaDatum(
           sada,
-          dohvatiZemljopisnuSirinuE5(),
-          dohvatiZemljopisnuDuzinuE5(),
+          SUNCEVA_LOKACIJA_SIRINA_E5,
+          SUNCEVA_LOKACIJA_DUZINA_E5,
           izlazMinute,
           zalazMinute)) {
     return;
@@ -327,22 +345,19 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
   zadnjiOkinutiDatum[dogadaj] = datumKljuc;
 
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
-    String log = F("Suncevo zvonjenje preskoceno (vrijeme nije potvrdeno): ");
-    log += nazivDogadaja(dogadaj);
+    char log[96];
+    snprintf_P(log, sizeof(log),
+               PSTR("Suncevo zvonjenje preskoceno (vrijeme nije potvrdjeno): %s"),
+               nazivDogadajaTekst(dogadaj));
     posaljiPCLog(log);
     return;
   }
 
-  if (jeUskrsnaTisinaAktivna(sada)) {
-    String log = F("Suncevo zvonjenje preskoceno (uskrsna tisina): ");
-    log += nazivDogadaja(dogadaj);
-    posaljiPCLog(log);
-    return;
-  }
-
-  if (!jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute())) {
-    String log = F("Suncevo zvonjenje preskoceno (izvan BAT raspona): ");
-    log += nazivDogadaja(dogadaj);
+  if (jePrekidacTisineAktivan()) {
+    char log[80];
+    snprintf_P(log, sizeof(log),
+               PSTR("Suncevo zvonjenje preskoceno (tihi rezim): %s"),
+               nazivDogadajaTekst(dogadaj));
     posaljiPCLog(log);
     return;
   }
@@ -355,26 +370,16 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
   }
 
   aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
+  evidentirajJutarnjiStartOtkucavanja(dogadaj, sada);
 
-  String log = F("Suncevo zvonjenje: ");
-  log += nazivDogadaja(dogadaj);
-  log += F(" -> ZVONO");
-  log += zvono;
-  log += F(" u ");
-  if (sada.hour() < 10) {
-    log += '0';
-  }
-  log += sada.hour();
-  log += ':';
-  if (sada.minute() < 10) {
-    log += '0';
-  }
-  log += sada.minute();
-  log += ':';
-  if (sada.second() < 10) {
-    log += '0';
-  }
-  log += sada.second();
+  char log[96];
+  snprintf_P(log, sizeof(log),
+             PSTR("Suncevo zvonjenje: %s -> ZVONO%u u %02u:%02u:%02u"),
+             nazivDogadajaTekst(dogadaj),
+             zvono,
+             sada.hour(),
+             sada.minute(),
+             sada.second());
   posaljiPCLog(log);
 }
 
@@ -399,13 +404,8 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
     return;
   }
 
-  if (jeUskrsnaTisinaAktivna(sada)) {
-    posaljiPCLog(F("Suncevo zvonjenje preskoceno (uskrsna tisina): podne"));
-    return;
-  }
-
-  if (!jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute())) {
-    posaljiPCLog(F("Suncevo zvonjenje preskoceno (izvan BAT raspona): podne"));
+  if (jePrekidacTisineAktivan()) {
+    posaljiPCLog(F("Suncevo zvonjenje preskoceno (tihi rezim): podne"));
     return;
   }
 
@@ -419,9 +419,8 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
 
   aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
 
-  String log = F("Suncevo zvonjenje: podne -> ZVONO");
-  log += zvono;
-  log += F(" u 12:00:30");
+  char log[64];
+  snprintf_P(log, sizeof(log), PSTR("Suncevo zvonjenje: podne -> ZVONO%u u 12:00:30"), zvono);
   posaljiPCLog(log);
 }
 
@@ -439,6 +438,8 @@ void inicijalizirajSuncevuAutomatiku() {
   }
   zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
   zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
+  datumJutarnjegStartaOtkucavanja = 0;
+  minutaJutarnjegStartaOtkucavanja = -1;
   zadnjaSirinaE5 = 0x7FFFFFFFL;
   zadnjaDuzinaE5 = 0x7FFFFFFFL;
   zadnjaMaskaDogadaja = 0xFF;
@@ -473,10 +474,6 @@ void upravljajSuncevomAutomatikom() {
   obradiFiksnoPodnevnoZvonjenje(sada);
 }
 
-bool jeSuncevaLokacijaValjana() {
-  return jeLokacijaValjana(dohvatiZemljopisnuSirinuE5(), dohvatiZemljopisnuDuzinuE5());
-}
-
 bool dohvatiDanasnjeVrijemeSuncevogDogadajaMin(uint8_t dogadaj, int& minute) {
   if (dogadaj >= SUNCEVI_DOGADAJ_BROJ) {
     return false;
@@ -494,4 +491,23 @@ bool dohvatiDanasnjeVrijemeSuncevogDogadajaMin(uint8_t dogadaj, int& minute) {
 
   minute = raspored.minute[dogadaj];
   return true;
+}
+
+bool jeJutarnjeZvonjenjeOtvoriloOtkucavanje(const DateTime& vrijeme) {
+  if (vrijeme.unixtime() == 0) {
+    return false;
+  }
+
+  if (datumJutarnjegStartaOtkucavanja != napraviDatumKljuc(vrijeme) ||
+      minutaJutarnjegStartaOtkucavanja < 0) {
+    return false;
+  }
+
+  const int trenutnaMinutaUDanu = vrijeme.hour() * 60 + vrijeme.minute();
+  const int batPocetakMinuta = dohvatiBATPeriodOdSata() * 60;
+  if (trenutnaMinutaUDanu < minutaJutarnjegStartaOtkucavanja) {
+    return false;
+  }
+
+  return trenutnaMinutaUDanu < batPocetakMinuta;
 }

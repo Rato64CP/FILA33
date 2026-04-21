@@ -1,5 +1,6 @@
 // time_glob.cpp - Globalno rukovanje vremenom
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include "time_glob.h"
 #include "eeprom_konstante.h"
@@ -124,13 +125,40 @@ static uint32_t apsolutnaRazlikaSekundi(const DateTime& a, const DateTime& b) {
   return (unixA >= unixB) ? (unixA - unixB) : (unixB - unixA);
 }
 
+static void kopirajFlashTekst(const __FlashStringHelper* tekst, char* odrediste, size_t velicina) {
+  if (odrediste == nullptr || velicina == 0) {
+    return;
+  }
+
+  if (tekst == nullptr) {
+    odrediste[0] = '\0';
+    return;
+  }
+
+  strncpy_P(odrediste, reinterpret_cast<const char*>(tekst), velicina - 1);
+  odrediste[velicina - 1] = '\0';
+}
+
+static void formatirajDatumIVrijeme(const DateTime& vrijeme, char* odrediste, size_t velicina) {
+  snprintf_P(odrediste, velicina,
+             PSTR("%u-%02u-%02u %02u:%02u:%02u"),
+             vrijeme.year(),
+             vrijeme.month(),
+             vrijeme.day(),
+             vrijeme.hour(),
+             vrijeme.minute(),
+             vrijeme.second());
+}
+
 static RezultatProvjereSinkronizacije potvrdiIliOdbijSumnjivuSinkronizaciju(
     const DateTime& novoVrijeme,
     uint8_t izvor,
     const __FlashStringHelper* nazivIzvora) {
   if (!jeVrijemeURasponuPouzdanosti(novoVrijeme)) {
-    String log = String(nazivIzvora);
-    log += F(": nevaljano vrijeme izvan dopustenog raspona, odbacujem");
+    char izvorTekst[8];
+    char log[96];
+    kopirajFlashTekst(nazivIzvora, izvorTekst, sizeof(izvorTekst));
+    snprintf_P(log, sizeof(log), PSTR("%s: nevaljano vrijeme izvan dopustenog raspona, odbacujem"), izvorTekst);
     posaljiPCLog(log);
     ocistiSumnjivuSinkronizaciju();
     return SINKRONIZACIJA_ODBIJENA;
@@ -154,8 +182,10 @@ static RezultatProvjereSinkronizacije potvrdiIliOdbijSumnjivuSinkronizaciju(
       (sadaMs - sumnjivaSinkronizacijaMs) <= ROK_SUMNJIVE_SINKRONIZACIJE_MS &&
       apsolutnaRazlikaSekundi(sumnjivoVrijemeSinkronizacije, novoVrijeme) <=
           MAX_RAZLIKA_IZMEDU_DVIJE_POTVRDE_S) {
-    String log = String(nazivIzvora);
-    log += F(": potvrden sumnjiv skok vremena, prihvacam korekciju");
+    char izvorTekst[8];
+    char log[80];
+    kopirajFlashTekst(nazivIzvora, izvorTekst, sizeof(izvorTekst));
+    snprintf_P(log, sizeof(log), PSTR("%s: potvrden sumnjiv skok vremena, prihvacam korekciju"), izvorTekst);
     posaljiPCLog(log);
     ocistiSumnjivuSinkronizaciju();
     return SINKRONIZACIJA_PRIHVACENA;
@@ -166,10 +196,13 @@ static RezultatProvjereSinkronizacije potvrdiIliOdbijSumnjivuSinkronizaciju(
   sumnjivoVrijemeSinkronizacije = novoVrijeme;
   sumnjivaSinkronizacijaMs = sadaMs;
 
-  String log = String(nazivIzvora);
-  log += F(": sumnjiv skok vremena od ");
-  log += String(razlikaSekundi);
-  log += F(" s, cekam ponovljenu potvrdu prije upisa u RTC");
+  char izvorTekst[8];
+  char log[96];
+  kopirajFlashTekst(nazivIzvora, izvorTekst, sizeof(izvorTekst));
+  snprintf_P(log, sizeof(log),
+             PSTR("%s: sumnjiv skok vremena od %lu s, cekam ponovljenu potvrdu prije upisa u RTC"),
+             izvorTekst,
+             razlikaSekundi);
   posaljiPCLog(log);
 
   if (izvor == IZ_NTP) {
@@ -535,20 +568,10 @@ static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
   azurirajOznakuIzvora();
   spremiZadnjuSinkronizaciju();
 
-  String log = F("Vrijeme azurirano iz NTP: ");
-  log += ntpVrijeme.year();
-  log += F("-");
-  log += ntpVrijeme.month();
-  log += F("-");
-  log += ntpVrijeme.day();
-  log += F(" ");
-  log += ntpVrijeme.hour();
-  log += F(":");
-  if (ntpVrijeme.minute() < 10) log += F("0");
-  log += ntpVrijeme.minute();
-  log += F(":");
-  if (ntpVrijeme.second() < 10) log += F("0");
-  log += ntpVrijeme.second();
+  char vrijemeTekst[24];
+  char log[64];
+  formatirajDatumIVrijeme(ntpVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
+  snprintf_P(log, sizeof(log), PSTR("Vrijeme azurirano iz NTP: %s"), vrijemeTekst);
   posaljiPCLog(log);
 }
 
@@ -575,20 +598,12 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
     zakazanoNtpImaEksplicitanDST = imaEksplicitanDST;
     zakazanoNtpDstAktivan = dstAktivanIzvori;
 
-    String log = F("NTP: sinkronizacija zakazana na sljedeci RTC SQW tik od ");
-    log += ntpVrijeme.year();
-    log += F("-");
-    log += ntpVrijeme.month();
-    log += F("-");
-    log += ntpVrijeme.day();
-    log += F(" ");
-    log += ntpVrijeme.hour();
-    log += F(":");
-    if (ntpVrijeme.minute() < 10) log += F("0");
-    log += ntpVrijeme.minute();
-    log += F(":");
-    if (ntpVrijeme.second() < 10) log += F("0");
-    log += ntpVrijeme.second();
+    char vrijemeTekst[24];
+    char log[96];
+    formatirajDatumIVrijeme(ntpVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
+    snprintf_P(log, sizeof(log),
+               PSTR("NTP: sinkronizacija zakazana na sljedeci RTC SQW tik od %s"),
+               vrijemeTekst);
     posaljiPCLog(log);
     return;
   }
@@ -640,16 +655,10 @@ RezultatProvjereSinkronizacije azurirajVrijemeIzDCF(const DateTime& dcfVrijeme,
       F("Vrijeme: potvrdeno iz DCF-a, automatika toranjskog sata je aktivna"));
   azurirajOznakuIzvora();
   spremiZadnjuSinkronizaciju();
-  String log = F("Vrijeme azurirano iz DCF: ");
-  log += dcfVrijeme.year();
-  log += F("-");
-  log += dcfVrijeme.month();
-  log += F("-");
-  log += dcfVrijeme.day();
-  log += F(" ");
-  log += dcfVrijeme.hour();
-  log += F(":");
-  log += dcfVrijeme.minute();
+  char vrijemeTekst[24];
+  char log[64];
+  formatirajDatumIVrijeme(dcfVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
+  snprintf_P(log, sizeof(log), PSTR("Vrijeme azurirano iz DCF: %s"), vrijemeTekst);
   posaljiPCLog(log);
   return SINKRONIZACIJA_PRIHVACENA;
 }
@@ -682,20 +691,10 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   azurirajOznakuIzvora();
   spremiZadnjuSinkronizaciju();
 
-  String log = F("Vrijeme rucno postavljeno: ");
-  log += rucnoVrijeme.year();
-  log += F("-");
-  log += rucnoVrijeme.month();
-  log += F("-");
-  log += rucnoVrijeme.day();
-  log += F(" ");
-  log += rucnoVrijeme.hour();
-  log += F(":");
-  if (rucnoVrijeme.minute() < 10) log += F("0");
-  log += rucnoVrijeme.minute();
-  log += F(":");
-  if (rucnoVrijeme.second() < 10) log += F("0");
-  log += rucnoVrijeme.second();
+  char vrijemeTekst[24];
+  char log[72];
+  formatirajDatumIVrijeme(rucnoVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
+  snprintf_P(log, sizeof(log), PSTR("Vrijeme rucno postavljeno: %s"), vrijemeTekst);
   posaljiPCLog(log);
   zatraziPoravnanjeTaktaKazaljki();
   zatraziPoravnanjeTaktaPloce();
@@ -708,10 +707,6 @@ const char* dohvatiOznakuIzvoraVremena() {
 
 bool jeZadnjaSvjezaSinkronizacijaIzNTP() {
   return zadnjiPotvrdeniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela();
-}
-
-bool jeRTCPouzdan() {
-  return rtcBaterijaOk;
 }
 
 bool jeRtcSqwAktivan() {

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include "kazaljke_sata.h"
 #include "podesavanja_piny.h"
@@ -22,6 +23,32 @@ unsigned long zadnjaProvjeraMs = 0;
 uint32_t zadnjiObradeniRtcTick = 0;
 uint32_t handStartTick = 0;
 bool rucnaBlokadaKazaljki = false;
+
+void posaljiLogKazaljkiStarta(uint8_t relej, int cilj) {
+  char log[64];
+  snprintf_P(log, sizeof(log), PSTR("Kazaljke: start impuls=%s cilj=%d"),
+             (relej == HAND_RELEJ_PARNI) ? "PARNI" : "NEPARNI",
+             cilj);
+  posaljiPCLog(log);
+}
+
+void posaljiLogKazaljkiBootRecovery(const EepromLayout::UnifiedMotionState& stanje) {
+  char log[96];
+  snprintf_P(log, sizeof(log),
+             PSTR("Kazaljke: boot recovery iz EEPROM-a, pozicija=%u active=%u relay=%u"),
+             stanje.hand_position,
+             stanje.hand_active,
+             stanje.hand_relay);
+  posaljiPCLog(log);
+}
+
+void posaljiLogKazaljkiNormalniRestart(uint16_t pozicija) {
+  char log[72];
+  snprintf_P(log, sizeof(log),
+             PSTR("Kazaljke: normalni restart, zadrzavam EEPROM poziciju=%u"),
+             pozicija);
+  posaljiPCLog(log);
+}
 
 void ugasiRelejeKazaljki() {
   digitalWrite(PIN_RELEJ_PARNE_KAZALJKE, LOW);
@@ -84,8 +111,13 @@ void aktivirajRelejeKazaljki(const EepromLayout::UnifiedMotionState& stanje) {
 
 void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  const bool istekPoRtcTicku =
+      (rtcTick - handStartTick) >= (TRAJANJE_FAZE_MS / 1000UL);
+  const bool istekPoMillis =
+      stanje.hand_start_ms != 0 &&
+      (sadaMs - stanje.hand_start_ms) >= TRAJANJE_FAZE_MS;
   if (stanje.hand_active == HAND_AKTIVNO &&
-      (rtcTick - handStartTick) >= (TRAJANJE_FAZE_MS / 1000UL)) {
+      (istekPoRtcTicku || istekPoMillis)) {
     stanje.hand_position = static_cast<uint16_t>((stanje.hand_position + 1) % BROJ_MINUTA_CIKLUS);
     stanje.hand_active = HAND_NEAKTIVNO;
     stanje.hand_relay = HAND_RELEJ_NIJEDAN;
@@ -134,11 +166,7 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   const EepromLayout::UnifiedMotionState potvrdenoStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   if (potvrdenoStanje.hand_active == HAND_AKTIVNO &&
       potvrdenoStanje.hand_start_ms == stanje.hand_start_ms) {
-    String log = F("Kazaljke: start impuls=");
-    log += (potvrdenoStanje.hand_relay == HAND_RELEJ_PARNI) ? F("PARNI") : F("NEPARNI");
-    log += F(" cilj=");
-    log += cilj;
-    posaljiPCLog(log);
+    posaljiLogKazaljkiStarta(potvrdenoStanje.hand_relay, cilj);
     UnifiedMotionStateStore::logirajStanje(potvrdenoStanje);
   }
 }
@@ -163,17 +191,9 @@ void inicijalizirajKazaljke() {
   // poziciju kazaljki. Ne smije se ponovno upisivati RTC vrijeme tijekom
   // inicijalizacije jer bi se time pregazila stvarna fizicka pozicija.
   if (jeBootRecoveryAktivan()) {
-    String log = F("Kazaljke: boot recovery iz EEPROM-a, pozicija=");
-    log += stanje.hand_position;
-    log += F(" active=");
-    log += stanje.hand_active;
-    log += F(" relay=");
-    log += stanje.hand_relay;
-    posaljiPCLog(log);
+    posaljiLogKazaljkiBootRecovery(stanje);
   } else {
-    String log = F("Kazaljke: normalni restart, zadrzavam EEPROM poziciju=");
-    log += stanje.hand_position;
-    posaljiPCLog(log);
+    posaljiLogKazaljkiNormalniRestart(stanje.hand_position);
   }
   aktivirajRelejeKazaljki(stanje);
 
@@ -325,13 +345,6 @@ bool suKazaljkeUSinkronu() {
 
 int dohvatiMemoriraneKazaljkeMinuta() {
   return UnifiedMotionStateStore::dohvatiIliMigriraj().hand_position;
-}
-
-void oznaciKazaljkeKaoSinkronizirane() {
-  if (!imaKazaljkeSata()) {
-    return;
-  }
-  pokreniBudnoKorekciju();
 }
 
 void obavijestiKazaljkeDSTPromjena(int) {

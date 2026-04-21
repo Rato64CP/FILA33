@@ -1,5 +1,6 @@
 // mrtvacko_thumbwheel.cpp - Stabilno ocitavanje timera mrtvackog zvona s dvije BCD znamenke
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 
 #include "mrtvacko_thumbwheel.h"
 #include "pc_serial.h"
@@ -67,19 +68,20 @@ bool istaOcitavanja(const BCDOcitavanje& lhs, const BCDOcitavanje& rhs) {
 }
 
 void prijaviStabilnoOcitavanje(const BCDOcitavanje& ocitanje) {
-  String log = F("Mrtvacko thumbwheel: stabilno ocitanje ");
-  if (ocitanje.desetice < 10) log += static_cast<char>('0' + ocitanje.desetice);
-  if (ocitanje.jedinice < 10) log += static_cast<char>('0' + ocitanje.jedinice);
-  log += F(" za timer mrtvackog zvona");
+  char log[80];
+  snprintf_P(log, sizeof(log),
+             PSTR("Mrtvacko thumbwheel: stabilno ocitanje %u%u za timer mrtvackog zvona"),
+             ocitanje.desetice,
+             ocitanje.jedinice);
   posaljiPCLog(log);
 }
 
 void prijaviNevaljanoOcitavanje(const BCDOcitavanje& ocitanje) {
-  String log = F("Mrtvacko thumbwheel: nevaljana BCD kombinacija D=");
-  log += String(ocitanje.desetice);
-  log += F(" J=");
-  log += String(ocitanje.jedinice);
-  log += F(" - zadrzavam zadnji stabilni timer mrtvackog zvona");
+  char log[112];
+  snprintf_P(log, sizeof(log),
+             PSTR("Mrtvacko thumbwheel: nevaljana BCD kombinacija D=%u J=%u - zadrzavam zadnji stabilni timer mrtvackog zvona"),
+             ocitanje.desetice,
+             ocitanje.jedinice);
   posaljiPCLog(log);
 }
 
@@ -155,12 +157,4 @@ uint8_t dohvatiMrtvackoThumbwheelVrijednost() {
   }
 
   return static_cast<uint8_t>(stanje.stabilno.desetice * 10U + stanje.stabilno.jedinice);
-}
-
-uint8_t dohvatiMrtvackoThumbwheelDesetice() {
-  return jeMrtvackoThumbwheelValjan() ? stanje.stabilno.desetice : 0;
-}
-
-uint8_t dohvatiMrtvackoThumbwheelJedinice() {
-  return jeMrtvackoThumbwheelValjan() ? stanje.stabilno.jedinice : 0;
 }

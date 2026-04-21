@@ -1,16 +1,16 @@
 #include <Arduino.h>
 #include <RTClib.h>
+#include <stdio.h>
 #include "okretna_ploca.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
 #include "slavljenje_mrtvacko.h"
 #include "postavke.h"
-#include "eeprom_konstante.h"
-#include "wear_leveling.h"
 #include "pc_serial.h"
 #include "unified_motion_state.h"
 #include "debouncing.h"
+#include "prekidac_tisine.h"
 
 namespace {
 constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
@@ -28,7 +28,6 @@ unsigned long zadnjaProvjeraMs = 0;
 uint32_t zadnjiObradeniRtcTick = 0;
 uint32_t pocetakFazeTick = 0;
 
-int offsetMinuta = 14;
 uint32_t zadnjiKljucCitanjaCavala = 0;
 bool zadnjiKljucCitanjaCavalaValjan = false;
 bool rucnaBlokadaPloce = false;
@@ -172,8 +171,12 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
 
 void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  const bool istekPoRtcTicku =
+      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL);
+  const bool istekPoMillis =
+      (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS;
   if (stanje.plate_phase == FAZA_PRVI_RELEJ &&
-      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL)) {
+      (istekPoRtcTicku || istekPoMillis)) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
     pocetakFazeMs = sadaMs;
     pocetakFazeTick = rtcTick;
@@ -185,7 +188,7 @@ void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs)
   }
 
   if (stanje.plate_phase == FAZA_DRUGI_RELEJ &&
-      (rtcTick - pocetakFazeTick) >= (TRAJANJE_FAZE_MS / 1000UL)) {
+      (istekPoRtcTicku || istekPoMillis)) {
     stanje.plate_position = static_cast<uint8_t>((stanje.plate_position + 1) % BROJ_POZICIJA);
     stanje.plate_phase = FAZA_STABILNO;
     aktivirajRelejePoFazi(stanje);
@@ -238,11 +241,13 @@ bool izracunajTerminCitanjaCavala(const EepromLayout::UnifiedMotionState& stanje
     return false;
   }
 
-  minutaTerminaUDanu = satTermina * 60 + minutaTermina;
+  // Citanje cavala namjerno kasni jednu minutu u odnosu na nominalni termin
+  // pozicije ploce, kako bi npr. slot 04:59 okidao u 05:00:30.
+  minutaTerminaUDanu = (satTermina * 60 + minutaTermina + 1) % 1440;
   const long sadaMsUDanu =
       static_cast<long>((now.hour() * 3600L + now.minute() * 60L + now.second()) * 1000L);
   const long terminMsUDanu =
-      static_cast<long>((satTermina * 3600L + minutaTermina * 60L + 30L) * 1000L);
+      static_cast<long>((minutaTerminaUDanu * 60L + 30L) * 1000L);
   protekloOdTerminaMs = sadaMsUDanu - terminMsUDanu;
   return true;
 }
@@ -271,14 +276,24 @@ bool jeCavaoAktivan(const bool ulazi[BROJ_ULAZA_PLOCE],
 }
 
 void logirajStanjaCavala(const bool ulazi[BROJ_ULAZA_PLOCE], bool jeNedjelja, uint8_t brojMjestaZaCavle) {
-  String log = F("Cavli ploce:");
+  char log[96];
+  int duljina = snprintf(log, sizeof(log), "Cavli ploce:");
   for (uint8_t i = 0; i < brojMjestaZaCavle && i < BROJ_ULAZA_PLOCE; ++i) {
-    log += ' ';
-    log += (i + 1);
-    log += '=';
-    log += ulazi[i] ? F("ON") : F("OFF");
+    if (duljina < 0 || duljina >= static_cast<int>(sizeof(log))) {
+      break;
+    }
+    duljina += snprintf(log + duljina,
+                        sizeof(log) - static_cast<size_t>(duljina),
+                        " %u=%s",
+                        i + 1,
+                        ulazi[i] ? "ON" : "OFF");
   }
-  log += jeNedjelja ? F(" | nedjelja") : F(" | pon-sub");
+  if (duljina >= 0 && duljina < static_cast<int>(sizeof(log))) {
+    snprintf(log + duljina,
+             sizeof(log) - static_cast<size_t>(duljina),
+             "%s",
+             jeNedjelja ? " | nedjelja" : " | pon-sub");
+  }
   posaljiPCLog(log);
 }
 
@@ -450,10 +465,8 @@ void obradiUlazePloce(const DateTime& now,
                                false);
     if (autoZvonoAktivno[zvono - 1] || autoZvonoZakazano[zvono - 1]) {
       imaZvono = true;
-      String bellLog = F("Cavli: aktiviran ZVONO");
-      bellLog += zvono;
-      bellLog += F(" preko cavla ");
-      bellLog += cavao;
+      char bellLog[48];
+      snprintf(bellLog, sizeof(bellLog), "Cavli: aktiviran ZVONO%u preko cavla %u", zvono, cavao);
       posaljiPCLog(bellLog);
     }
   }
@@ -489,11 +502,6 @@ void inicijalizirajPlocu() {
 
   for (uint8_t i = 0; i < BROJ_ULAZA_PLOCE; ++i) pinMode(PIN_ULAZA_PLOCE[i], INPUT_PULLUP);
 
-  WearLeveling::ucitaj(EepromLayout::BAZA_OFFSET_MINUTA,
-                       EepromLayout::SLOTOVI_OFFSET_MINUTA,
-                       offsetMinuta);
-  offsetMinuta = constrain(offsetMinuta, 0, 14);
-
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   if (jeBootRecoveryAktivan()) {
     posaljiPCLog(F("Ploca: zadrzavam spremljeno stanje za boot recovery"));
@@ -523,7 +531,7 @@ void inicijalizirajPlocu() {
 }
 
 void upravljajPlocom() {
-  static bool prethodnaUskrsnaTisinaAktivna = false;
+  static bool prethodniTihiRezimAktivan = false;
 
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
@@ -542,21 +550,21 @@ void upravljajPlocom() {
 
   const DateTime now = dohvatiTrenutnoVrijeme();
   const unsigned long sadaMs = millis();
-  const bool uskrsnaTisinaAktivna = jeUskrsnaTisinaAktivna(now);
+  const bool tihiRezimAktivan = jePrekidacTisineAktivan();
   bool ulaziPloce[BROJ_ULAZA_PLOCE];
   procitajStabilnaStanjaUlazaPloce(ulaziPloce);
   const bool cavaoSlavljenjaAktivan =
       jeCavaoAktivan(ulaziPloce, dohvatiBrojMjestaZaCavle(), dohvatiCavaoSlavljenja());
 
-  if (uskrsnaTisinaAktivna) {
-    if (!prethodnaUskrsnaTisinaAktivna) {
-      posaljiPCLog(F("Ploca: uskrsna tisina aktivna, cavao-zvonjenja i posebni nacini su blokirani"));
+  if (tihiRezimAktivan) {
+    if (!prethodniTihiRezimAktivan) {
+      posaljiPCLog(F("Ploca: tihi rezim aktivan, cavao-zvonjenja i posebni nacini su blokirani"));
     }
     zaustaviAutomatikuPloceZbogUskrsneTisine();
-  } else if (prethodnaUskrsnaTisinaAktivna) {
-    posaljiPCLog(F("Ploca: uskrsna tisina zavrsena, cavao-zvonjenja su ponovno dozvoljena"));
+  } else if (prethodniTihiRezimAktivan) {
+    posaljiPCLog(F("Ploca: tihi rezim zavrsen, cavao-zvonjenja su ponovno dozvoljena"));
   }
-  prethodnaUskrsnaTisinaAktivna = uskrsnaTisinaAktivna;
+  prethodniTihiRezimAktivan = tihiRezimAktivan;
 
   azurirajAutomatskaZvonjenja(sadaMs, cavaoSlavljenjaAktivan);
 
@@ -581,7 +589,7 @@ void upravljajPlocom() {
   int minutaTerminaUDanu = 0;
   long protekloOdTerminaMs = 0;
 
-  if (!uskrsnaTisinaAktivna &&
+  if (!tihiRezimAktivan &&
       jePlocaKonfigurirana() &&
       jePlocaSpremnaZaCitanjeCavala(stanje, now) &&
       izracunajTerminCitanjaCavala(stanje, now, minutaTerminaUDanu, protekloOdTerminaMs) &&
@@ -610,27 +618,8 @@ void postaviTrenutniPolozajPloce(int pozicija) {
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
 }
 
-void postaviOffsetMinuta(int offset) {
-  offsetMinuta = constrain(offset, 0, 14);
-  WearLeveling::spremi(EepromLayout::BAZA_OFFSET_MINUTA,
-                       EepromLayout::SLOTOVI_OFFSET_MINUTA,
-                       offsetMinuta);
-}
-
 int dohvatiPozicijuPloce() {
   return UnifiedMotionStateStore::dohvatiIliMigriraj().plate_position;
-}
-
-int dohvatiOffsetMinuta() {
-  return offsetMinuta;
-}
-
-bool pretvoriPozicijuPloceUVrijeme(int pozicija, int& sat24, int& minuta) {
-  return izracunajVrijemeZaPoziciju(pozicija, sat24, minuta);
-}
-
-bool pretvoriVrijemeUPozicijuPloce(int sat24, int minuta, int& pozicija) {
-  return izracunajPozicijuZaVrijeme(sat24, minuta, pozicija);
 }
 
 bool jePlocaUSinkronu() {
@@ -641,11 +630,6 @@ bool jePlocaUSinkronu() {
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   return stanje.plate_phase == FAZA_STABILNO &&
          stanje.plate_position == izracunajCiljnuPoziciju(dohvatiTrenutnoVrijeme());
-}
-
-void oznaciPlocuKaoSinkroniziranu() {
-  zadnjaProvjeraMs = 0;
-  zadnjiObradeniRtcTick = 0;
 }
 
 void zatraziPoravnanjeTaktaPloce() {

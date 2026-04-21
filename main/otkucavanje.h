@@ -15,6 +15,7 @@ void otkucajPolasata();
 
 // Blokira ili dozvoljava otkucavanje
 void postaviBlokaduOtkucavanja(bool blokiraj);
+void postaviGlobalnuBlokaduOtkucavanja(bool blokiraj);
 
 // Dinamicki status satnog/polusatnog otkucavanja za LCD i telemetriju.
 bool jeOtkucavanjeUTijeku();

@@ -20,6 +20,7 @@
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
 #include "misna_automatika.h"
+#include "prekidac_tisine.h"
 
 void setup() {
   inicijalizirajLCD();
@@ -40,6 +41,7 @@ void setup() {
   inicijalizirajSuncevuAutomatiku();
   inicijalizirajMisnuAutomatiku();
   inicijalizirajOtkucavanje();
+  inicijalizirajPrekidacTisine();
   inicijalizirajMrtvackoThumbwheel();
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
@@ -62,6 +64,7 @@ void loop() {
   obradiESPSerijskuKomunikaciju();
   upravljajMenuSistemom();
   provjeriTipke();
+  osvjeziPrekidacTisine();
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
 
   upravljajZvonom();

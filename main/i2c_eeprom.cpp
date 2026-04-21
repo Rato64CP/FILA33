@@ -10,9 +10,10 @@ constexpr size_t VELICINA_STRANICE = 32;          // 24C32 zapisuje po 32 bajta
 constexpr size_t MAX_I2C_PODATAKA_PO_PAKETU = 30; // AVR Wire buffer: 32 bajta - 2 bajta adrese
 constexpr size_t UKUPNI_KAPACITET = 4096;         // 32 kbit = 4096 bajtova
 constexpr unsigned long CEKANJE_ZAPISA_MS = 5UL;  // Vrijeme interne pohrane nakon page write
+constexpr unsigned long PONOVNI_POKUSAJ_INICIJALIZACIJE_MS = 5000UL;
 
 bool inicijaliziran = false;
-bool inicijalizacijaPokusana = false;
+unsigned long zadnjiPokusajInicijalizacijeMs = 0;
 
 bool jeUnutarOpsega(int adresa, size_t duljina) {
   return adresa >= 0 && (static_cast<size_t>(adresa) + duljina) <= UKUPNI_KAPACITET;
@@ -29,14 +30,22 @@ bool provjeriDostupnost() {
 namespace VanjskiEEPROM {
 
 bool inicijaliziraj() {
-  if (!inicijalizacijaPokusana) {
-    Wire.begin();
-    #if defined(WIRE_HAS_TIMEOUT) || defined(TWBR)
-    Wire.setWireTimeout(25000, true);
-    #endif
-    inicijaliziran = provjeriDostupnost();
-    inicijalizacijaPokusana = true;
+  if (inicijaliziran) {
+    return true;
   }
+
+  const unsigned long sadaMs = millis();
+  if (zadnjiPokusajInicijalizacijeMs != 0 &&
+      (sadaMs - zadnjiPokusajInicijalizacijeMs) < PONOVNI_POKUSAJ_INICIJALIZACIJE_MS) {
+    return false;
+  }
+
+  zadnjiPokusajInicijalizacijeMs = sadaMs;
+  Wire.begin();
+  #if defined(WIRE_HAS_TIMEOUT) || defined(TWBR)
+  Wire.setWireTimeout(25000, true);
+  #endif
+  inicijaliziran = provjeriDostupnost();
   return inicijaliziran;
 }
 
@@ -56,11 +65,13 @@ bool procitaj(int adresa, void* odrediste, size_t duljina) {
     Wire.write(static_cast<uint8_t>((adresa >> 8) & 0xFF));
     Wire.write(static_cast<uint8_t>(adresa & 0xFF));
     if (Wire.endTransmission(false) != 0) {
+      inicijaliziran = false;
       return false;
     }
 
     size_t procitano = Wire.requestFrom(static_cast<int>(EEPROM_ADRESA), static_cast<int>(blok));
     if (procitano != blok) {
+      inicijaliziran = false;
       return false;
     }
 
@@ -68,6 +79,7 @@ bool procitaj(int adresa, void* odrediste, size_t duljina) {
       if (Wire.available()) {
         cilj[i] = Wire.read();
       } else {
+        inicijaliziran = false;
         return false;
       }
     }
@@ -114,6 +126,7 @@ bool zapisi(int adresa, const void* izvor, size_t duljina) {
     }
 
     if (Wire.endTransmission() != 0) {
+      inicijaliziran = false;
       return false;
     }
 

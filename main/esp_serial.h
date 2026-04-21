@@ -11,7 +11,6 @@ void posaljiWiFiStatusESP();
 void posaljiNTPPostavkeESP();
 void posaljiNTPZahtjevESP();
 void posaljiESPKomandu(const char* komanda);
-void posaljiESPKomandu(const String& komanda);
 bool jeWiFiPovezanNaESP();
 const char* dohvatiESPWiFiLokalnuIP();
 const char* dohvatiESPWiFiMACAdresu();

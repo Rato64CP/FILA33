@@ -1,5 +1,6 @@
 // tipke.cpp - Upravljanje matricnom tipkovnicom i menijem toranjskog sata
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include "tipke.h"
 #include "lcd_display.h"
 #include "pc_serial.h"
@@ -117,8 +118,8 @@ static void obradiPritisakTipke(const MapiranjeTipke& tipka) {
     return;
   }
 
-  String log = F("Tipka matrice: ");
-  log += tipka.naziv;
+  char log[48];
+  snprintf_P(log, sizeof(log), PSTR("Tipka matrice: %s"), tipka.naziv);
   posaljiPCLog(log);
   obradiKluc(tipka.event);
 }

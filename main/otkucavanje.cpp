@@ -2,14 +2,17 @@
 // Mehanicko upravljanje cekicima preko relejnih impulsa za toranjski sat
 
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 
 #include "otkucavanje.h"
 
 #include "slavljenje_mrtvacko.h"
 #include "otkucavanje_interno.h"
+#include "sunceva_automatika.h"
 #include "zvonjenje.h"
 #include "podesavanja_piny.h"
+#include "prekidac_tisine.h"
 #include "time_glob.h"
 #include "postavke.h"
 #include "lcd_display.h"
@@ -21,6 +24,7 @@ const unsigned long TRAJANJE_IMPULSA_CEKICA_DEFAULT = 150UL;
 const unsigned long PAUZA_MEZI_UDARACA_DEFAULT = 400UL;
 const unsigned long SATNO_OTKUCAJ_PAUZA_MS = 2000UL;  // 2 s izmedu satnih udaraca
 const unsigned long SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS = 150UL;
+const unsigned long SIGURNOSNI_MAX_OVERRIDE_TRAJANJE_CEKICA_MS = 300UL;
 
 enum VrstaOtkucavanja {
   OTKUCAVANJE_NONE = 0,
@@ -61,8 +65,22 @@ OtkucavanjeStanje otkucavanje = {
     TRAJANJE_IMPULSA_CEKICA_DEFAULT,
     PAUZA_MEZI_UDARACA_DEFAULT};
 bool blokadaOtkucavanja = false;
-DateTime zadnjeIzmjerenoVrijeme;
+bool globalnaBlokadaOtkucavanja = false;
 SigurnostCekicaStanje sigurnostCekica = {{false, false}, {0UL, 0UL}, {0UL, 0UL}};
+
+void kopirajFlashTekst(const __FlashStringHelper* tekst, char* odrediste, size_t velicina) {
+  if (odrediste == nullptr || velicina == 0) {
+    return;
+  }
+
+  if (tekst == nullptr) {
+    odrediste[0] = '\0';
+    return;
+  }
+
+  strncpy_P(odrediste, reinterpret_cast<const char*>(tekst), velicina - 1);
+  odrediste[velicina - 1] = '\0';
+}
 
 int dohvatiIndeksCekicaZaPin(int pin) {
   if (pin == PIN_CEKIC_MUSKI) {
@@ -74,17 +92,20 @@ int dohvatiIndeksCekicaZaPin(int pin) {
   return -1;
 }
 
-unsigned long normalizirajSigurnoTrajanjeCekicaMs(unsigned long trazenoTrajanjeMs) {
+unsigned long normalizirajSigurnoTrajanjeCekicaMs(unsigned long trazenoTrajanjeMs,
+                                                  unsigned long sigurnosniMaxMs) {
   if (trazenoTrajanjeMs == 0UL) {
     trazenoTrajanjeMs = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   }
-  if (trazenoTrajanjeMs > SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS) {
-    trazenoTrajanjeMs = SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS;
+  if (trazenoTrajanjeMs > sigurnosniMaxMs) {
+    trazenoTrajanjeMs = sigurnosniMaxMs;
   }
   return trazenoTrajanjeMs;
 }
 
-void aktivirajCekic_Internal(int pin, unsigned long trazenoTrajanjeMs) {
+void aktivirajCekic_Internal(int pin,
+                             unsigned long trazenoTrajanjeMs,
+                             unsigned long sigurnosniMaxMs = SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS) {
   const int indeks = dohvatiIndeksCekicaZaPin(pin);
   if (indeks < 0) {
     return;
@@ -93,7 +114,8 @@ void aktivirajCekic_Internal(int pin, unsigned long trazenoTrajanjeMs) {
   digitalWrite(pin, HIGH);
   sigurnostCekica.aktivan[indeks] = true;
   sigurnostCekica.vrijemeAktivacijeMs[indeks] = millis();
-  sigurnostCekica.trajanjeMs[indeks] = normalizirajSigurnoTrajanjeCekicaMs(trazenoTrajanjeMs);
+  sigurnostCekica.trajanjeMs[indeks] =
+      normalizirajSigurnoTrajanjeCekicaMs(trazenoTrajanjeMs, sigurnosniMaxMs);
 }
 
 void deaktivirajCekic_Internal(int pin) {
@@ -121,14 +143,19 @@ void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHelper* ra
   otkucavanje.trajanjeImpulsaMs = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   otkucavanje.pauzaIzmeduUdaracaMs = PAUZA_MEZI_UDARACA_DEFAULT;
 
-  String log = jeOtkazivanje ? String(F("Otkucavanje: operacija otkazana"))
-                             : String(F("Otkucavanje: sekvenca dovrsena"));
   if (razlog != nullptr) {
-    log += F(" (");
-    log += String(razlog);
-    log += ')';
+    char razlogBuffer[56];
+    char log[96];
+    kopirajFlashTekst(razlog, razlogBuffer, sizeof(razlogBuffer));
+    snprintf_P(log, sizeof(log), PSTR("%s (%s)"),
+               jeOtkazivanje ? "Otkucavanje: operacija otkazana"
+                             : "Otkucavanje: sekvenca dovrsena",
+               razlogBuffer);
+    posaljiPCLog(log);
+  } else {
+    posaljiPCLog(jeOtkazivanje ? F("Otkucavanje: operacija otkazana")
+                               : F("Otkucavanje: sekvenca dovrsena"));
   }
-  posaljiPCLog(log);
 }
 
 void pokreniSljedeciUdarac() {
@@ -142,8 +169,8 @@ void pokreniSljedeciUdarac() {
   otkucavanje.vrijemeZadnjeAktivacije = millis();
   otkucavanje.preostaliUdarci--;
 
-  String log = F("Udarac: preostalo=");
-  log += otkucavanje.preostaliUdarci;
+  char log[40];
+  snprintf_P(log, sizeof(log), PSTR("Udarac: preostalo=%d"), otkucavanje.preostaliUdarci);
   posaljiPCLog(log);
 }
 
@@ -172,14 +199,15 @@ void pokreniSekvencuOtkucavanja(VrstaOtkucavanja vrsta,
   otkucavanje.vrijemePocetkaMs = 0UL;
   otkucavanje.cekicAktivan = false;
   otkucavanje.vrijemeZadnjeAktivacije = 0UL;
-  otkucavanje.trajanjeImpulsaMs = normalizirajSigurnoTrajanjeCekicaMs(trajanjeImpulsaMs);
+  otkucavanje.trajanjeImpulsaMs =
+      normalizirajSigurnoTrajanjeCekicaMs(trajanjeImpulsaMs, SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS);
   otkucavanje.pauzaIzmeduUdaracaMs =
       (pauzaIzmeduUdaracaMs == 0UL) ? PAUZA_MEZI_UDARACA_DEFAULT : pauzaIzmeduUdaracaMs;
 
-  String log = F("Otkucavanje: ");
-  log += String(opisSekvence);
-  log += F(", udaraca=");
-  log += brojUdaraca;
+  char opisSekvenceBuffer[40];
+  char log[96];
+  kopirajFlashTekst(opisSekvence, opisSekvenceBuffer, sizeof(opisSekvenceBuffer));
+  snprintf_P(log, sizeof(log), PSTR("Otkucavanje: %s, udaraca=%d"), opisSekvenceBuffer, brojUdaraca);
   posaljiPCLog(log);
 
   if (pinCekica == PIN_CEKIC_MUSKI) {
@@ -218,7 +246,7 @@ void primijeniSigurnosniLimitCekica(unsigned long sadaMs) {
 }  // namespace
 
 bool jeOperacijaCekicaDozvoljena() {
-  if (blokadaOtkucavanja) {
+  if (blokadaOtkucavanja || globalnaBlokadaOtkucavanja) {
     return false;
   }
 
@@ -238,7 +266,8 @@ void prekiniAktivnoOtkucavanjeZbogPosebnogNacina(const __FlashStringHelper* razl
 }
 
 unsigned long dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs() {
-  return normalizirajSigurnoTrajanjeCekicaMs(dohvatiTrajanjeImpulsaCekica());
+  return normalizirajSigurnoTrajanjeCekicaMs(
+      dohvatiTrajanjeImpulsaCekica(), SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS);
 }
 
 void deaktivirajObaCekicaZaPosebniNacin() {
@@ -248,7 +277,9 @@ void deaktivirajObaCekicaZaPosebniNacin() {
 
 void aktivirajJedanCekicZaPosebniNacin(int pin, unsigned long trazenoTrajanjeMs) {
   deaktivirajObaCekicaZaPosebniNacin();
-  aktivirajCekic_Internal(pin, trazenoTrajanjeMs);
+  // Posebni nacini toranjskog sata smiju zatraziti dulji impuls od korisnicke
+  // postavke, ali i dalje ostaju pod strogim sigurnosnim limitom releja.
+  aktivirajCekic_Internal(pin, trazenoTrajanjeMs, SIGURNOSNI_MAX_OVERRIDE_TRAJANJE_CEKICA_MS);
 
   if (pin == PIN_CEKIC_MUSKI) {
     signalizirajHammer1_Active();
@@ -259,8 +290,10 @@ void aktivirajJedanCekicZaPosebniNacin(int pin, unsigned long trazenoTrajanjeMs)
 
 void aktivirajObaCekicaZaPosebniNacin(unsigned long trazenoTrajanjeMs) {
   deaktivirajObaCekicaZaPosebniNacin();
-  aktivirajCekic_Internal(PIN_CEKIC_MUSKI, trazenoTrajanjeMs);
-  aktivirajCekic_Internal(PIN_CEKIC_ZENSKI, trazenoTrajanjeMs);
+  aktivirajCekic_Internal(
+      PIN_CEKIC_MUSKI, trazenoTrajanjeMs, SIGURNOSNI_MAX_OVERRIDE_TRAJANJE_CEKICA_MS);
+  aktivirajCekic_Internal(
+      PIN_CEKIC_ZENSKI, trazenoTrajanjeMs, SIGURNOSNI_MAX_OVERRIDE_TRAJANJE_CEKICA_MS);
   signalizirajHammer1_Active();
   signalizirajHammer2_Active();
 }
@@ -315,8 +348,6 @@ void inicijalizirajOtkucavanje() {
   sigurnostCekica.trajanjeMs[1] = 0UL;
 
   inicijalizirajSlavljenjeIMrtvacko();
-
-  zadnjeIzmjerenoVrijeme = dohvatiTrenutnoVrijeme();
   blokadaOtkucavanja = false;
 
   posaljiPCLog(F("Otkucavanje: inicijalizirano"));
@@ -325,8 +356,8 @@ void inicijalizirajOtkucavanje() {
 void upravljajOtkucavanjem() {
   const unsigned long sadaMs = millis();
   const DateTime sada = dohvatiTrenutnoVrijeme();
-  const bool uskrsnaTisinaAktivna = jeUskrsnaTisinaAktivna(sada);
   const uint8_t modOtkucavanja = dohvatiModOtkucavanja();
+  const bool tihiRezimAktivan = jePrekidacTisineAktivan();
 
   primijeniSigurnosniLimitCekica(sadaMs);
   upravljajSlavljenjemIMrtvackim(sadaMs);
@@ -343,8 +374,8 @@ void upravljajOtkucavanjem() {
     }
   }
 
-  if (uskrsnaTisinaAktivna && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-    ponistiAktivnoOtkucavanje(true, F("uskrsna tisina aktivna"));
+  if (tihiRezimAktivan && otkucavanje.vrsta != OTKUCAVANJE_NONE) {
+    ponistiAktivnoOtkucavanje(true, F("aktivan tihi rezim"));
     return;
   }
 
@@ -359,7 +390,9 @@ void upravljajOtkucavanjem() {
       zadnjaMinuta = sada.minute();
 
       if (!jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        const bool batAktivan = jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute());
+        const bool batAktivan =
+            jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute()) ||
+            jeJutarnjeZvonjenjeOtvoriloOtkucavanje(sada);
         const bool otkucavanjeDozvoljenoUSatu = jeDozvoljenoOtkucavanjeUSatu(sada.hour());
 
         if (modOtkucavanja == MOD_OTKUCAJ_ISKLJUCEN) {
@@ -369,8 +402,8 @@ void upravljajOtkucavanjem() {
               sada.minute() == 45) {
             if (!otkucavanjeDozvoljenoUSatu) {
               posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan raspona rada"));
-            } else if (uskrsnaTisinaAktivna) {
-              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: uskrsna tisina"));
+            } else if (tihiRezimAktivan) {
+              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: tihi rezim"));
             } else if (!batAktivan) {
               posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan BAT raspona"));
             } else if (sada.minute() == 0) {
@@ -409,18 +442,18 @@ void upravljajOtkucavanjem() {
             broj = 12;
           }
 
-          if (otkucavanjeDozvoljenoUSatu && batAktivan && !uskrsnaTisinaAktivna) {
+          if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
             otkucajSate(broj);
-          } else if (uskrsnaTisinaAktivna) {
-            posaljiPCLog(F("Satno otkucavanje preskoceno: uskrsna tisina"));
+          } else if (tihiRezimAktivan) {
+            posaljiPCLog(F("Satno otkucavanje preskoceno: tihi rezim"));
           } else if (!batAktivan) {
             posaljiPCLog(F("Satno otkucavanje preskoceno: izvan BAT raspona"));
           }
         } else if (sada.minute() == 30) {
-          if (otkucavanjeDozvoljenoUSatu && batAktivan && !uskrsnaTisinaAktivna) {
+          if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
             otkucajPolasata();
-          } else if (uskrsnaTisinaAktivna) {
-            posaljiPCLog(F("Polusatno otkucavanje preskoceno: uskrsna tisina"));
+          } else if (tihiRezimAktivan) {
+            posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi rezim"));
           } else if (!batAktivan) {
             posaljiPCLog(F("Polusatno otkucavanje preskoceno: izvan BAT raspona"));
           }
@@ -490,6 +523,31 @@ void postaviBlokaduOtkucavanja(bool blokiraj) {
     }
   } else {
     posaljiPCLog(F("Blokada otkucavanja: ISKLJUCENA"));
+  }
+}
+
+void postaviGlobalnuBlokaduOtkucavanja(bool blokiraj) {
+  if (globalnaBlokadaOtkucavanja == blokiraj) {
+    return;
+  }
+
+  globalnaBlokadaOtkucavanja = blokiraj;
+
+  if (globalnaBlokadaOtkucavanja) {
+    posaljiPCLog(F("Globalna blokada otkucavanja: UKLJUCENA"));
+
+    if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
+      ponistiAktivnoOtkucavanje(true, F("globalna blokada otkucavanja"));
+    }
+    if (jeSlavljenjeUTijeku()) {
+      zaustaviSlavljenje();
+    }
+    if (jeMrtvackoUTijeku()) {
+      zaustaviMrtvacko();
+    }
+    deaktivirajObaCekicaZaPosebniNacin();
+  } else {
+    posaljiPCLog(F("Globalna blokada otkucavanja: ISKLJUCENA"));
   }
 }
 
