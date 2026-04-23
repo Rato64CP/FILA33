@@ -12,10 +12,10 @@ typedef enum {
   MENU_STATE_NETWORK_SETTINGS,    // Mreza
   MENU_STATE_SYSTEM_SETTINGS,     // Sustav
   MENU_STATE_WIFI_IP_DISPLAY,     // Prikaz lokalne WiFi IP adrese
-  MENU_STATE_CONFIRMATION,        // Potvrda akcije
   MENU_STATE_QUIET_HOURS,         // Uredjivanje tihih sati
   MENU_STATE_NAIL_SETTINGS,       // Uredjivanje postavki stapica
-  MENU_STATE_SUNCE_SETTINGS       // Uredjivanje suncevih dogadaja
+  MENU_STATE_SUNCE_SETTINGS,      // Uredjivanje suncevih dogadaja
+  MENU_STATE_HOLIDAY_SETTINGS     // Uredjivanje blagdanskog slavljenja
 } MenuState;
 
 typedef enum {

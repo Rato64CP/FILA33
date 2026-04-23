@@ -4,10 +4,11 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 
 ## ✨ Sto sustav radi
 
-- vodi vrijeme preko `DS3231 RTC`, kontroliranog `NTP` zahtjeva i `DCF77`
+- vodi vrijeme preko `DS3231 RTC` i kontroliranog `NTP` zahtjeva
 - upravlja kazaljkama sata uz korekciju i sinkronizaciju
 - upravlja okretnom plocom kroz dvofazne korake i citanje cavala
 - vodi zvona, cekice, slavljenje i mrtvacko
+- podrzava blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - cuva postavke i kriticno stanje u `24C32 EEPROM-u`
 - vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
 - podrzava jedinstveni tihi rezim za uskrsnu tisinu i rucni kip-prekidac
@@ -40,7 +41,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 - `esp_firmware/` - pomocni firmware za `ESP8266` i `ESP32`
 - `pi_bridge/` - Python serijski most za `Raspberry Pi` i `Home Assistant`
 - `main/main.ino` - inicijalizacija i glavna petlja
-- `main/time_glob.*` - RTC, NTP, DCF, DST i prioriteti izvora vremena
+- `main/time_glob.*` - RTC, NTP, DST i prioriteti izvora vremena
 - `main/esp_serial.*` - serijska komunikacija s ESP modulom
 - `main/kazaljke_sata.*` - logika kazaljki i korekcije
 - `main/okretna_ploca.*` - upravljanje polozajem, fazama i cavlima
@@ -82,6 +83,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 - BAT / tihi sati iz postavki blokiraju samo otkucavanje
 - sunceva automatika i cavli ploce rade i tijekom BAT raspona
 - jutarnje suncevo zvono moze ranije otvoriti otkucavanje prije kraja BAT raspona
+- blagdansko slavljenje ceka stvarni zavrsetak zvona, otkucavanja i inercije prije pokretanja
 
 ## ⚠️ Ponašanje Kod Gresaka
 
@@ -98,7 +100,6 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 - `DS3231 RTC`
 - `24C32 EEPROM`
 - `LCD 16x2` preko `I2C`
-- `DCF77` prijemnik
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`

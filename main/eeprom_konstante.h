@@ -30,7 +30,7 @@ constexpr int SLOTOVI_STANJE_PLOCE = 6;
 constexpr int SLOT_SIZE_STANJE_PLOCE = 4;
 
 // ==================== TIME SOURCE TRACKING ====================
-// Tracks which source provided current time (RTC, NTP, or DCF)
+// Tracks which source provided current time (RTC or NTP)
 
 struct ZadnjaSinkronizacija {
   int izvor;
@@ -67,6 +67,8 @@ struct PostavkeSpremnik {
   uint8_t trajanjeZvonjenjaNedjeljaMin;
   uint8_t trajanjeSlavljenjaMin;
   uint8_t slavljenjePrijeZvonjenja;
+  uint8_t inercijaZvona1Sekunde;
+  uint8_t inercijaZvona2Sekunde;
 
   // Konfiguracija zvona i rasporeda cavala
   uint8_t brojZvona;
@@ -80,6 +82,12 @@ struct PostavkeSpremnik {
   char wifiLozinka[33];
   bool koristiDhcp;
   bool lcdPozadinskoOsvjetljenje;
+  bool logiranjeOmoguceno;
+  uint8_t blagdaniSlavljenjeMaska;
+  uint8_t blagdaniRazdobljaMaska;
+  uint8_t sviSvetiOmoguceno;
+  uint8_t sviSvetiPocetakSat;
+  uint8_t sviSvetiZavrsetakSat;
   uint8_t modSlavljenja;
   uint8_t modOtkucavanja;
   uint8_t modMrtvackog;
@@ -87,15 +95,14 @@ struct PostavkeSpremnik {
   char mreznaMaska[16];
   char zadaniGateway[16];
   char ntpServer[40];
-  bool dcfOmogucen;
   bool wifiOmogucen;
   bool imaKazaljke;
   uint16_t checksum;
 };
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
-// Testna revizija 16 cisti mrtva MQTT/pomocna polja iz spremnika postavki.
-constexpr uint8_t POSTAVKE_VERZIJA = 16;
+// Revizija 21 dodaje postavke mrtvackog za Svi sveti i Dusni dan.
+constexpr uint8_t POSTAVKE_VERZIJA = 21;
 
 constexpr int BAZA_POSTAVKE =
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);
@@ -176,13 +183,14 @@ struct SunceviDogadajiSpremnik {
   uint16_t potpis;
   uint8_t verzija;
   uint8_t maskaDogadaja;
+  uint8_t nocnaRasvjetaOmogucena;
   uint8_t zvona[3];
   int16_t odgodeMin[3];
   uint16_t checksum;
 };
 
 constexpr uint16_t SUNCEVI_DOGADAJI_POTPIS = 0x5344;
-constexpr uint8_t SUNCEVI_DOGADAJI_VERZIJA = 3;
+constexpr uint8_t SUNCEVI_DOGADAJI_VERZIJA = 4;
 
 constexpr int BAZA_SUNCEVI_DOGADAJI =
   BAZA_EEPROM_DIJAGNOSTIKA + VELICINA_EEPROM_DIJAGNOSTIKA;

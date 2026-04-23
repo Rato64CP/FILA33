@@ -18,14 +18,14 @@ Glavna `loop()` petlja je organizirana kao kooperativni scheduler bez blokiranja
 1. osvjezi watchdog
 2. obradi komunikacije i UI (`ESP`, meni, tipke)
 3. obradi mehaniku (zvona, otkucavanje, kazaljke, ploca)
-4. obradi dodatnu sinkronizaciju (`DCF`)
+4. obradi dodatnu sinkronizaciju (`NTP`)
 5. periodicki spremi kriticno stanje
 6. ponovno osvjezi watchdog
 
 Time se osigurava da nijedan podsustav ne gladuje, a svi rade ciklicki u malim koracima.
 
 ### Arhitektura na visokoj razini
-- **Vrijeme i sinkronizacija**: [main/time_glob.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp), [main/esp_serial.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp), [main/dcf_sync.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/dcf_sync.cpp)
+- **Vrijeme i sinkronizacija**: [main/time_glob.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp), [main/esp_serial.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp)
 - **Kretanje mehanike**: [main/kazaljke_sata.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/kazaljke_sata.cpp), [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp)
 - **Udari i zvona**: [main/otkucavanje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/otkucavanje.cpp), [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp), [main/slavljenje_mrtvacko.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/slavljenje_mrtvacko.cpp)
 - **UI i postavke**: [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp), [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp), [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp)
@@ -213,7 +213,7 @@ Kazaljke i okretna ploca ostaju aktivne.
 Postoje fizicke sklopke za `ZVONO 1` i `ZVONO 2`. Kada je rucni override aktivan, on ima prioritet nad automatikom.
 
 ### Inercija
-Nakon ukljucivanja ili iskljucivanja zvona aktivira se inercija od `90 s`. U tom periodu se blokiraju udari cekica kako se ne bi preklapala mehanicka gibanja.
+Nakon ukljucivanja ili iskljucivanja zvona aktivira se inercija. Vrijednost se zasebno postavlja za `Zvono 1` i `Zvono 2` kroz meni `Sustav`, a u tom periodu se blokiraju udari cekica kako se ne bi preklapala mehanicka gibanja.
 
 ### Tihi rezim i zvona
 Kad je aktivan tihi rezim:
@@ -223,7 +223,7 @@ Kad je aktivan tihi rezim:
 
 ---
 
-## 7. NTP / RTC / DCF Sinkronizacija
+## 7. NTP / RTC Sinkronizacija
 
 ### RTC kao primarni izvor
 Sustav kontinuirano cita `DS3231` i to je lokalni autoritet vremena tijekom normalnog rada.
@@ -235,9 +235,6 @@ Sustav kontinuirano cita `DS3231` i to je lokalni autoritet vremena tijekom norm
 - mreza je spremna
 
 Prihvacena `NTP` sinkronizacija se, kad god je moguce, poravnava na sljedeci `RTC SQW` tik sekunde.
-
-### DCF kao dodatni izvor
-`DCF77` ostaje dodatni sinkronizacijski izvor i fallback kad mreza nije dostupna ili se zeli druga potvrda vremena.
 
 ### Zastita od sumnjivog skoka vremena
 Ako novo vrijeme napravi prevelik skok, sustav ga ne prihvaca odmah nego trazi dodatnu potvrdu. Time se izbjegava upis krivog vremena u `RTC`.
@@ -260,6 +257,51 @@ Firmware sam vodi `CET/CEST` status, sprema ga u EEPROM i automatski primjenjuje
 3. `postavke` validira, pripremi integritet i zapis
 4. promjena se sprema u EEPROM
 
+Pravilo upravljanja tipkama je ujednaceno:
+- strelice sluze za kretanje po stavkama i promjenu vrijednosti
+- `Ent` sprema promjene za aktivnu granu menija
+- `Esc` izlazi bez spremanja i vraca se jednu granu natrag
+
+Meni `Sunce` trenutno uredjuje:
+- jutarnji dogadaj
+- podnevni dogadaj
+- vecernji dogadaj
+- nocnu rasvjetu kao cetvrtu stranicu nakon `Jutro`, `Podne` i `Vecer`
+
+Nocna rasvjeta je odvojena od zvona, ali koristi isti izracun izlaska i zalaska sunca:
+- ukljucuje relej `PIN_RELEJ_NOCNE_RASVJETE` pri vecernjem dogadaju
+- gasi ga pri jutarnjem dogadaju
+- po danu je `OFF`, po noci je `ON`
+- u meniju `Sunce` `Gore/Dolje` na stranici nocne rasvjete mijenja `AUTO`, a `Lijevo/Desno` prelazi na susjednu stranicu
+
+Meni `Blagdani` uredjuje automatsko slavljenje nakon suncevih dogadaja:
+- `SLAVI J0 P0 V0` odredjuje smije li se slaviti nakon jutarnje Zdravomarije, podnevnog zvona i vecernje Zdravomarije
+- `A:0 P:0 VG:0` ukljucuje razdoblja za sv. Antu, sv. Petra i Veliku Gospu
+- sv. Ante vrijedi od `6.6.` do ukljucivo `13.6.`
+- sv. Petar vrijedi od `22.6.` do ukljucivo `28.6.`
+- Velika Gospa vrijedi od `8.8.` do ukljucivo `15.8.`
+- slavljenje se zakazuje tek nakon stvarno pokrenutog suncevog zvona
+- prije starta slavljenja ceka se kraj zvona, otkucavanja i inercije
+- trajanje i odgoda slavljenja koriste postojece postavke iz `Stapici`
+
+Druga stranica menija `Blagdani` uredjuje Svi sveti i Dusni dan:
+- `SVI SVETI 0/1` ukljucuje ili iskljucuje posebni mrtvacki raspored
+- `P:15` oznacava pocetni sat mrtvackog na dan `1.11.`
+- `Z:8` oznacava zavrsni sat mrtvackog na dan `2.11.`
+- ako je ukljuceno, mrtvacko radi `1.11.` od `P:00` do `21:00`
+- nakon toga je tisina do `2.11.` u `06:00`
+- mrtvacko ponovno radi `2.11.` od `06:00` do `Z:00`
+- `1.11.` se preskace vecernja Zdravomarija
+- `2.11.` se preskace jutarnja Zdravomarija
+- mrtvacko za Svi sveti namjerno ignorira thumbwheel auto-stop, jer trajanje odreduje kalendarski raspored
+
+Meni `Sustav` trenutno uredjuje:
+- `LCD svjetlo`
+- `Logiranje`
+- `Impuls cekica`
+- `Inercija Z1`
+- `Inercija Z2`
+
 ### EEPROM verzioniranje i validacija
 Postavke imaju trostruku zastitu:
 - potpis
@@ -278,7 +320,7 @@ Ako validacija ne prode, sustav se vraca na zadane vrijednosti i ponovno ih snim
 2. vanjski EEPROM
 3. RTC i ucitavanje postavki
 4. tipke, ESP i meni
-5. zvona, otkucavanje, kazaljke, plocu i `DCF`
+5. zvona, otkucavanje, kazaljke i plocu
 6. watchdog
 7. power-recovery oznake i boot recovery
 

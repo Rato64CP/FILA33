@@ -7,10 +7,11 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - upravljanje kazaljkama sata
 - upravljanje okretnom plocom
 - upravljanje zvonima i cekicima
+- blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - lokalne postavke preko LCD izbornika i tipki
 - pohrana postavki i stanja u `24C32 EEPROM`
 - recovery nakon watchdog i power-loss reseta
-- obrada DCF, RTC i NTP izvora vremena
+- obrada RTC i NTP izvora vremena
 - jedinstveni tihi rezim, BAT logika i lokalni overridei
 
 ## 🧭 Podjela poslova Mega / ESP
@@ -42,7 +43,6 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 
 - `DS3231 RTC` je glavni izvor za offline rad
 - `NTP` dolazi preko ESP modula, ali trenutak sinkronizacije bira `Mega 2560`
-- `DCF77` sluzi kao dodatna sinkronizacija i fallback
 - automatski prijelaz CET/CEST ostaje pod kontrolom firmwarea toranjskog sata
 - `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
 
@@ -73,7 +73,6 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 - izlazi za zvona i cekice
 - DS3231 RTC i 24C32 EEPROM preko I2C
 - LCD 16x2 preko I2C
-- DCF77 prijemnik
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`

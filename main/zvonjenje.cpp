@@ -12,8 +12,6 @@
 
 // ==================== CONSTANTS ====================
 
-// Trajanje inercije: 90 sekundi nakon rada zvona.
-const unsigned long TRAJANJE_INERCIJE_MS = 90000UL;
 static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
 
@@ -42,10 +40,10 @@ static struct {
 
 // Inercija nakon aktivacije zvona.
 static struct {
-  bool inercija_aktivna;
-  unsigned long vrijeme_pocetka;
-  unsigned long trajanje_ms;
-} inercija = {false, 0, TRAJANJE_INERCIJE_MS};
+  bool aktivna[BROJ_ZVONA_MAX];
+  unsigned long vrijeme_pocetka[BROJ_ZVONA_MAX];
+  unsigned long trajanje_ms[BROJ_ZVONA_MAX];
+} inercija = {};
 
 // Rucno upravljanje fizickim sklopkama ima prioritet nad automatikom.
 static struct {
@@ -63,6 +61,26 @@ static bool jeValjanIndeksZvona(int indeks) {
 
 static bool jeZvonoOmogucenoPoPostavkama(int zvono) {
   return zvono >= 1 && zvono <= dohvatiBrojZvona();
+}
+
+static unsigned long dohvatiTrajanjeInercijeZvonaMs(int indeks) {
+  if (indeks == 0) {
+    return static_cast<unsigned long>(dohvatiInercijuZvona1Sekunde()) * 1000UL;
+  }
+  if (indeks == 1) {
+    return static_cast<unsigned long>(dohvatiInercijuZvona2Sekunde()) * 1000UL;
+  }
+  return 0UL;
+}
+
+static void pokreniInercijuZvona(int indeks) {
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
+  }
+
+  inercija.aktivna[indeks] = true;
+  inercija.vrijeme_pocetka[indeks] = millis();
+  inercija.trajanje_ms[indeks] = dohvatiTrajanjeInercijeZvonaMs(indeks);
 }
 
 static void prekiniPosebneNacineZbogZvona(int indeks) {
@@ -100,11 +118,14 @@ static void aktivirajBell_Relej(int indeks) {
   prekiniPosebneNacineZbogZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
   digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], HIGH);
-  inercija.inercija_aktivna = true;
-  inercija.vrijeme_pocetka = millis();
+  pokreniInercijuZvona(indeks);
 
   char log[56];
-  snprintf_P(log, sizeof(log), PSTR("Zvono%d: aktivirana, inercija (90s) poceta"), indeks + 1);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Zvono%d: aktivirana, inercija (%us) poceta"),
+             indeks + 1,
+             static_cast<unsigned>((inercija.trajanje_ms[indeks] + 500UL) / 1000UL));
   posaljiPCLog(log);
   signalizirajZvono_Ringing(indeks + 1);
 }
@@ -166,26 +187,36 @@ void iskljuciZvono(int zvono) {
     zvona.aktivan[indeks] = false;
     zvona.start_ms[indeks] = 0;
     zvona.duration_ms[indeks] = 0;
-    inercija.inercija_aktivna = true;
-    inercija.vrijeme_pocetka = millis();
+    pokreniInercijuZvona(indeks);
   }
 }
 
 bool jeLiInerciaAktivna() {
-  if (!inercija.inercija_aktivna) {
-    return false;
+  bool baremJednaAktivna = false;
+  const unsigned long sadaMs = millis();
+
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    if (!inercija.aktivna[i]) {
+      continue;
+    }
+
+    const unsigned long proteklo = sadaMs - inercija.vrijeme_pocetka[i];
+    if (proteklo >= inercija.trajanje_ms[i]) {
+      inercija.aktivna[i] = false;
+      char log[48];
+      snprintf_P(log,
+                 sizeof(log),
+                 PSTR("Inercija Z%d: zavrsena nakon %us"),
+                 i + 1,
+                 static_cast<unsigned>((inercija.trajanje_ms[i] + 500UL) / 1000UL));
+      posaljiPCLog(log);
+      continue;
+    }
+
+    baremJednaAktivna = true;
   }
 
-  unsigned long sadaMs = millis();
-  unsigned long proteklo = sadaMs - inercija.vrijeme_pocetka;
-
-  if (proteklo >= inercija.trajanje_ms) {
-    inercija.inercija_aktivna = false;
-    posaljiPCLog(F("Inercija: zavrsena nakon 90s"));
-    return false;
-  }
-
-  return true;
+  return baremJednaAktivna;
 }
 
 bool jeZvonoUTijeku() {
@@ -271,7 +302,11 @@ void inicijalizirajZvona() {
     manualnoUpravljanje.override_aktivan[i] = false;
   }
 
-  inercija.inercija_aktivna = false;
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    inercija.aktivna[i] = false;
+    inercija.vrijeme_pocetka[i] = 0UL;
+    inercija.trajanje_ms[i] = 0UL;
+  }
   posaljiPCLog(F("Zvona: inicijalizirana za 2 zvona toranjskog sata"));
 }
 

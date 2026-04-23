@@ -16,7 +16,6 @@
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "mrtvacko_thumbwheel.h"
-#include "dcf_sync.h"
 #include "watchdog.h"
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
@@ -35,6 +34,7 @@ void inicijalizirajSigurnaPocetnaStanjaIzlaza() {
       PIN_ZVONO_2,
       PIN_CEKIC_MUSKI,
       PIN_CEKIC_ZENSKI,
+      PIN_RELEJ_NOCNE_RASVJETE,
       PIN_LAMPICA_ZVONO_1,
       PIN_LAMPICA_ZVONO_2,
       PIN_LAMPICA_SLAVLJENJE,
@@ -86,11 +86,6 @@ void setup() {
 
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
-  if (jeDCFOmogucen()) {
-    inicijalizirajDCF();
-  } else {
-    posaljiPCLog(F("DCF77: onemogucen u postavkama, inicijalizacija preskocena"));
-  }
 }
 
 void loop() {
@@ -110,10 +105,6 @@ void loop() {
   upravljajKorekcijomKazaljki();
   upravljajPlocom();
   obradiAutomatskiNTPZahtjevESP();
-
-  if (jeDCFOmogucen()) {
-    osvjeziDCFSinkronizaciju();
-  }
   spremiKriticalnoStanje();
 
   osvjeziWatchdog();

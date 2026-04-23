@@ -14,5 +14,6 @@ bool jeSlavljenjeUTijeku();
 
 // Mrtvacko koristi cekice izvan redovnog satnog otkucavanja.
 void zapocniMrtvacko();
+bool pokusajZapocetiMrtvackoBezAutoStopa();
 void zaustaviMrtvacko();
 bool jeMrtvackoUTijeku();

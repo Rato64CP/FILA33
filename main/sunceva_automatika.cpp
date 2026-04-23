@@ -5,9 +5,11 @@
 #include <RTClib.h>
 #include <math.h>
 #include "otkucavanje.h"
+#include "podesavanja_piny.h"
 #include "postavke.h"
 #include "time_glob.h"
 #include "zvonjenje.h"
+#include "slavljenje_mrtvacko.h"
 #include "pc_serial.h"
 #include "prekidac_tisine.h"
 
@@ -36,13 +38,27 @@ struct ZakazanoSuncevoZvonjenje {
   unsigned long trajanjeMs;
 };
 
+struct ZakazanoBlagdanskoSlavljenje {
+  bool aktivno;
+  bool pokrenuto;
+  uint8_t dogadaj;
+  uint32_t datumKljuc;
+  unsigned long startMs;
+  unsigned long trajanjeMs;
+  unsigned long krajMs;
+};
+
 static DnevniRasporedSuncevihDogadaja raspored = {false, 0, {-1, -1, -1}};
 static ZakazanoSuncevoZvonjenje zakazanoZvonjenje = {false, 0, 0, 0, 0, 0};
+static ZakazanoBlagdanskoSlavljenje zakazanoBlagdanskoSlavljenje = {
+    false, false, 0, 0, 0, 0, 0};
 static uint32_t zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
 static uint32_t zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
 static uint32_t zadnjiOkinutiDatum[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
 static uint32_t datumJutarnjegStartaOtkucavanja = 0;
 static int minutaJutarnjegStartaOtkucavanja = -1;
+static bool sviSvetiMrtvackoAktivno = false;
+static bool nocnaRasvjetaUkljucena = false;
 static int32_t zadnjaSirinaE5 = 0x7FFFFFFFL;
 static int32_t zadnjaDuzinaE5 = 0x7FFFFFFFL;
 static uint8_t zadnjaMaskaDogadaja = 0xFF;
@@ -210,6 +226,133 @@ static const char* nazivDogadajaTekst(uint8_t dogadaj) {
   return "vecer";
 }
 
+static const char* nazivBlagdanskogRazdobljaTekst(uint8_t razdoblje) {
+  if (razdoblje == BLAGDAN_ANTE) {
+    return "sv. Ante";
+  }
+  if (razdoblje == BLAGDAN_PETAR) {
+    return "sv. Petra";
+  }
+  return "Velike Gospe";
+}
+
+static bool jeDatumURasponu(const DateTime& sada,
+                            uint8_t mjesec,
+                            uint8_t prviDan,
+                            uint8_t zadnjiDan) {
+  return sada.month() == mjesec && sada.day() >= prviDan && sada.day() <= zadnjiDan;
+}
+
+static bool dohvatiAktivnoBlagdanskoRazdoblje(const DateTime& sada, uint8_t& razdoblje) {
+  if (jeBlagdanskoRazdobljeOmoguceno(BLAGDAN_ANTE) &&
+      jeDatumURasponu(sada, 6, 6, 13)) {
+    razdoblje = BLAGDAN_ANTE;
+    return true;
+  }
+
+  if (jeBlagdanskoRazdobljeOmoguceno(BLAGDAN_PETAR) &&
+      jeDatumURasponu(sada, 6, 22, 28)) {
+    razdoblje = BLAGDAN_PETAR;
+    return true;
+  }
+
+  if (jeBlagdanskoRazdobljeOmoguceno(BLAGDAN_VELIKA_GOSPA) &&
+      jeDatumURasponu(sada, 8, 8, 15)) {
+    razdoblje = BLAGDAN_VELIKA_GOSPA;
+    return true;
+  }
+
+  return false;
+}
+
+static bool trebaSlavitiBlagdanNakonDogadaja(uint8_t dogadaj,
+                                             const DateTime& sada,
+                                             uint8_t& razdoblje) {
+  if (!jeBlagdanskoSlavljenjeOmoguceno(dogadaj)) {
+    return false;
+  }
+
+  return dohvatiAktivnoBlagdanskoRazdoblje(sada, razdoblje);
+}
+
+static bool jeDanSvihSvetih(const DateTime& sada) {
+  return sada.month() == 11 && sada.day() == 1;
+}
+
+static bool jeDusniDan(const DateTime& sada) {
+  return sada.month() == 11 && sada.day() == 2;
+}
+
+static bool trebaPreskocitiSuncevDogadajZbogSvihSvetih(uint8_t dogadaj, const DateTime& sada) {
+  if (!jeSviSvetiMrtvackoOmoguceno()) {
+    return false;
+  }
+
+  return (jeDanSvihSvetih(sada) && dogadaj == SUNCEVI_DOGADAJ_VECER) ||
+         (jeDusniDan(sada) && dogadaj == SUNCEVI_DOGADAJ_JUTRO);
+}
+
+static bool jeSviSvetiMrtvackoProzorAktivan(const DateTime& sada) {
+  if (!jeSviSvetiMrtvackoOmoguceno()) {
+    return false;
+  }
+
+  const int minutaUDanu = sada.hour() * 60 + sada.minute();
+  if (jeDanSvihSvetih(sada)) {
+    return minutaUDanu >= static_cast<int>(dohvatiSviSvetiPocetakSat()) * 60 &&
+           minutaUDanu < 21 * 60;
+  }
+
+  if (jeDusniDan(sada)) {
+    return minutaUDanu >= 6 * 60 &&
+           minutaUDanu < static_cast<int>(dohvatiSviSvetiZavrsetakSat()) * 60;
+  }
+
+  return false;
+}
+
+static void postaviRelejNocneRasvjete(bool ukljuceno) {
+  digitalWrite(PIN_RELEJ_NOCNE_RASVJETE, ukljuceno ? HIGH : LOW);
+}
+
+static void postaviNocnuRasvjetu(bool ukljuceno) {
+  if (nocnaRasvjetaUkljucena == ukljuceno) {
+    return;
+  }
+
+  nocnaRasvjetaUkljucena = ukljuceno;
+  postaviRelejNocneRasvjete(ukljuceno);
+  posaljiPCLog(ukljuceno ? F("Sunce: nocna rasvjeta ukljucena")
+                         : F("Sunce: nocna rasvjeta iskljucena"));
+}
+
+static bool jeVrijemeUProzoru(int trenutnaMinutaUDanu, int pocetakMinuta, int krajMinuta) {
+  if (pocetakMinuta == krajMinuta) {
+    return false;
+  }
+  if (pocetakMinuta < krajMinuta) {
+    return trenutnaMinutaUDanu >= pocetakMinuta && trenutnaMinutaUDanu < krajMinuta;
+  }
+  return trenutnaMinutaUDanu >= pocetakMinuta || trenutnaMinutaUDanu < krajMinuta;
+}
+
+static void osvjeziNocnuRasvjetu(const DateTime& sada) {
+  if (!jeNocnaRasvjetaOmogucena() || !jeVrijemePotvrdjenoZaAutomatiku() || !raspored.valjano) {
+    postaviNocnuRasvjetu(false);
+    return;
+  }
+
+  const int jutroMinuta = raspored.minute[SUNCEVI_DOGADAJ_JUTRO];
+  const int vecerMinuta = raspored.minute[SUNCEVI_DOGADAJ_VECER];
+  if (jutroMinuta < 0 || vecerMinuta < 0) {
+    postaviNocnuRasvjetu(false);
+    return;
+  }
+
+  const int trenutnaMinutaUDanu = sada.hour() * 60 + sada.minute();
+  postaviNocnuRasvjetu(jeVrijemeUProzoru(trenutnaMinutaUDanu, vecerMinuta, jutroMinuta));
+}
+
 static bool vrijemeProslo(unsigned long ciljMs) {
   return static_cast<long>(millis() - ciljMs) >= 0;
 }
@@ -247,6 +390,30 @@ static void zakaziSuncevoZvonjenje(uint8_t dogadaj,
   posaljiPCLog(log);
 }
 
+static void zakaziBlagdanskoSlavljenjeAkoTreba(uint8_t dogadaj, const DateTime& sada) {
+  uint8_t razdoblje = 0;
+  if (!trebaSlavitiBlagdanNakonDogadaja(dogadaj, sada, razdoblje)) {
+    return;
+  }
+
+  zakazanoBlagdanskoSlavljenje.aktivno = true;
+  zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+  zakazanoBlagdanskoSlavljenje.dogadaj = dogadaj;
+  zakazanoBlagdanskoSlavljenje.datumKljuc = napraviDatumKljuc(sada);
+  zakazanoBlagdanskoSlavljenje.startMs =
+      millis() + static_cast<unsigned long>(dohvatiOdgoduSlavljenjaSekunde()) * 1000UL;
+  zakazanoBlagdanskoSlavljenje.trajanjeMs = dohvatiTrajanjeSlavljenjaMs();
+  zakazanoBlagdanskoSlavljenje.krajMs = 0;
+
+  char log[112];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Blagdani: slavljenje nakon %s (%s) zakazano"),
+             nazivDogadajaTekst(dogadaj),
+             nazivBlagdanskogRazdobljaTekst(razdoblje));
+  posaljiPCLog(log);
+}
+
 static void evidentirajJutarnjiStartOtkucavanja(uint8_t dogadaj, const DateTime& sada) {
   if (dogadaj != SUNCEVI_DOGADAJ_JUTRO) {
     return;
@@ -276,8 +443,15 @@ static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
     return;
   }
 
+  if (jePrekidacTisineAktivan()) {
+    zakazanoZvonjenje.aktivno = false;
+    posaljiPCLog(F("Suncevo zvonjenje nakon odgode preskoceno (tihi rezim)"));
+    return;
+  }
+
   aktivirajZvonjenjeNaTrajanje(zakazanoZvonjenje.zvono, zakazanoZvonjenje.trajanjeMs);
   evidentirajJutarnjiStartOtkucavanja(zakazanoZvonjenje.dogadaj, sada);
+  zakaziBlagdanskoSlavljenjeAkoTreba(zakazanoZvonjenje.dogadaj, sada);
 
   char log[96];
   snprintf_P(log, sizeof(log),
@@ -287,6 +461,99 @@ static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
   posaljiPCLog(log);
 
   zakazanoZvonjenje.aktivno = false;
+}
+
+static void obradiZakazanoBlagdanskoSlavljenje(const DateTime& sada) {
+  if (!zakazanoBlagdanskoSlavljenje.aktivno) {
+    return;
+  }
+
+  if (zakazanoBlagdanskoSlavljenje.datumKljuc != napraviDatumKljuc(sada)) {
+    zakazanoBlagdanskoSlavljenje.aktivno = false;
+    zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+    return;
+  }
+
+  if (jePrekidacTisineAktivan()) {
+    zakazanoBlagdanskoSlavljenje.aktivno = false;
+    zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+    posaljiPCLog(F("Blagdani: slavljenje preskoceno zbog tihog rezima"));
+    return;
+  }
+
+  if (!zakazanoBlagdanskoSlavljenje.pokrenuto) {
+    if (!vrijemeProslo(zakazanoBlagdanskoSlavljenje.startMs)) {
+      return;
+    }
+
+    if (jeOtkucavanjeUTijeku() || jeZvonoUTijeku() || jeLiInerciaAktivna() ||
+        jeSlavljenjeUTijeku() || jeMrtvackoUTijeku()) {
+      zakazanoBlagdanskoSlavljenje.startMs =
+          millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
+      return;
+    }
+
+    zapocniSlavljenje();
+    if (!jeSlavljenjeUTijeku()) {
+      zakazanoBlagdanskoSlavljenje.startMs =
+          millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
+      return;
+    }
+
+    zakazanoBlagdanskoSlavljenje.pokrenuto = true;
+    zakazanoBlagdanskoSlavljenje.krajMs =
+        millis() + zakazanoBlagdanskoSlavljenje.trajanjeMs;
+    posaljiPCLog(F("Blagdani: slavljenje pokrenuto nakon suncevog dogadaja"));
+    return;
+  }
+
+  if (!vrijemeProslo(zakazanoBlagdanskoSlavljenje.krajMs)) {
+    return;
+  }
+
+  zaustaviSlavljenje();
+  if (!jeSlavljenjeUTijeku()) {
+    zakazanoBlagdanskoSlavljenje.aktivno = false;
+    zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+    posaljiPCLog(F("Blagdani: slavljenje zavrseno"));
+  } else {
+    zakazanoBlagdanskoSlavljenje.krajMs =
+        millis() + ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS;
+  }
+}
+
+static void upravljajMrtvackimZaSveSvete(const DateTime& sada) {
+  const bool prozorAktivan = jeSviSvetiMrtvackoProzorAktivan(sada);
+  if (!prozorAktivan) {
+    if (sviSvetiMrtvackoAktivno) {
+      zaustaviMrtvacko();
+      sviSvetiMrtvackoAktivno = false;
+      posaljiPCLog(F("Svi sveti: mrtvacko zaustavljeno izvan zadanog prozora"));
+    }
+    return;
+  }
+
+  if (jePrekidacTisineAktivan()) {
+    if (sviSvetiMrtvackoAktivno) {
+      zaustaviMrtvacko();
+      sviSvetiMrtvackoAktivno = false;
+      posaljiPCLog(F("Svi sveti: mrtvacko zaustavljeno zbog tihog rezima"));
+    }
+    return;
+  }
+
+  if (!jeMrtvackoUTijeku()) {
+    if (pokusajZapocetiMrtvackoBezAutoStopa()) {
+      sviSvetiMrtvackoAktivno = true;
+      posaljiPCLog(F("Svi sveti: mrtvacko pokrenuto prema blagdanskom rasporedu"));
+    }
+    return;
+  }
+
+  if (!sviSvetiMrtvackoAktivno) {
+    // Mrtvacko je vec moglo biti pokrenuto rucno; ne preuzimamo ga za automatsko gasenje.
+    return;
+  }
 }
 
 static void osvjeziDnevniRaspored(const DateTime& sada) {
@@ -347,6 +614,17 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
     return;
   }
 
+  if (trebaPreskocitiSuncevDogadajZbogSvihSvetih(dogadaj, sada)) {
+    char log[88];
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("Suncevo zvonjenje preskoceno zbog Svih svetih: %s"),
+               nazivDogadajaTekst(dogadaj));
+    posaljiPCLog(log);
+    zadnjiOkinutiDatum[dogadaj] = datumKljuc;
+    return;
+  }
+
   zadnjiOkinutiDatum[dogadaj] = datumKljuc;
 
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
@@ -376,6 +654,7 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
 
   aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
   evidentirajJutarnjiStartOtkucavanja(dogadaj, sada);
+  zakaziBlagdanskoSlavljenjeAkoTreba(dogadaj, sada);
 
   char log[96];
   snprintf_P(log, sizeof(log),
@@ -423,6 +702,7 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
   }
 
   aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
+  zakaziBlagdanskoSlavljenjeAkoTreba(SUNCEVI_DOGADAJ_PODNE, sada);
 
   char log[64];
   snprintf_P(log, sizeof(log), PSTR("Suncevo zvonjenje: podne -> ZVONO%u u 12:00:30"), zvono);
@@ -432,9 +712,15 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
 }  // namespace
 
 void inicijalizirajSuncevuAutomatiku() {
+  pinMode(PIN_RELEJ_NOCNE_RASVJETE, OUTPUT);
+  postaviRelejNocneRasvjete(false);
+  nocnaRasvjetaUkljucena = false;
   raspored.valjano = false;
   raspored.datumKljuc = 0;
   zakazanoZvonjenje.aktivno = false;
+  zakazanoBlagdanskoSlavljenje.aktivno = false;
+  zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+  sviSvetiMrtvackoAktivno = false;
   for (uint8_t i = 0; i < SUNCEVI_DOGADAJ_BROJ; ++i) {
     raspored.minute[i] = -1;
     zadnjiOkinutiDatum[i] = 0;
@@ -448,6 +734,14 @@ void inicijalizirajSuncevuAutomatiku() {
   zadnjaSirinaE5 = 0x7FFFFFFFL;
   zadnjaDuzinaE5 = 0x7FFFFFFFL;
   zadnjaMaskaDogadaja = 0xFF;
+
+  // Ako se toranjski sat podigne usred noci, nocna rasvjeta ne smije cekati
+  // sljedeci puni ciklus automatike nego odmah zauzeti ispravno stanje.
+  const DateTime sada = dohvatiTrenutnoVrijeme();
+  if (sada.unixtime() != 0) {
+    osigurajDnevniRaspored(sada);
+    osvjeziNocnuRasvjetu(sada);
+  }
 }
 
 void upravljajSuncevomAutomatikom() {
@@ -457,6 +751,8 @@ void upravljajSuncevomAutomatikom() {
   }
 
   osigurajDnevniRaspored(sada);
+  osvjeziNocnuRasvjetu(sada);
+  upravljajMrtvackimZaSveSvete(sada);
 
   if (!raspored.valjano) {
     return;
@@ -477,6 +773,7 @@ void upravljajSuncevomAutomatikom() {
 
   obradiZakazanoSuncevoZvonjenje(sada);
   obradiFiksnoPodnevnoZvonjenje(sada);
+  obradiZakazanoBlagdanskoSlavljenje(sada);
 }
 
 bool dohvatiDanasnjeVrijemeSuncevogDogadajaMin(uint8_t dogadaj, int& minute) {

@@ -16,10 +16,6 @@ uint32_t dohvatiRtcSekundniBrojac();
 void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
                           bool imaEksplicitanDST = false,
                           bool dstAktivanIzvori = false);
-RezultatProvjereSinkronizacije azurirajVrijemeIzDCF(
-    const DateTime& dcfVrijeme,
-    bool imaEksplicitanDST = false,
-    bool dstAktivanIzvori = false);
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 
 const char* dohvatiOznakuIzvoraVremena();
@@ -31,5 +27,5 @@ bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
 int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme);
 
 void oznaciPovratakNaRTC();
-void razvojnoResetirajIzvorSinkronizacijeNaRTC();
+void resetirajIzvorSinkronizacijeNaRTC();
 bool jeSinkronizacijaZastarjela();

@@ -2,6 +2,27 @@
 
 Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Mega 2560` u sustavu toranjskog sata. Glavni izvor istine i dalje ostaje [podesavanja_piny.h](C:/Users/Rato/Documents/GitHub/FILA33/main/podesavanja_piny.h), a ova datoteka sluzi kao pomoc pri spajanju, servisiranju i provjeri instalacije.
 
+## Brzi pregled izlaznih pinova
+
+Ovi pinovi su izlazi iz `Arduino Mega 2560` prema relejima, cekicima i signalnim lampicama toranjskog sata.
+
+| Pin | Izlaz | Tip | Aktivno stanje | Napomena |
+|---:|---|---|---|---|
+| `22` | Relej parne kazaljke | Relej | `HIGH` | Impuls kazaljki, parni korak |
+| `23` | Relej neparne kazaljke | Relej | `HIGH` | Impuls kazaljki, neparni korak |
+| `24` | Relej parne ploce | Relej | `HIGH` | Prva faza pomaka okretne ploce |
+| `25` | Relej neparne ploce | Relej | `HIGH` | Druga faza pomaka okretne ploce |
+| `26` | Zvono 1 | Relej | `HIGH` | Zvono 1, ukljucuje se preko automatike ili rucne sklopke |
+| `27` | Zvono 2 | Relej | `HIGH` | Zvono 2, ukljucuje se preko automatike ili rucne sklopke |
+| `28` | Cekic 1 - muski | Relej/izlaz cekica | `HIGH` | Satno otkucavanje, slavljenje i mrtvacko |
+| `29` | Cekic 2 - zenski | Relej/izlaz cekica | `HIGH` | Polusatno otkucavanje, slavljenje i mrtvacko |
+| `36` | Lampica Zvono 1 | LED izlaz | `HIGH` | Svijetli dok je stvarno ukljuceno zvono 1 |
+| `37` | Lampica Zvono 2 | LED izlaz | `HIGH` | Svijetli dok je stvarno ukljuceno zvono 2 |
+| `38` | Lampica Slavljenje | LED izlaz | `HIGH` / treptanje | Svijetli dok slavljenje radi, trepce dok ceka kraj inercije |
+| `39` | Lampica Mrtvacko | LED izlaz | `HIGH` / treptanje | Svijetli dok mrtvacko radi, trepce dok ceka kraj inercije |
+| `46` | Lampica tihog rezima | LED izlaz | `HIGH` | Svijetli kad je aktivan rucni ili uskrsni tihi rezim |
+| `47` | Relej nocne rasvjete | Relej | `HIGH` | Ukljucen nocu prema suncevoj automatici |
+
 ## Releji kazaljki
 
 | Funkcija | Pin | Napomena |
@@ -25,6 +46,12 @@ Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Me
 | Cekic 1 - muski | `28` | Satno otkucavanje i posebni nacini |
 | Cekic 2 - zenski | `29` | Polusatno otkucavanje i posebni nacini |
 
+## Nocna rasvjeta
+
+| Funkcija | Pin | Napomena |
+|---|---:|---|
+| Relej nocne rasvjete | `47` | `HIGH = nocna rasvjeta ukljucena` |
+
 ## Ulazi okretne ploce
 
 | Funkcija | Pin | Napomena |
@@ -39,8 +66,6 @@ Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Me
 
 | Funkcija | Pin | Napomena |
 |---|---:|---|
-| DCF signal | `35` | `LOW = impuls` |
-| DCF aktivacija prijemnika | `A9` | Opcionalni izlaz za `P1` DCF prijemnika |
 | RTC SQW 1 Hz | `2` | `DS3231 SQW` takt za precizno okidanje |
 
 ## I2C sabirnica
@@ -87,8 +112,8 @@ Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Me
 |---|---:|---|
 | Lampica Zvono 1 | `36` | `HIGH = upaljeno` |
 | Lampica Zvono 2 | `37` | `HIGH = upaljeno` |
-| Lampica Slavljenje | `38` | `HIGH = upaljeno` |
-| Lampica Mrtvacko | `39` | `HIGH = upaljeno` |
+| Lampica Slavljenje | `38` | `HIGH = upaljeno`, trepce ako slavljenje ceka kraj inercije |
+| Lampica Mrtvacko | `39` | `HIGH = upaljeno`, trepce ako mrtvacko ceka kraj inercije |
 | Lampica Tihi rezim | `46` | `HIGH = upaljeno` |
 
 ## Thumbwheel za mrtvacko zvono
@@ -135,10 +160,11 @@ Aktualna postavka firmwarea:
 - `18-19` -> `Serial1` za buduci `Raspberry Pi`
 - `20-21` -> `I2C`
 - `22-29` -> releji kazaljki, ploce, zvona i cekica
-- `30-35` -> ulazi ploce i `DCF`
+- `30-34` -> ulazi ploce
 - `36-39`, `46` -> signalne lampice
 - `41-45` -> tipke i sklopke
-- `A1-A9` -> thumbwheel i `DCF` aktivacija
+- `47` -> relej nocne rasvjete
+- `A1-A8` -> thumbwheel
 
 ## Napomena za razvoj
 

@@ -29,6 +29,7 @@ const unsigned long MRTVACKO_PAUZA_MS = 10000UL;
 const unsigned long MRTVACKO_MOD2_TRAJANJE_IMPULSA_MS = 300UL;
 const unsigned long MRTVACKO_MOD2_PAUZA_NAKON_CEKIC1_MS = 700UL;
 const unsigned long MRTVACKO_MOD2_PAUZA_NAKON_CEKIC2_MS = 3700UL;
+const unsigned long TREPTANJE_LAMPICE_CEKANJA_MS = 500UL;
 
 enum ModMrtvackog {
   MOD_MRTVACKO_KLASICNO = 1,
@@ -63,11 +64,23 @@ struct MrtvackoStanje {
   bool autoStopUkljucen;
   unsigned long autoStopNakonMs;
   uint8_t zadanoTrajanjeMin;
+  bool ignorirajThumbwheel;
 };
 
 SlavljenjeStanje slavljenje = {false, 0UL, 0, 1, 0UL, false, -1};
 MrtvackoStanje mrtvacko = {
-    false, 0UL, false, 0UL, MOD_MRTVACKO_KLASICNO, MRTVACKO_FAZA_OBA_CEKICA, false, 0UL, 0};
+    false, 0UL, false, 0UL, MOD_MRTVACKO_KLASICNO, MRTVACKO_FAZA_OBA_CEKICA, false, 0UL, 0, false};
+bool slavljenjeNaCekanju = false;
+bool mrtvackoNaCekanju = false;
+
+void osvjeziLampicePosebnihNacina(unsigned long sadaMs) {
+  const bool treptajUkljucen = ((sadaMs / TREPTANJE_LAMPICE_CEKANJA_MS) % 2UL) == 0UL;
+
+  digitalWrite(PIN_LAMPICA_SLAVLJENJE,
+               slavljenje.aktivno ? HIGH : (slavljenjeNaCekanju && treptajUkljucen ? HIGH : LOW));
+  digitalWrite(PIN_LAMPICA_MRTVACKO,
+               mrtvacko.aktivno ? HIGH : (mrtvackoNaCekanju && treptajUkljucen ? HIGH : LOW));
+}
 
 void posaljiLogPromjeneMrtvackogTimer(const MrtvackoStanje& stanje) {
   char log[96];
@@ -242,9 +255,11 @@ void azurirajMrtvacko(unsigned long sadaMs) {
     return;
   }
 
-  // Ako se timer na thumbwheelu promijeni tijekom rada, nova vrijednost
-  // odmah postaje autoritet i restarta lokalno odbrojavanje mrtvackog.
-  primijeniTrajanjeMrtvackogIzThumbwheela(sadaMs, false);
+  // Ako se timer na thumbwheelu promijeni tijekom rucnog rada, nova vrijednost
+  // odmah postaje autoritet. Automatsko mrtvacko za Svi sveti ga namjerno ignorira.
+  if (!mrtvacko.ignorirajThumbwheel) {
+    primijeniTrajanjeMrtvackogIzThumbwheela(sadaMs, false);
+  }
 
   if (mrtvacko.autoStopUkljucen) {
     const unsigned long protekloOdPocetka = sadaMs - mrtvacko.vrijemePocetkaMs;
@@ -308,12 +323,21 @@ void provjeriPrekidacSlavljenja() {
 
   if (novoStanje == SWITCH_PRESSED) {
     if (!slavljenje.aktivno) {
-      zapocniSlavljenje();
-      posaljiPCLog(F("Prekidac slavljenja: ukljuceno"));
+      if (jeOperacijaCekicaDozvoljena() && !mrtvacko.aktivno) {
+        slavljenjeNaCekanju = false;
+        zapocniSlavljenje();
+        posaljiPCLog(F("Prekidac slavljenja: ukljuceno"));
+      } else {
+        slavljenjeNaCekanju = true;
+        posaljiPCLog(F("Prekidac slavljenja: zahtjev na cekanju do kraja inercije/blokade"));
+      }
     }
-  } else if (slavljenje.aktivno) {
-    zaustaviSlavljenje();
-    posaljiPCLog(F("Prekidac slavljenja: iskljuceno"));
+  } else {
+    slavljenjeNaCekanju = false;
+    if (slavljenje.aktivno) {
+      zaustaviSlavljenje();
+      posaljiPCLog(F("Prekidac slavljenja: iskljuceno"));
+    }
   }
 }
 
@@ -325,13 +349,98 @@ void provjeriDugmeMrtvackog() {
 
   if (novoStanje == SWITCH_PRESSED) {
     if (mrtvacko.aktivno) {
+      mrtvackoNaCekanju = false;
       zaustaviMrtvacko();
       posaljiPCLog(F("Dugme: mrtvacko zaustavljeno"));
+    } else if (mrtvackoNaCekanju) {
+      mrtvackoNaCekanju = false;
+      posaljiPCLog(F("Dugme: mrtvacko skinuto s cekanja"));
     } else {
-      zapocniMrtvacko();
-      posaljiPCLog(F("Dugme: mrtvacko pokrenuto"));
+      if (jeOperacijaCekicaDozvoljena() && !slavljenje.aktivno) {
+        mrtvackoNaCekanju = false;
+        zapocniMrtvacko();
+        posaljiPCLog(F("Dugme: mrtvacko pokrenuto"));
+      } else {
+        mrtvackoNaCekanju = true;
+        posaljiPCLog(F("Dugme: mrtvacko na cekanju do kraja inercije/blokade"));
+      }
     }
   }
+}
+
+void obradiCekanjePosebnihNacina() {
+  if (slavljenjeNaCekanju &&
+      !slavljenje.aktivno &&
+      !mrtvacko.aktivno &&
+      digitalRead(PIN_KEY_CELEBRATION) == LOW &&
+      jeOperacijaCekicaDozvoljena()) {
+    slavljenjeNaCekanju = false;
+    zapocniSlavljenje();
+    posaljiPCLog(F("Slavljenje: automatski pokrecem nakon zavrsetka inercije/blokade"));
+  }
+
+  if (mrtvackoNaCekanju &&
+      !mrtvacko.aktivno &&
+      !slavljenje.aktivno &&
+      jeOperacijaCekicaDozvoljena()) {
+    mrtvackoNaCekanju = false;
+    zapocniMrtvacko();
+    posaljiPCLog(F("Mrtvacko: automatski pokrecem nakon zavrsetka inercije/blokade"));
+  }
+}
+
+bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokirano) {
+  const unsigned long sadaMs = millis();
+  const uint8_t modMrtvackog = dohvatiModMrtvackog();
+
+  if (!jeOperacijaCekicaDozvoljena()) {
+    if (postaviCekanjeAkoBlokirano) {
+      mrtvackoNaCekanju = true;
+      posaljiPCLog(F("Mrtvacko: ne moze se odmah pokrenuti, ostaje na cekanju"));
+    }
+    return false;
+  }
+
+  if (slavljenje.aktivno) {
+    if (postaviCekanjeAkoBlokirano) {
+      mrtvackoNaCekanju = true;
+      posaljiPCLog(F("Mrtvacko: slavljenje je aktivno, zahtjev ostaje na cekanju"));
+    }
+    return false;
+  }
+
+  mrtvackoNaCekanju = false;
+  prekiniAktivnoOtkucavanjeZbogPosebnogNacina(F("mrtvacko preuzima cekice toranjskog sata"));
+
+  mrtvacko.aktivno = true;
+  mrtvacko.vrijemePocetkaMs = sadaMs;
+  mrtvacko.cekiciAktivni = true;
+  mrtvacko.vrijemeFazeMs = sadaMs;
+  mrtvacko.aktivniMod = modMrtvackog;
+  mrtvacko.ignorirajThumbwheel = !koristiThumbwheel;
+  digitalWrite(PIN_LAMPICA_MRTVACKO, HIGH);
+  if (koristiThumbwheel) {
+    primijeniTrajanjeMrtvackogIzThumbwheela(sadaMs, true);
+  } else {
+    mrtvacko.zadanoTrajanjeMin = 0;
+    mrtvacko.autoStopUkljucen = false;
+    mrtvacko.autoStopNakonMs = 0UL;
+  }
+
+  if (modMrtvackog == MOD_MRTVACKO_SEKVENCIJALNO) {
+    mrtvacko.faza = MRTVACKO_FAZA_CEKIC1;
+    aktivirajJedanCekicZaPosebniNacin(PIN_CEKIC_MUSKI, MRTVACKO_MOD2_TRAJANJE_IMPULSA_MS);
+  } else {
+    mrtvacko.faza = MRTVACKO_FAZA_OBA_CEKICA;
+    aktivirajObaCekicaZaPosebniNacin(dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs());
+  }
+
+  posaljiLogStartaMrtvackog(modMrtvackog,
+                            dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
+                            mrtvacko.autoStopUkljucen,
+                            mrtvacko.zadanoTrajanjeMin);
+  signalizirajFuneral_Mode();
+  return true;
 }
 
 }  // namespace
@@ -361,14 +470,19 @@ void inicijalizirajSlavljenjeIMrtvacko() {
   mrtvacko.autoStopUkljucen = false;
   mrtvacko.autoStopNakonMs = 0UL;
   mrtvacko.zadanoTrajanjeMin = 0;
+  mrtvacko.ignorirajThumbwheel = false;
+  slavljenjeNaCekanju = false;
+  mrtvackoNaCekanju = false;
 }
 
 void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs) {
   uskladiStanjeNakonSigurnosnogLimita(sadaMs);
   provjeriPrekidacSlavljenja();
   provjeriDugmeMrtvackog();
+  obradiCekanjePosebnihNacina();
   azurirajSlavljenje(sadaMs);
   azurirajMrtvacko(sadaMs);
+  osvjeziLampicePosebnihNacina(sadaMs);
 }
 
 void zapocniSlavljenje() {
@@ -376,15 +490,18 @@ void zapocniSlavljenje() {
   const uint8_t modSlavljenja = dohvatiModSlavljenja();
 
   if (!jeOperacijaCekicaDozvoljena()) {
-    posaljiPCLog(F("Slavljenje: ne moze se pokrenuti (inercija ili blok)"));
+    slavljenjeNaCekanju = true;
+    posaljiPCLog(F("Slavljenje: ne moze se odmah pokrenuti, ostaje na cekanju"));
     return;
   }
 
   if (mrtvacko.aktivno) {
-    posaljiPCLog(F("Slavljenje: odbijeno - mrtvacko je aktivno (mutual exclusion)"));
+    slavljenjeNaCekanju = true;
+    posaljiPCLog(F("Slavljenje: mrtvacko je aktivno, zahtjev ostaje na cekanju"));
     return;
   }
 
+  slavljenjeNaCekanju = false;
   prekiniAktivnoOtkucavanjeZbogPosebnogNacina(F("slavljenje preuzima cekice toranjskog sata"));
 
   slavljenje.aktivno = true;
@@ -407,6 +524,7 @@ void zaustaviSlavljenje() {
     return;
   }
 
+  slavljenjeNaCekanju = false;
   slavljenje.aktivno = false;
   deaktivirajObaCekicaZaPosebniNacin();
   slavljenje.cekicAktivan = false;
@@ -420,41 +538,11 @@ bool jeSlavljenjeUTijeku() {
 }
 
 void zapocniMrtvacko() {
-  const unsigned long sadaMs = millis();
-  const uint8_t modMrtvackog = dohvatiModMrtvackog();
+  (void)pokreniMrtvackoInterno(true, true);
+}
 
-  if (!jeOperacijaCekicaDozvoljena()) {
-    posaljiPCLog(F("Mrtvacko: ne moze se pokrenuti (inercija ili blok)"));
-    return;
-  }
-
-  if (slavljenje.aktivno) {
-    posaljiPCLog(F("Mrtvacko: odbijeno - slavljenje je aktivno (mutual exclusion)"));
-    return;
-  }
-
-  prekiniAktivnoOtkucavanjeZbogPosebnogNacina(F("mrtvacko preuzima cekice toranjskog sata"));
-
-  mrtvacko.aktivno = true;
-  mrtvacko.vrijemePocetkaMs = sadaMs;
-  mrtvacko.cekiciAktivni = true;
-  mrtvacko.vrijemeFazeMs = sadaMs;
-  mrtvacko.aktivniMod = modMrtvackog;
-  digitalWrite(PIN_LAMPICA_MRTVACKO, HIGH);
-  primijeniTrajanjeMrtvackogIzThumbwheela(sadaMs, true);
-  if (modMrtvackog == MOD_MRTVACKO_SEKVENCIJALNO) {
-    mrtvacko.faza = MRTVACKO_FAZA_CEKIC1;
-    aktivirajJedanCekicZaPosebniNacin(PIN_CEKIC_MUSKI, MRTVACKO_MOD2_TRAJANJE_IMPULSA_MS);
-  } else {
-    mrtvacko.faza = MRTVACKO_FAZA_OBA_CEKICA;
-    aktivirajObaCekicaZaPosebniNacin(dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs());
-  }
-
-  posaljiLogStartaMrtvackog(modMrtvackog,
-                            dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
-                            mrtvacko.autoStopUkljucen,
-                            mrtvacko.zadanoTrajanjeMin);
-  signalizirajFuneral_Mode();
+bool pokusajZapocetiMrtvackoBezAutoStopa() {
+  return pokreniMrtvackoInterno(false, false);
 }
 
 void zaustaviMrtvacko() {
@@ -462,6 +550,7 @@ void zaustaviMrtvacko() {
     return;
   }
 
+  mrtvackoNaCekanju = false;
   mrtvacko.aktivno = false;
   deaktivirajObaCekicaZaPosebniNacin();
   mrtvacko.cekiciAktivni = false;
@@ -470,6 +559,7 @@ void zaustaviMrtvacko() {
   mrtvacko.autoStopUkljucen = false;
   mrtvacko.autoStopNakonMs = 0UL;
   mrtvacko.zadanoTrajanjeMin = 0;
+  mrtvacko.ignorirajThumbwheel = false;
   digitalWrite(PIN_LAMPICA_MRTVACKO, LOW);
   posaljiPCLog(F("Mrtvacko: zaustavljeno"));
 }

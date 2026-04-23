@@ -1,5 +1,5 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
-// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/DCF) + oznaka dana za cavle (R/N)
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/MAN) + oznaka dana za cavle (R/N)
 // + zvjezdica aktivnosti na zadnjem mjestu.
 // Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery) + WiFi oznaka na 16. znaku.
 
@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "time_glob.h"
-#include "dcf_sync.h"
 #include "otkucavanje.h"
 #include "postavke.h"
 #include "zvonjenje.h"
@@ -26,7 +25,6 @@ static char line1_buffer[17];
 static char zadnje_ispisani_redak1[17];
 static unsigned long last_line1_refresh = 0;
 static uint32_t last_line1_rtc_tick = 0xFFFFFFFFUL;
-static uint32_t last_line1_dcf_visual_tick = 0xFFFFFFFFUL;
 
 static char wifi_status = ' ';
 
@@ -88,6 +86,7 @@ static const char LCD_PORUKA_ERR_I2C[] PROGMEM = "ERROR: I2C comm ";
 static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
 static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
+static const char LCD_PORUKA_INERCIJA[] PROGMEM = "Smirivanje zvona";
 
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
@@ -220,10 +219,7 @@ void inicijalizirajLCD() {
 static void build_line1() {
   DateTime now = dohvatiTrenutnoVrijeme();
   char source_str[4];
-  if (jeDCFSinkronizacijaUTijeku()) {
-    strncpy(source_str, jeDCFImpulsAktivan() ? "---" : "   ", sizeof(source_str) - 1);
-    source_str[sizeof(source_str) - 1] = '\0';
-  } else if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     strncpy(source_str, "ERR", sizeof(source_str) - 1);
     source_str[sizeof(source_str) - 1] = '\0';
   } else {
@@ -308,6 +304,14 @@ static void build_line2() {
   // Dinamicka poruka za mrtvacko zvono mora nestati cim se nacin rada ugasi.
   if (current_activity == ACTIVITY_FUNERAL && !jeMrtvackoUTijeku()) {
     ocistiAktivnostDrugogRetka();
+  }
+
+  if (current_activity == ACTIVITY_NONE && jeLiInerciaAktivna()) {
+    char poruka[17];
+    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_INERCIJA);
+    pripremiRedakZaLCD(poruka, line2_buffer);
+    otkucavanje_poruka_aktivna = false;
+    return;
   }
 
   if (wifi_ip_prikaz_aktivan) {
@@ -450,29 +454,17 @@ void prikaziSat() {
 
   const unsigned long now_ms = millis();
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
-  const uint32_t dcfVisualTick = dohvatiDcfVizualniBrojac();
-  const bool dcfPrijemAktivan = jeDCFSinkronizacijaUTijeku();
 
   bool trebaOsvjezitiRedak1 = false;
-  if (dcfVisualTick != last_line1_dcf_visual_tick) {
-    if (dcfVisualTick != last_line1_dcf_visual_tick) {
-      last_line1_dcf_visual_tick = dcfVisualTick;
-    }
-    last_line1_refresh = now_ms;
-    trebaOsvjezitiRedak1 = true;
-  } else if (dcfPrijemAktivan) {
-    trebaOsvjezitiRedak1 = false;
-  } else if (jeRtcSqwAktivan()) {
+  if (jeRtcSqwAktivan()) {
     if (rtcTick != last_line1_rtc_tick) {
       last_line1_rtc_tick = rtcTick;
-      last_line1_dcf_visual_tick = dcfVisualTick;
       last_line1_refresh = now_ms;
       trebaOsvjezitiRedak1 = true;
     }
   } else if (last_line1_refresh == 0 || (now_ms - last_line1_refresh) >= 1000UL) {
     last_line1_refresh = now_ms;
     last_line1_rtc_tick = rtcTick;
-    last_line1_dcf_visual_tick = dcfVisualTick;
     trebaOsvjezitiRedak1 = true;
   }
 

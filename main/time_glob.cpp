@@ -24,8 +24,7 @@ static DateTime trenutnoVrijeme;
 enum IzvorVremena {
   IZ_RTC,
   IZ_MAN,
-  IZ_NTP,
-  IZ_DCF
+  IZ_NTP
 };
 
 static IzvorVremena trenutniIzvor = IZ_RTC;
@@ -91,9 +90,6 @@ static void azurirajOznakuIzvora() {
       break;
     case IZ_NTP:
       strncpy(oznakaizvora, "NTP", sizeof(oznakaizvora) - 1);
-      break;
-    case IZ_DCF:
-      strncpy(oznakaizvora, "DCF", sizeof(oznakaizvora) - 1);
       break;
     default:
       strncpy(oznakaizvora, "???", sizeof(oznakaizvora) - 1);
@@ -363,15 +359,13 @@ static void ucitajZadnjuSinkronizaciju() {
                           zs)) {
     zadnjaSinkronizacija = DateTime(zs.timestamp);
     zadnjaSinkronizacijaMs = 0;
-    if (zs.izvor == IZ_MAN) {
-      zadnjiPotvrdeniIzvor = IZ_MAN;
-    } else if (zs.izvor == IZ_NTP) {
-      zadnjiPotvrdeniIzvor = IZ_NTP;
-    } else if (zs.izvor == IZ_DCF) {
-      zadnjiPotvrdeniIzvor = IZ_DCF;
-    } else {
-      zadnjiPotvrdeniIzvor = IZ_RTC;
-    }
+      if (zs.izvor == IZ_MAN) {
+        zadnjiPotvrdeniIzvor = IZ_MAN;
+      } else if (zs.izvor == IZ_NTP) {
+        zadnjiPotvrdeniIzvor = IZ_NTP;
+      } else {
+        zadnjiPotvrdeniIzvor = IZ_RTC;
+      }
   } else {
     zadnjaSinkronizacija = DateTime((uint32_t)0);
     zadnjaSinkronizacijaMs = 0;
@@ -426,9 +420,9 @@ void inicijalizirajRTC() {
     if (rtc.lostPower()) {
       posaljiPCLog(F("RTC: baterija je prazna, vrijeme nije pouzdano"));
       rtcBaterijaOk = false;
-      postaviVrijemePotvrdjenoZaAutomatiku(
-          false,
-          F("Vrijeme: cekam NTP/DCF ili rucnu potvrdu prije aktivacije automatike"));
+        postaviVrijemePotvrdjenoZaAutomatiku(
+            false,
+            F("Vrijeme: cekam NTP ili rucnu potvrdu prije aktivacije automatike"));
       signalizirajUpozorenjeRtcBaterije();
       // Postavi minimalnu vrijednost
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -516,8 +510,7 @@ DateTime dohvatiTrenutnoVrijeme() {
     }
   }
 
-  if ((zadnjiPotvrdeniIzvor == IZ_NTP || zadnjiPotvrdeniIzvor == IZ_DCF) &&
-      jeSinkronizacijaZastarjela()) {
+  if (zadnjiPotvrdeniIzvor == IZ_NTP && jeSinkronizacijaZastarjela()) {
     oznaciPovratakNaRTC();
   }
 
@@ -613,56 +606,6 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
   return;
 }
 
-RezultatProvjereSinkronizacije azurirajVrijemeIzDCF(const DateTime& dcfVrijeme,
-                                                    bool imaEksplicitanDST,
-                                                    bool dstAktivanIzvori) {
-  otkaziZakazanuNtpSinkronizaciju();
-
-  // Provjera validnosti DCF vremena
-  if (!jeVrijemeURasponuPouzdanosti(dcfVrijeme)) {
-    posaljiPCLog(F("DCF: neispravno vrijeme, odbacujem"));
-    return SINKRONIZACIJA_ODBIJENA;
-  }
-  
-  // Ako je NTP najnoviji izvor, ne mijenjaj
-  if (zadnjiPotvrdeniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela()) {
-    return SINKRONIZACIJA_ODBIJENA;
-  }
-
-  const RezultatProvjereSinkronizacije rezultatProvjere =
-      potvrdiIliOdbijSumnjivuSinkronizaciju(dcfVrijeme, IZ_DCF, F("DCF"));
-  if (rezultatProvjere != SINKRONIZACIJA_PRIHVACENA) {
-    return rezultatProvjere;
-  }
-  // Azuriranje RTC-a
-  if (rtc.begin()) {
-    rtc.adjust(dcfVrijeme);
-    rtcBaterijaOk = true;
-  }
-  
-  trenutnoVrijeme = dcfVrijeme;
-  dstAktivan = odrediDSTStatusSinkronizacije(
-      dcfVrijeme,
-      imaEksplicitanDST,
-      dstAktivanIzvori);
-  spremiDSTStatus();
-  zadnjaSinkronizacija = dcfVrijeme;
-  trenutniIzvor = IZ_DCF;
-  zadnjiPotvrdeniIzvor = IZ_DCF;
-  ocistiSumnjivuSinkronizaciju();
-  postaviVrijemePotvrdjenoZaAutomatiku(
-      true,
-      F("Vrijeme: potvrdeno iz DCF-a, automatika toranjskog sata je aktivna"));
-  azurirajOznakuIzvora();
-  spremiZadnjuSinkronizaciju();
-  char vrijemeTekst[24];
-  char log[64];
-  formatirajDatumIVrijeme(dcfVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
-  snprintf_P(log, sizeof(log), PSTR("Vrijeme azurirano iz DCF: %s"), vrijemeTekst);
-  posaljiPCLog(log);
-  return SINKRONIZACIJA_PRIHVACENA;
-}
-
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   otkaziZakazanuNtpSinkronizaciju();
 
@@ -735,22 +678,22 @@ int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme) {
 }
 
 void oznaciPovratakNaRTC() {
-  // Ako je sat radio iz potvrdenog NTP/DCF izvora, vrati prikaz i rad na RTC.
+  // Ako je sat radio iz potvrdenog NTP izvora, vrati prikaz i rad na RTC.
   if (trenutniIzvor != IZ_RTC) {
     trenutniIzvor = IZ_RTC;
     azurirajOznakuIzvora();
-    posaljiPCLog(F("Povratak na RTC nakon vise od 24 sata bez nove NTP/DCF sinkronizacije"));
+    posaljiPCLog(F("Povratak na RTC nakon vise od 24 sata bez nove NTP sinkronizacije"));
   }
 }
 
-void razvojnoResetirajIzvorSinkronizacijeNaRTC() {
+void resetirajIzvorSinkronizacijeNaRTC() {
   zadnjaSinkronizacija = DateTime((uint32_t)0);
   zadnjaSinkronizacijaMs = 0;
   trenutniIzvor = IZ_RTC;
   zadnjiPotvrdeniIzvor = IZ_RTC;
   ocistiSumnjivuSinkronizaciju();
   azurirajOznakuIzvora();
-  posaljiPCLog(F("Vrijeme: razvojni reset izvora sinkronizacije na RTC"));
+  posaljiPCLog(F("Vrijeme: izvor sinkronizacije vracen na RTC"));
 }
 
 bool jeSinkronizacijaZastarjela() {

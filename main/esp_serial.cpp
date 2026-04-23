@@ -14,7 +14,6 @@
 #include "okretna_ploca.h"
 #include "postavke.h"
 #include "lcd_display.h"
-#include "dcf_sync.h"
 #include "misna_automatika.h"
 #include "sunceva_automatika.h"
 
@@ -145,7 +144,7 @@ static void posaljiStatusESPU() {
   char statusLinija[256];
   snprintf_P(statusLinija,
              sizeof(statusLinija),
-             PSTR("STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|dcf=%d|dcfr=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d"),
+             PSTR("STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d"),
              vrijemeIso,
              dohvatiOznakuIzvoraVremena(),
              jeVrijemePotvrdjenoZaAutomatiku() ? 1 : 0,
@@ -153,8 +152,6 @@ static void posaljiStatusESPU() {
              0,
              0,
              jeNTPOmogucen() ? 1 : 0,
-             jeDCFOmogucen() ? 1 : 0,
-             jeDCFSinkronizacijaUTijeku() ? 1 : 0,
              suKazaljkeUSinkronu() ? 1 : 0,
              dohvatiMemoriraneKazaljkeMinuta(),
              jePlocaUSinkronu() ? 1 : 0,
@@ -401,10 +398,6 @@ static bool jeSigurnaMinutaZaNTPZahtjev(const DateTime& sada) {
 }
 
 static bool mehanikaTornjskogSataMirujeZaNTP() {
-  if (jeDCFSinkronizacijaUTijeku()) {
-    return false;
-  }
-
   if (jeOtkucavanjeUTijeku()) {
     return false;
   }
@@ -834,7 +827,6 @@ static void obradiESPRedak() {
     else if (strcmp(komanda, "MISA_RADNA") == 0)     uspjeh = pokreniESPMisnuNajavuRadniDan();
     else if (strcmp(komanda, "MISA_NEDJELJA") == 0)  uspjeh = pokreniESPMisnuNajavuNedjelja();
     else if (strcmp(komanda, "MISA_BLAGDAN") == 0)   uspjeh = pokreniESPMisnuNajavuBlagdan();
-    else if (strcmp(komanda, "DCF_START") == 0)       pokreniRucniDCFPrijem();
     else prepoznataKomanda = false;
 
     if (!prepoznataKomanda) {

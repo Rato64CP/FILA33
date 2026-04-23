@@ -239,7 +239,7 @@ bool obrisiSveMetapodatke() {
     }
   }
 
-  posaljiPCLog(F("WearLeveling: razvojni metapodaci obrisani"));
+  posaljiPCLog(F("WearLeveling: metapodaci obrisani"));
   return true;
 }
 

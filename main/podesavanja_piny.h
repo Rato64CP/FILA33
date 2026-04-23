@@ -35,10 +35,8 @@
 #define PIN_ULAZA_PLOCE_5             34  // Cavao 5
 
 // ==================== TIME SYNCHRONIZATION INPUTS ====================
-// DCF77 receiver - external synchronization source
+// RTC SQW ostaje jedini lokalni takt sinkronizacije vremena toranjskog sata.
 
-#define PIN_DCF_SIGNAL                35  // DCF77 digital signal (LOW = impulse)
-#define PIN_DCF_AKTIVACIJA            A9  // Opcionalni izlaz za P1 DCF prijemnika (LOW=ukljucen)
 #define PIN_RTC_SQW                   2   // DS3231 SQW 1 Hz takt za precizno okidanje
 
 // ==================== I2C BUS ====================
@@ -83,6 +81,12 @@
 #define PIN_LAMPICA_ZVONO_2           37  // LED za ZVONO 2 (HIGH=upali)
 #define PIN_LAMPICA_SLAVLJENJE        38  // LED za slavljenje (HIGH=upali)
 #define PIN_LAMPICA_MRTVACKO          39  // LED za mrtvacko (HIGH=upali)
+
+// ==================== NOCNA RASVJETA ====================
+// Relej nocne rasvjete toranjskog sata, upravljan prema jutarnjem i vecernjem
+// suncevom dogadaju. Danju je OFF, nocu je ON.
+
+#define PIN_RELEJ_NOCNE_RASVJETE      47  // Relej nocne rasvjete (HIGH=ukljuci)
 
 // ==================== MANUAL BELL TOGGLE INPUTS ====================
 // Fizicke sklopke na GND za rucno upravljanje zvonima toranjskog sata
