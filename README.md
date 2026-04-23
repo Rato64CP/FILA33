@@ -1,6 +1,6 @@
 # 🕰️ Automatika Toranjskog Sata
 
-Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i vanjskog mreznog sloja (`ESP8266`, `ESP32` ili `Raspberry Pi` most).
+Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i ESP mreznog sloja.
 
 ## ✨ Sto sustav radi
 
@@ -16,7 +16,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 ## 🧭 Arhitektura
 
 - `Arduino Mega 2560` upravlja kazaljkama, okretnom plocom, zvonima, cekicima, lokalnim postavkama i recovery logikom
-- vanjski mrezni sloj (`ESP8266`, `ESP32` ili `Raspberry Pi`) sluzi za `WiFi`, `NTP`, `Home Assistant` integraciju i servisni API
+- ESP mrezni sloj sluzi za `WiFi`, `NTP`, bezicni servisni API i buduce integracije
 - `Mega 2560` je jedino mjesto istine za stanje toranjskog sata
 - osnovni rad sata mora ostati moguc i bez mreze
 
@@ -29,7 +29,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 
 ## 🔄 Serijska komunikacija
 
-- Mega trenutno koristi `Serial3` za ugradeni `ESP8266`, a `Serial1` je pripremljen za buduci `Raspberry Pi` most
+- Mega koristi `Serial3` za ugradeni `ESP8266` kao jedini aktivni mrezni most
 - aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
 - `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
@@ -39,7 +39,6 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 
 - `main/` - glavni firmware toranjskog sata za `Arduino Mega 2560`
 - `esp_firmware/` - pomocni firmware za `ESP8266` i `ESP32`
-- `pi_bridge/` - Python serijski most za `Raspberry Pi` i `Home Assistant`
 - `main/main.ino` - inicijalizacija i glavna petlja
 - `main/time_glob.*` - RTC, NTP, DST i prioriteti izvora vremena
 - `main/esp_serial.*` - serijska komunikacija s ESP modulom
@@ -110,7 +109,6 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 
 - [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
 - [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
-- [README za Raspberry Pi most](/C:/Users/Rato/Documents/GitHub/FILA33/pi_bridge/README.md)
 - [Tehnicka dokumentacija firmware sustava](/C:/Users/Rato/Documents/GitHub/FILA33/docs/tehnicka_dokumentacija_firmware_sustava.md)
 
 ## 🛠️ Napomene Za Razvoj

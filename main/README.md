@@ -17,8 +17,8 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 ## 🧭 Podjela poslova Mega / ESP
 
 - `Mega 2560` vodi sve radne odluke toranjskog sata
-- `ESP8266`, `ESP32` ili `Raspberry Pi` je samo pomocni mrezni sloj
-- vanjski mrezni sloj donosi WiFi, NTP, setup WiFi, Home Assistant integraciju i servisni API
+- `ESP8266` ili `ESP32` je samo pomocni mrezni sloj
+- vanjski mrezni sloj donosi WiFi, NTP, setup WiFi i bezicni servisni API
 - postavke rada sata vise se ne uredjuju preko ESP weba
 - stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`
 
@@ -49,7 +49,7 @@ Ova podmapa sadrzi glavni firmware za `Arduino Mega 2560`. Mega je glavni kontro
 ## 🔄 Serijska komunikacija s ESP-om
 
 - Mega trenutno koristi `Serial3` za ugradeni `ESP8266` na Mega+WiFi R3 plocici
-- `Serial1` ostaje pripremljen za buduci vanjski `Raspberry Pi` most
+- `Serial1` nije dio aktivnog mreznog puta; komunikacija prema ESP-u ostaje na `Serial3`
 - aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege

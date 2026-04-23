@@ -111,12 +111,10 @@
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
-// Serial1:        9600 baud   - priprema za vanjski Raspberry Pi 4B / HA serijski most
-//                              (Rx1=pin19, Tx1=pin18)
+// Serial1:        slobodno / rezerva (Rx1=pin19, Tx1=pin18)
 // Serial3:        9600 baud   - ugradeni ESP8266 na Mega+WiFi R3 plocici (Rx3=pin15, Tx3=pin14)
 
-// Dok Raspberry Pi most nije spreman, toranjski sat zadano ostaje na ugradenom ESP8266.
-// Za migraciju na Raspberry Pi kasnije promijeni na Serial1.
+// Toranjski sat koristi ESP kao jedini aktivni mrezni most i bezicni API sloj.
 #define ESP_SERIJSKI_PORT            Serial3
 
 // All PIN assignments consolidated in this single header file
