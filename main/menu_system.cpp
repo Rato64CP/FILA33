@@ -116,7 +116,7 @@ static int privremenaMinuta = 0;
 // ==================== MATICNI SAT / NTP ====================
 
 static bool ntpOmogucenUredjivanje = true;
-static uint8_t faza_postavki_maticnog_sata = 0; // 0 = sat, 1 = minuta, 2 = NTP
+static uint8_t faza_postavki_maticnog_sata = 0; // 0 = dan, 1 = mjesec, 2 = godina, 3 = sat, 4 = minuta, 5 = NTP
 
 // ==================== SUSTAV ====================
 
@@ -216,7 +216,6 @@ static int dohvatiPozicijuPloceIzUredjivanja() {
 }
 
 static bool dohvatiUnesenoVrijeme(int* sat, int* minuta);
-static void resetirajUnosVremena();
 
 static bool postaviVrijemeIzUnosaZaPlocu() {
   int sat = 0;
@@ -278,10 +277,6 @@ static int trajanjeZvonaRdMin = 2;
 static int trajanjeZvonaNedMin = 3;
 static int trajanjeSlavljenjaMin = 2;
 static int odgodaSlavljenjaSekundeUredjivanje = 15;
-static int brojMjestaZaCavleUredjivanje = 5;
-static int brojZvonaUredjivanje = 2;
-static uint8_t cavliRadniUredjivanje[4] = {1, 2, 0, 0};
-static uint8_t cavliNedjeljaUredjivanje[4] = {3, 4, 0, 0};
 static uint8_t faza_postavki_cavala = 0;
 
 static int prebaciTrajanjeStapicaMinute(int trenutno, int smjer) {
@@ -593,50 +588,17 @@ static void vratiNaGlavniMeniNaStavku(int indeks) {
   trenutnoStanje = MENU_STATE_MAIN_MENU;
 }
 
-static uint8_t ograniceniCavaoZaMeni(int vrijednost) {
-  if (vrijednost < 0) return 0;
-  if (vrijednost > brojMjestaZaCavleUredjivanje) return static_cast<uint8_t>(brojMjestaZaCavleUredjivanje);
-  return static_cast<uint8_t>(vrijednost);
-}
-
-static void sanitizirajRasporedCavalaUredjivanje() {
-  brojMjestaZaCavleUredjivanje = 5;
-  brojZvonaUredjivanje = 2;
-
-  for (uint8_t i = 0; i < 4; ++i) {
-    cavliRadniUredjivanje[i] = ograniceniCavaoZaMeni(cavliRadniUredjivanje[i]);
-    if (cavliRadniUredjivanje[i] > 4) {
-      cavliRadniUredjivanje[i] = 0;
-    }
-    cavliNedjeljaUredjivanje[i] = ograniceniCavaoZaMeni(cavliNedjeljaUredjivanje[i]);
-    if (cavliNedjeljaUredjivanje[i] > 4) {
-      cavliNedjeljaUredjivanje[i] = 0;
-    }
-  }
-  for (uint8_t i = 2; i < 4; ++i) {
-    cavliRadniUredjivanje[i] = 0;
-    cavliNedjeljaUredjivanje[i] = 0;
-  }
-  trajanjeZvonaRdMin = constrain(trajanjeZvonaRdMin, 2, 4);
-  trajanjeZvonaNedMin = constrain(trajanjeZvonaNedMin, 2, 4);
-  trajanjeSlavljenjaMin = constrain(trajanjeSlavljenjaMin, 2, 4);
-  odgodaSlavljenjaSekundeUredjivanje =
-      sanitizirajOdgoduSlavljenjaSekundeZaMeni(odgodaSlavljenjaSekundeUredjivanje);
-}
-
 static void ucitajPostavkeCavalaZaUredjivanje() {
-  brojMjestaZaCavleUredjivanje = dohvatiBrojMjestaZaCavle();
-  brojZvonaUredjivanje = dohvatiBrojZvona();
-  for (uint8_t i = 0; i < 4; ++i) {
-    cavliRadniUredjivanje[i] = dohvatiCavaoRadniZaZvono(i + 1);
-    cavliNedjeljaUredjivanje[i] = dohvatiCavaoNedjeljaZaZvono(i + 1);
-  }
   trajanjeZvonaRdMin = dohvatiTrajanjeZvonjenjaRadniMin();
   trajanjeZvonaNedMin = dohvatiTrajanjeZvonjenjaNedjeljaMin();
   trajanjeSlavljenjaMin = dohvatiTrajanjeSlavljenjaMin();
   odgodaSlavljenjaSekundeUredjivanje = dohvatiOdgoduSlavljenjaSekunde();
   faza_postavki_cavala = 0;
-  sanitizirajRasporedCavalaUredjivanje();
+  trajanjeZvonaRdMin = constrain(trajanjeZvonaRdMin, 2, 4);
+  trajanjeZvonaNedMin = constrain(trajanjeZvonaNedMin, 2, 4);
+  trajanjeSlavljenjaMin = constrain(trajanjeSlavljenjaMin, 2, 4);
+  odgodaSlavljenjaSekundeUredjivanje =
+      sanitizirajOdgoduSlavljenjaSekundeZaMeni(odgodaSlavljenjaSekundeUredjivanje);
 }
 
 static void ucitajTihiPeriodZaUredjivanje() {
@@ -726,13 +688,6 @@ static void pomakniStranicuSunca(int smjer) {
   }
 }
 
-static void prilagodiVrijednostCavla(uint8_t* vrijednost, int delta) {
-  int novaVrijednost = static_cast<int>(*vrijednost) + delta;
-  if (novaVrijednost < 0) novaVrijednost = brojMjestaZaCavleUredjivanje;
-  if (novaVrijednost > brojMjestaZaCavleUredjivanje) novaVrijednost = 0;
-  *vrijednost = static_cast<uint8_t>(novaVrijednost);
-}
-
 static int prilagodiSuncevuOdgoduZaKorak(int trenutnaOdgoda, int smjer) {
   int indeks = 0;
   int najmanjaRazlika = abs(trenutnaOdgoda - DOPUSTENE_SUNCEVE_ODGODE[0]);
@@ -817,24 +772,40 @@ static void prikaziGlavniMeni() {
 static void prikaziMaticniSatMenu() {
   char redak1[17];
   char redak2[17];
-  snprintf(redak1, sizeof(redak1), "RUCNO %02d:%02d", privremeniSat, privremenaMinuta);
+  snprintf(redak1,
+           sizeof(redak1),
+           "SAT %02d:%02d NTP%u",
+           privremeniSat,
+           privremenaMinuta,
+           ntpOmogucenUredjivanje ? 1U : 0U);
   snprintf(redak2,
            sizeof(redak2),
-           "NTP:%u",
-           ntpOmogucenUredjivanje ? 1U : 0U);
+           "DAT %02d.%02d.%04d",
+           privremeniDan,
+           privremeniMjesec,
+           privremenaGodina);
   prikaziPoruku(redak1, redak2);
 
   lcd.cursor();
   lcd.blink();
   switch (faza_postavki_maticnog_sata) {
     case 0:
-      lcd.setCursor(6, 0);
+      lcd.setCursor(4, 0);
       break;
     case 1:
-      lcd.setCursor(9, 0);
+      lcd.setCursor(7, 0);
+      break;
+    case 2:
+      lcd.setCursor(10, 0);
+      break;
+    case 3:
+      lcd.setCursor(4, 1);
+      break;
+    case 4:
+      lcd.setCursor(7, 1);
       break;
     default:
-      lcd.setCursor(4, 1);
+      lcd.setCursor(13, 1);
       break;
   }
 }
@@ -1246,15 +1217,24 @@ static void obradiKlucGlavniMeni(KeyEvent event) {
 static void obradiKlucMaticniSat(KeyEvent event) {
   switch (event) {
     case KEY_LEFT:
-      faza_postavki_maticnog_sata = (faza_postavki_maticnog_sata - 1 + 3) % 3;
+      faza_postavki_maticnog_sata = (faza_postavki_maticnog_sata - 1 + 6) % 6;
       break;
     case KEY_RIGHT:
-      faza_postavki_maticnog_sata = (faza_postavki_maticnog_sata + 1) % 3;
+      faza_postavki_maticnog_sata = (faza_postavki_maticnog_sata + 1) % 6;
       break;
     case KEY_UP:
       if (faza_postavki_maticnog_sata == 0) {
-        privremeniSat = (privremeniSat + 1) % 24;
+        const int brojDana = dohvatiBrojDanaUMjesecuUredjivanja(privremeniMjesec, privremenaGodina);
+        privremeniDan = (privremeniDan >= brojDana) ? 1 : (privremeniDan + 1);
       } else if (faza_postavki_maticnog_sata == 1) {
+        privremeniMjesec = (privremeniMjesec >= 12) ? 1 : (privremeniMjesec + 1);
+        sanitizirajDatumVrijemeMaticnogSata();
+      } else if (faza_postavki_maticnog_sata == 2) {
+        privremenaGodina = (privremenaGodina >= 2099) ? 2024 : (privremenaGodina + 1);
+        sanitizirajDatumVrijemeMaticnogSata();
+      } else if (faza_postavki_maticnog_sata == 3) {
+        privremeniSat = (privremeniSat + 1) % 24;
+      } else if (faza_postavki_maticnog_sata == 4) {
         privremenaMinuta = (privremenaMinuta + 1) % 60;
       } else {
         ntpOmogucenUredjivanje = !ntpOmogucenUredjivanje;
@@ -1262,8 +1242,17 @@ static void obradiKlucMaticniSat(KeyEvent event) {
       break;
     case KEY_DOWN:
       if (faza_postavki_maticnog_sata == 0) {
-        privremeniSat = (privremeniSat - 1 + 24) % 24;
+        const int brojDana = dohvatiBrojDanaUMjesecuUredjivanja(privremeniMjesec, privremenaGodina);
+        privremeniDan = (privremeniDan <= 1) ? brojDana : (privremeniDan - 1);
       } else if (faza_postavki_maticnog_sata == 1) {
+        privremeniMjesec = (privremeniMjesec <= 1) ? 12 : (privremeniMjesec - 1);
+        sanitizirajDatumVrijemeMaticnogSata();
+      } else if (faza_postavki_maticnog_sata == 2) {
+        privremenaGodina = (privremenaGodina <= 2024) ? 2099 : (privremenaGodina - 1);
+        sanitizirajDatumVrijemeMaticnogSata();
+      } else if (faza_postavki_maticnog_sata == 3) {
+        privremeniSat = (privremeniSat - 1 + 24) % 24;
+      } else if (faza_postavki_maticnog_sata == 4) {
         privremenaMinuta = (privremenaMinuta - 1 + 60) % 60;
       } else {
         ntpOmogucenUredjivanje = !ntpOmogucenUredjivanje;
@@ -1433,11 +1422,9 @@ static void obradiKlucMreza(KeyEvent event) {
 static void obradiKlucWiFiIP(KeyEvent event) {
   switch (event) {
     case KEY_LEFT:
-    case KEY_UP:
       wifiInfoStrana = (wifiInfoStrana - 1 + 2) % 2;
       break;
     case KEY_RIGHT:
-    case KEY_DOWN:
       wifiInfoStrana = (wifiInfoStrana + 1) % 2;
       break;
     case KEY_SELECT:
@@ -1609,12 +1596,16 @@ static void obradiKlucSunce(KeyEvent event) {
     case KEY_LEFT:
       if (stranicaNocneRasvjete) {
         pomakniStranicuSunca(-1);
+      } else if (faza_postavki_sunca == 0) {
+        pomakniStranicuSunca(-1);
       } else {
         faza_postavki_sunca = (faza_postavki_sunca - 1 + 4) % 4;
       }
       break;
     case KEY_RIGHT:
       if (stranicaNocneRasvjete) {
+        pomakniStranicuSunca(1);
+      } else if (faza_postavki_sunca >= 3) {
         pomakniStranicuSunca(1);
       } else {
         faza_postavki_sunca = (faza_postavki_sunca + 1) % 4;
@@ -1624,7 +1615,8 @@ static void obradiKlucSunce(KeyEvent event) {
       if (stranicaNocneRasvjete) {
         nocnaRasvjetaUredjivanje = !nocnaRasvjetaUredjivanje;
       } else if (faza_postavki_sunca == 0) {
-        pomakniStranicuSunca(-1);
+        // Stranica se u izborniku Sunce mijenja lijevo/desno kako bi
+        // gore/dolje ostalo rezervirano samo za uredjivanje vrijednosti.
       } else if (faza_postavki_sunca == 1) {
         sunceOmogucenoUredjivanje[dogadaj] = !sunceOmogucenoUredjivanje[dogadaj];
       } else if (faza_postavki_sunca == 2) {
@@ -1641,7 +1633,8 @@ static void obradiKlucSunce(KeyEvent event) {
       if (stranicaNocneRasvjete) {
         nocnaRasvjetaUredjivanje = !nocnaRasvjetaUredjivanje;
       } else if (faza_postavki_sunca == 0) {
-        pomakniStranicuSunca(1);
+        // Stranica se u izborniku Sunce mijenja lijevo/desno kako bi
+        // gore/dolje ostalo rezervirano samo za uredjivanje vrijednosti.
       } else if (faza_postavki_sunca == 1) {
         sunceOmogucenoUredjivanje[dogadaj] = !sunceOmogucenoUredjivanje[dogadaj];
       } else if (faza_postavki_sunca == 2) {

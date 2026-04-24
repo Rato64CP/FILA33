@@ -1,6 +1,6 @@
-# Arduino Mega pinout toranjskog sata
+# ZVONKO v. 1.0 - Arduino Mega pinout toranjskog sata
 
-Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Mega 2560` u sustavu toranjskog sata. Glavni izvor istine i dalje ostaje [podesavanja_piny.h](C:/Users/Rato/Documents/GitHub/FILA33/main/podesavanja_piny.h), a ova datoteka sluzi kao pomoc pri spajanju, servisiranju i provjeri instalacije.
+Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Mega 2560` u sustavu `ZVONKO v. 1.0`. Glavni izvor istine i dalje ostaje [podesavanja_piny.h](C:/Users/Rato/Documents/GitHub/FILA33/main/podesavanja_piny.h), a ova datoteka sluzi kao pomoc pri spajanju, servisiranju i provjeri instalacije.
 
 ## Brzi pregled izlaznih pinova
 

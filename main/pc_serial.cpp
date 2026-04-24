@@ -9,7 +9,7 @@ void inicijalizirajPCSerijsku() {
     delay(10);
   }
   Serial.println(F("============================================"));
-  Serial.println(F("Toranjski sat v1.0 - RTC+NTP sinkronizacija"));
+  Serial.println(F("ZVONKO v. 1.0 - RTC+NTP sinkronizacija"));
   Serial.println(F("============================================"));
 }
 

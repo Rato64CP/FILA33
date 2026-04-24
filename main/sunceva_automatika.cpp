@@ -523,6 +523,15 @@ static void obradiZakazanoBlagdanskoSlavljenje(const DateTime& sada) {
 }
 
 static void upravljajMrtvackimZaSveSvete(const DateTime& sada) {
+  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+    if (sviSvetiMrtvackoAktivno) {
+      zaustaviMrtvacko();
+      sviSvetiMrtvackoAktivno = false;
+      posaljiPCLog(F("Svi sveti: mrtvacko zaustavljeno jer vrijeme nije potvrdeno"));
+    }
+    return;
+  }
+
   const bool prozorAktivan = jeSviSvetiMrtvackoProzorAktivan(sada);
   if (!prozorAktivan) {
     if (sviSvetiMrtvackoAktivno) {

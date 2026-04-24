@@ -11,7 +11,6 @@
 #include "watchdog.h"
 
 namespace {
-constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
 constexpr int BROJ_MINUTA_CIKLUS = 720;
 constexpr int MAKS_CEKANJE_AKO_SU_KAZALJKE_NAPRIJED = 60;
 constexpr uint8_t HAND_NEAKTIVNO = 0;
@@ -100,7 +99,7 @@ void aktivirajRelejeKazaljki(const EepromLayout::UnifiedMotionState& stanje) {
   }
 }
 
-void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
+void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje) {
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
   if (stanje.hand_active == HAND_AKTIVNO && aktivniKorakStartRtcTick == 0) {
     aktivniKorakStartRtcTick = rtcTick;
@@ -110,10 +109,7 @@ void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sa
       stanje.hand_active == HAND_AKTIVNO &&
       aktivniKorakStartRtcTick != 0 &&
       (rtcTick - aktivniKorakStartRtcTick) >= 6U;
-  const bool istekPoMillis =
-      stanje.hand_start_ms != 0 &&
-      (sadaMs - stanje.hand_start_ms) >= TRAJANJE_FAZE_MS;
-  if (stanje.hand_active == HAND_AKTIVNO && (istekPoSqw || istekPoMillis)) {
+  if (istekPoSqw) {
     stanje.hand_position = static_cast<uint16_t>((stanje.hand_position + 1) % BROJ_MINUTA_CIKLUS);
     stanje.hand_active = HAND_NEAKTIVNO;
     stanje.hand_relay = HAND_RELEJ_NIJEDAN;
@@ -121,14 +117,12 @@ void obradiJedanKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sa
     aktivniKorakStartRtcTick = 0;
     aktivirajRelejeKazaljki(stanje);
     UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-    posaljiPCLog(istekPoSqw
-                     ? F("Kazaljke: korak dovrsen po RTC SQW taktu")
-                     : F("Kazaljke: korak dovrsen po millis() failsafe zastiti"));
+    posaljiPCLog(F("Kazaljke: korak dovrsen po RTC SQW taktu"));
     UnifiedMotionStateStore::logirajStanje(stanje);
   }
 }
 
-void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
+void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje) {
   const EepromLayout::UnifiedMotionState najnovijeStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   stanje = najnovijeStanje;
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
@@ -157,13 +151,13 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
 
   stanje.hand_active = HAND_AKTIVNO;
   stanje.hand_relay = odrediRelejKazaljki(stanje);
-  stanje.hand_start_ms = sadaMs;
+  stanje.hand_start_ms = 0;
   aktivniKorakStartRtcTick = rtcTick;
   aktivirajRelejeKazaljki(stanje);
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
   const EepromLayout::UnifiedMotionState potvrdenoStanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   if (potvrdenoStanje.hand_active == HAND_AKTIVNO &&
-      potvrdenoStanje.hand_start_ms == stanje.hand_start_ms) {
+      potvrdenoStanje.hand_relay == stanje.hand_relay) {
     posaljiLogKazaljkiStarta(potvrdenoStanje.hand_relay, cilj);
     UnifiedMotionStateStore::logirajStanje(potvrdenoStanje);
   }
@@ -223,7 +217,19 @@ void upravljajKorekcijomKazaljki() {
   }
 
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
-  const unsigned long sadaMs = millis();
+
+  if (!jeRtcSqwAktivan()) {
+    if (stanje.hand_active != HAND_NEAKTIVNO || stanje.hand_relay != HAND_RELEJ_NIJEDAN) {
+      stanje.hand_active = HAND_NEAKTIVNO;
+      stanje.hand_relay = HAND_RELEJ_NIJEDAN;
+      stanje.hand_start_ms = 0;
+      aktivniKorakStartRtcTick = 0;
+      UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+      ugasiRelejeKazaljki();
+      posaljiPCLog(F("Kazaljke: RTC SQW nije aktivan, gasim aktivni impuls bez pomaka"));
+    }
+    return;
+  }
 
   if (jeAutomatikaKazaljkiBlokirana()) {
     if (stanje.hand_active != HAND_NEAKTIVNO || stanje.hand_relay != HAND_RELEJ_NIJEDAN) {
@@ -245,12 +251,12 @@ void upravljajKorekcijomKazaljki() {
 
   if (stanje.hand_active != HAND_NEAKTIVNO) {
     aktivirajRelejeKazaljki(stanje);
-    obradiJedanKorak(stanje, sadaMs);
+    obradiJedanKorak(stanje);
     return;
   }
 
   aktivirajRelejeKazaljki(stanje);
-  pokreniKorakAkoTreba(stanje, sadaMs);
+  pokreniKorakAkoTreba(stanje);
 }
 
 void pokreniBudnoKorekciju() {

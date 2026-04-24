@@ -1,6 +1,6 @@
-# 📘 Tehnicka dokumentacija firmware sustava toranjskog sata
+# 📘 ZVONKO v. 1.0 - Tehnicka dokumentacija firmware sustava
 
-Ovaj dokument opisuje kako sustav danas stvarno radi u pogonu: mehanicko kretanje kazaljki, okretne ploce, zvona i cekica, sinkronizaciju vremena te sigurnosne mehanizme. Fokus je na ponasanju i razlozima dizajna, ne na prepisivanju implementacije.
+Ovaj dokument opisuje kako sustav `ZVONKO v. 1.0` danas stvarno radi u pogonu: mehanicko kretanje kazaljki, okretne ploce, zvona i cekica, sinkronizaciju vremena te sigurnosne mehanizme. Fokus je na ponasanju i razlozima dizajna, ne na prepisivanju implementacije.
 
 ---
 

@@ -35,6 +35,7 @@ static bool lcd_pozadinsko_stanje_poznato = false;
 static bool lcd_pozadinsko_stanje_ukljuceno = true;
 static int last_date_minute = -1;
 static bool otkucavanje_poruka_aktivna = false;
+static bool hod_sata_prikaz_aktivan = false;
 static bool rtc_battery_warning_active = false;
 static bool wifi_ip_prikaz_aktivan = false;
 static unsigned long wifi_ip_prikaz_pocetak_ms = 0;
@@ -87,6 +88,9 @@ static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
 static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 static const char LCD_PORUKA_INERCIJA[] PROGMEM = "Smirivanje zvona";
+static const int LCD_BROJ_MINUTA_CIKLUS = 720;
+static const int LCD_MAKS_CEKANJE_KAZALJKI_MIN = 60;
+static const int LCD_PRAG_DUGE_KOREKCIJE_MIN = 2;
 
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
@@ -129,6 +133,11 @@ static void pripremiDrugiRedakSaWiFiOznakom(const char* tekst) {
   line2_buffer[16] = '\0';
 }
 
+static void upisiDrugiRedakNaLCDSaWiFiOznakom(const char* tekst) {
+  pripremiDrugiRedakSaWiFiOznakom(tekst);
+  upisiRedakNaLCD(1, line2_buffer, zadnje_ispisani_redak2);
+}
+
 static void ocistiAktivnostDrugogRetka() {
   current_activity = ACTIVITY_NONE;
   activity_timeout_ms = 0;
@@ -141,6 +150,52 @@ static void ocistiAktivnostDrugogRetka() {
 
 static PGM_P dohvatiNazivDanaIzFlash(uint8_t danUTjednu) {
   return reinterpret_cast<PGM_P>(pgm_read_ptr(&LCD_NAZIVI_DANA[danUTjednu]));
+}
+
+static int izracunajDvanaestSatneMinuteZaLCD(const DateTime& vrijeme) {
+  return (vrijeme.hour() % 12) * 60 + vrijeme.minute();
+}
+
+static int izracunajMinuteNaprijedZaLCD(int polozajKazaljki, int ciljVrijeme) {
+  return (polozajKazaljki - ciljVrijeme + LCD_BROJ_MINUTA_CIKLUS) % LCD_BROJ_MINUTA_CIKLUS;
+}
+
+static bool trebajuKazaljkeSamoCekatiZaLCD(int polozajKazaljki, int ciljVrijeme) {
+  const int minuteNaprijed = izracunajMinuteNaprijedZaLCD(polozajKazaljki, ciljVrijeme);
+  return minuteNaprijed > 0 && minuteNaprijed <= LCD_MAKS_CEKANJE_KAZALJKI_MIN;
+}
+
+static int izracunajPreostaluKorekcijuKazaljkiZaLCD(int polozajKazaljki, int ciljVrijeme) {
+  return (ciljVrijeme - polozajKazaljki + LCD_BROJ_MINUTA_CIKLUS) % LCD_BROJ_MINUTA_CIKLUS;
+}
+
+static bool trebaPrikazatiDugiHodSata(int& memoriraneMinute) {
+  if (!imaKazaljkeSata() || !jeVrijemePotvrdjenoZaAutomatiku()) {
+    return false;
+  }
+
+  const EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+  memoriraneMinute = stanje.hand_position;
+
+  const int ciljVrijeme = izracunajDvanaestSatneMinuteZaLCD(dohvatiTrenutnoVrijeme());
+  if (memoriraneMinute == ciljVrijeme) {
+    return false;
+  }
+
+  // Ako su kazaljke malo naprijed, firmware ih namjerno ne vraca silom,
+  // nego ceka da ih stvarno vrijeme sustigne.
+  if (trebajuKazaljkeSamoCekatiZaLCD(memoriraneMinute, ciljVrijeme)) {
+    return false;
+  }
+
+  return izracunajPreostaluKorekcijuKazaljkiZaLCD(memoriraneMinute, ciljVrijeme) >
+         LCD_PRAG_DUGE_KOREKCIJE_MIN;
+}
+
+static void formatirajHodSata(int memoriraneMinute, char* odrediste, size_t velicina) {
+  const int sat12 = ((memoriraneMinute / 60) % 12 == 0) ? 12 : ((memoriraneMinute / 60) % 12);
+  const int minuta = memoriraneMinute % 60;
+  snprintf(odrediste, velicina, "Hod sata: %02d:%02d", sat12, minuta);
 }
 
 static bool jeSustavAktivanNaLCD() {
@@ -202,7 +257,7 @@ void inicijalizirajLCD() {
   wifi_ip_poruka[0] = '\0';
 
   lcd.setCursor(0, 0);
-  lcd.print(F("FILA 33 v.1.0"));
+  lcd.print(F("ZVONKO v. 1.0"));
   lcd.setCursor(0, 1);
   lcd.print(F("Inicijalizacija"));
 
@@ -309,7 +364,7 @@ static void build_line2() {
   if (current_activity == ACTIVITY_NONE && jeLiInerciaAktivna()) {
     char poruka[17];
     kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_INERCIJA);
-    pripremiRedakZaLCD(poruka, line2_buffer);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
     otkucavanje_poruka_aktivna = false;
     return;
   }
@@ -330,11 +385,29 @@ static void build_line2() {
     kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_OTKUCAJ);
     pripremiDrugiRedakSaWiFiOznakom(poruka);
     otkucavanje_poruka_aktivna = true;
+    hod_sata_prikaz_aktivan = false;
     return;
   }
 
   if (current_activity == ACTIVITY_NONE && otkucavanje_poruka_aktivna && !jeOtkucavanjeUTijeku()) {
     otkucavanje_poruka_aktivna = false;
+    last_date_minute = -1;
+  }
+
+  if (current_activity == ACTIVITY_NONE) {
+    int memoriraneMinute = 0;
+    if (trebaPrikazatiDugiHodSata(memoriraneMinute)) {
+      char poruka[17];
+      formatirajHodSata(memoriraneMinute, poruka, sizeof(poruka));
+      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      otkucavanje_poruka_aktivna = false;
+      hod_sata_prikaz_aktivan = true;
+      return;
+    }
+  }
+
+  if (hod_sata_prikaz_aktivan) {
+    hod_sata_prikaz_aktivan = false;
     last_date_minute = -1;
   }
 
@@ -490,7 +563,7 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
   }
 
   if (redak2) {
-    upisiRedakNaLCD(1, redak2, zadnje_ispisani_redak2);
+    upisiDrugiRedakNaLCDSaWiFiOznakom(redak2);
   }
 }
 

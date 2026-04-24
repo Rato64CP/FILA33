@@ -19,7 +19,6 @@
 #include "watchdog.h"
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
-#include "misna_automatika.h"
 #include "prekidac_tisine.h"
 
 namespace {
@@ -69,7 +68,6 @@ void setup() {
 
   inicijalizirajZvona();
   inicijalizirajSuncevuAutomatiku();
-  inicijalizirajMisnuAutomatiku();
   inicijalizirajOtkucavanje();
   inicijalizirajPrekidacTisine();
   inicijalizirajMrtvackoThumbwheel();
@@ -100,7 +98,6 @@ void loop() {
   upravljajZvonom();
   upravljajOtkucavanjem();
   upravljajSuncevomAutomatikom();
-  upravljajMisnomAutomatikom();
   osvjeziMrtvackoThumbwheel();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();

@@ -1,6 +1,6 @@
-# 🕰️ Automatika Toranjskog Sata
+# 🕰️ ZVONKO v. 1.0
 
-Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i ESP mreznog sloja.
+`ZVONKO v. 1.0` je firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izmedu `Arduino Mega 2560` i ESP mreznog sloja.
 
 ## ✨ Sto sustav radi
 
@@ -56,7 +56,7 @@ Firmware i upravljacka logika za toranjski sat temeljena na podjeli poslova izme
 
 ## 📶 Setup WiFi
 
-- `ESP8266` moze pokrenuti privremenu setup mrezu `FILA33_setup`
+- `ESP8266` moze pokrenuti privremenu setup mrezu `ZVONKO_setup`
 - lozinka setup mreze je `toranj33`
 - setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`
 - status LED koristi `GPIO12 / D6`

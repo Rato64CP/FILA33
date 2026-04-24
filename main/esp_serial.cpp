@@ -14,7 +14,6 @@
 #include "okretna_ploca.h"
 #include "postavke.h"
 #include "lcd_display.h"
-#include "misna_automatika.h"
 #include "sunceva_automatika.h"
 
 // UART prema mreznom mostu toranjskog sata bira se kroz main/podesavanja_piny.h.
@@ -126,7 +125,6 @@ static bool jeValjanaIPv4AdresaZaLCD(const char* tekst) {
 void posaljiESPKomandu(const char* komanda);
 static void zatraziWiFiStatusESP();
 static bool spremiSetupWiFiPostavkeIzESPa(const char* payload);
-static void posaljiVrijemeESPU();
 
 static void posaljiStatusESPU() {
   const DateTime sada = dohvatiTrenutnoVrijeme();
@@ -162,22 +160,6 @@ static void posaljiStatusESPU() {
              jeZvonoAktivno(1) ? 1 : 0,
              jeZvonoAktivno(2) ? 1 : 0);
   espSerijskiPort.println(statusLinija);
-}
-
-static void posaljiVrijemeESPU() {
-  const DateTime sada = dohvatiTrenutnoVrijeme();
-  char vrijemeIso[21];
-  snprintf_P(vrijemeIso,
-             sizeof(vrijemeIso),
-             PSTR("%04d-%02d-%02dT%02d:%02d:%02d"),
-             sada.year(),
-             sada.month(),
-             sada.day(),
-             sada.hour(),
-             sada.minute(),
-             sada.second());
-  espSerijskiPort.print(F("TIME:"));
-  espSerijskiPort.println(vrijemeIso);
 }
 
 static void resetirajUlazniBuffer() {
@@ -222,7 +204,6 @@ static bool jePrepoznataESPLinija(const char* linija) {
          strncmp(linija, "SETUPWIFI:", 10) == 0 ||
          strncmp(linija, "STATUS:", 7) == 0 ||
          strcmp(linija, "STATUS?") == 0 ||
-         strcmp(linija, "TIME?") == 0 ||
          strncmp(linija, "NTP:", 4) == 0 ||
          strncmp(linija, "CMD:", 4) == 0 ||
          strncmp(linija, "NTPLOG:", 7) == 0;
@@ -718,12 +699,6 @@ static void obradiESPRedak() {
     return;
   }
 
-  if (strcmp(ulazniBuffer, "TIME?") == 0) {
-    posaljiVrijemeESPU();
-    resetirajUlazniBuffer();
-    return;
-  }
-
   if (strncmp(ulazniBuffer, "STATUS:", 7) == 0) {
     resetirajUlazniBuffer();
     return;
@@ -824,9 +799,6 @@ static void obradiESPRedak() {
           false,
           dohvatiZvonoZaSuncevDogadaj(SUNCEVI_DOGADAJ_VECER),
           dohvatiOdgoduSuncevogDogadajaMin(SUNCEVI_DOGADAJ_VECER));
-    else if (strcmp(komanda, "MISA_RADNA") == 0)     uspjeh = pokreniESPMisnuNajavuRadniDan();
-    else if (strcmp(komanda, "MISA_NEDJELJA") == 0)  uspjeh = pokreniESPMisnuNajavuNedjelja();
-    else if (strcmp(komanda, "MISA_BLAGDAN") == 0)   uspjeh = pokreniESPMisnuNajavuBlagdan();
     else prepoznataKomanda = false;
 
     if (!prepoznataKomanda) {

@@ -14,7 +14,6 @@
 #include "watchdog.h"
 
 namespace {
-constexpr unsigned long TRAJANJE_FAZE_MS = 6000UL;
 constexpr int BROJ_POZICIJA = 64;
 constexpr int POZICIJA_NOCI = 63;
 constexpr int MINUTNI_BLOK = 15;
@@ -24,7 +23,7 @@ constexpr uint8_t FAZA_STABILNO = 0;
 constexpr uint8_t FAZA_PRVI_RELEJ = 1;
 constexpr uint8_t FAZA_DRUGI_RELEJ = 2;
 
-unsigned long pocetakFazeMs = 0;
+uint32_t pocetakFazeRtcTick = 0;
 uint32_t zadnjiObradeniRtcTick = 0;
 
 uint32_t zadnjiKljucCitanjaCavala = 0;
@@ -125,22 +124,6 @@ bool izracunajVrijemeZaPoziciju(int pozicija, int& sat24, int& minuta) {
   return true;
 }
 
-bool izracunajPozicijuZaVrijeme(int sat24, int minuta, int& pozicija) {
-  if (sat24 < 0 || sat24 > 23 || minuta < 0 || minuta > 59) {
-    return false;
-  }
-
-  const int pocetakOperacije = dohvatiPocetakPloceMinute();
-  const int ukupnoMinuta = sat24 * 60 + minuta;
-  const int diff = ukupnoMinuta - pocetakOperacije;
-  if (diff < 0 || diff >= (BROJ_POZICIJA * MINUTNI_BLOK) || (diff % MINUTNI_BLOK) != 0) {
-    return false;
-  }
-
-  pozicija = diff / MINUTNI_BLOK;
-  return pozicija >= 0 && pozicija < BROJ_POZICIJA;
-}
-
 void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
@@ -160,30 +143,39 @@ void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
   }
 }
 
-void obradiKorak(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
-  const bool istekPoMillis =
-      (sadaMs - pocetakFazeMs) >= TRAJANJE_FAZE_MS;
-  if (stanje.plate_phase == FAZA_PRVI_RELEJ && istekPoMillis) {
+void obradiKorak(EepromLayout::UnifiedMotionState& stanje) {
+  const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  if (stanje.plate_phase != FAZA_STABILNO && pocetakFazeRtcTick == 0) {
+    pocetakFazeRtcTick = rtcTick;
+  }
+
+  const bool istekPoSqw =
+      stanje.plate_phase != FAZA_STABILNO &&
+      pocetakFazeRtcTick != 0 &&
+      (rtcTick - pocetakFazeRtcTick) >= 6U;
+
+  if (stanje.plate_phase == FAZA_PRVI_RELEJ && istekPoSqw) {
     stanje.plate_phase = FAZA_DRUGI_RELEJ;
-    pocetakFazeMs = sadaMs;
+    pocetakFazeRtcTick = rtcTick;
     aktivirajRelejePoFazi(stanje);
     UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-    posaljiPCLog(F("Ploca: faza 2"));
+    posaljiPCLog(F("Ploca: faza 2 po RTC SQW taktu"));
     UnifiedMotionStateStore::logirajStanje(stanje);
     return;
   }
 
-  if (stanje.plate_phase == FAZA_DRUGI_RELEJ && istekPoMillis) {
+  if (stanje.plate_phase == FAZA_DRUGI_RELEJ && istekPoSqw) {
     stanje.plate_position = static_cast<uint8_t>((stanje.plate_position + 1) % BROJ_POZICIJA);
     stanje.plate_phase = FAZA_STABILNO;
+    pocetakFazeRtcTick = 0;
     aktivirajRelejePoFazi(stanje);
     UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-    posaljiPCLog(F("Ploca: korak dovrsen"));
+    posaljiPCLog(F("Ploca: korak dovrsen po RTC SQW taktu"));
     UnifiedMotionStateStore::logirajStanje(stanje);
   }
 }
 
-void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned long sadaMs) {
+void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje) {
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
   if (stanje.plate_phase != FAZA_STABILNO) {
     return;
@@ -203,10 +195,10 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje, unsigned lon
   }
 
   stanje.plate_phase = FAZA_PRVI_RELEJ;
-  pocetakFazeMs = sadaMs;
+  pocetakFazeRtcTick = rtcTick;
   aktivirajRelejePoFazi(stanje);
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
-  posaljiPCLog(F("Ploca: start"));
+  posaljiPCLog(F("Ploca: start po RTC SQW taktu"));
   UnifiedMotionStateStore::logirajStanje(stanje);
 }
 
@@ -302,7 +294,61 @@ void zaustaviAktivnoSlavljenjeZbogIzvadenogCavla() {
   }
 }
 
-void azurirajAutomatskaZvonjenja(unsigned long sadaMs, bool cavaoSlavljenjaAktivan) {
+void otkaziZakazanoZvonoZbogIzvadenogCavla(int indeks, uint8_t cavao) {
+  if (indeks < 0 || indeks >= BROJ_ZVONA_MAX || !autoZvonoZakazano[indeks]) {
+    return;
+  }
+
+  autoZvonoZakazano[indeks] = false;
+  autoZvonoAktivno[indeks] = false;
+  autoZvonoStart[indeks] = 0;
+  autoZvonoKraj[indeks] = 0;
+
+  char log[64];
+  snprintf(log,
+           sizeof(log),
+           "Cavli: cavao %u izvaden, zakazano ZVONO%u otkazano",
+           cavao,
+           indeks + 1);
+  posaljiPCLog(log);
+}
+
+void zaustaviAktivnoZvonoZbogIzvadenogCavla(int indeks, uint8_t cavao) {
+  if (indeks < 0 || indeks >= BROJ_ZVONA_MAX || !autoZvonoAktivno[indeks]) {
+    return;
+  }
+
+  deaktivirajZvonjenje(indeks + 1);
+  autoZvonoAktivno[indeks] = false;
+  autoZvonoZakazano[indeks] = false;
+  autoZvonoStart[indeks] = 0;
+  autoZvonoKraj[indeks] = 0;
+
+  char log[64];
+  snprintf(log,
+           sizeof(log),
+           "Cavli: cavao %u izvaden, ZVONO%u zaustavljeno",
+           cavao,
+           indeks + 1);
+  posaljiPCLog(log);
+}
+
+void azurirajAutomatskaZvonjenja(unsigned long sadaMs,
+                                 const bool ulazi[BROJ_ULAZA_PLOCE],
+                                 bool jeNedjelja,
+                                 uint8_t brojMjestaZaCavle,
+                                 bool cavaoSlavljenjaAktivan) {
+  for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    const uint8_t cavao = jeNedjelja ? dohvatiCavaoNedjeljaZaZvono(i + 1)
+                                     : dohvatiCavaoRadniZaZvono(i + 1);
+    if (jeCavaoAktivan(ulazi, brojMjestaZaCavle, cavao)) {
+      continue;
+    }
+
+    otkaziZakazanoZvonoZbogIzvadenogCavla(i, cavao);
+    zaustaviAktivnoZvonoZbogIzvadenogCavla(i, cavao);
+  }
+
   for (int i = 0; i < BROJ_ZVONA_MAX; ++i) {
     if (autoZvonoZakazano[i] && vrijemeProslo(sadaMs, autoZvonoStart[i])) {
       aktivirajZvonjenjeNaTrajanje(i + 1, autoZvonoKraj[i] - autoZvonoStart[i]);
@@ -500,7 +546,7 @@ void inicijalizirajPlocu() {
   }
   aktivirajRelejePoFazi(stanje);
 
-  pocetakFazeMs = millis();
+  pocetakFazeRtcTick = 0;
   zadnjiObradeniRtcTick = 0;
   zadnjiKljucCitanjaCavala = 0;
   zadnjiKljucCitanjaCavalaValjan = false;
@@ -536,12 +582,13 @@ void upravljajPlocom() {
   }
 
   const DateTime now = dohvatiTrenutnoVrijeme();
-  const unsigned long sadaMs = millis();
   const bool tihiRezimAktivan = jePrekidacTisineAktivan();
+  const bool jeNedjelja = (now.dayOfTheWeek() == 0);
+  const uint8_t brojMjestaZaCavle = dohvatiBrojMjestaZaCavle();
   bool ulaziPloce[BROJ_ULAZA_PLOCE];
   procitajStabilnaStanjaUlazaPloce(ulaziPloce);
   const bool cavaoSlavljenjaAktivan =
-      jeCavaoAktivan(ulaziPloce, dohvatiBrojMjestaZaCavle(), dohvatiCavaoSlavljenja());
+      jeCavaoAktivan(ulaziPloce, brojMjestaZaCavle, dohvatiCavaoSlavljenja());
 
   if (tihiRezimAktivan) {
     if (!prethodniTihiRezimAktivan) {
@@ -553,14 +600,28 @@ void upravljajPlocom() {
   }
   prethodniTihiRezimAktivan = tihiRezimAktivan;
 
-  azurirajAutomatskaZvonjenja(sadaMs, cavaoSlavljenjaAktivan);
+  azurirajAutomatskaZvonjenja(
+      millis(), ulaziPloce, jeNedjelja, brojMjestaZaCavle, cavaoSlavljenjaAktivan);
 
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
+
+  if (!jeRtcSqwAktivan()) {
+    if (stanje.plate_phase != FAZA_STABILNO) {
+      stanje.plate_phase = FAZA_STABILNO;
+      pocetakFazeRtcTick = 0;
+      UnifiedMotionStateStore::spremiAkoPromjena(stanje);
+      aktivirajRelejePoFazi(stanje);
+      posaljiPCLog(F("Ploca: RTC SQW nije aktivan, gasim aktivnu fazu bez pomaka"));
+    }
+    return;
+  }
+
   aktivirajRelejePoFazi(stanje);
 
   if (rucnaBlokadaPloce) {
     if (stanje.plate_phase != FAZA_STABILNO) {
       stanje.plate_phase = FAZA_STABILNO;
+      pocetakFazeRtcTick = 0;
       UnifiedMotionStateStore::spremiAkoPromjena(stanje);
       aktivirajRelejePoFazi(stanje);
     }
@@ -569,7 +630,6 @@ void upravljajPlocom() {
     return;
   }
 
-  const bool jeNedjelja = (now.dayOfTheWeek() == 0);
   const unsigned long trajanjeProzoraCitanjaMs =
       jeNedjelja ? dohvatiTrajanjeZvonjenjaNedjeljaMs() : dohvatiTrajanjeZvonjenjaRadniMs();
   int minutaTerminaUDanu = 0;
@@ -585,22 +645,23 @@ void upravljajPlocom() {
     if (!zadnjiKljucCitanjaCavalaValjan || kljucCitanja != zadnjiKljucCitanjaCavala) {
       zadnjiKljucCitanjaCavala = kljucCitanja;
       zadnjiKljucCitanjaCavalaValjan = true;
-      obradiUlazePloce(now, sadaMs, ulaziPloce, static_cast<unsigned long>(protekloOdTerminaMs));
+      obradiUlazePloce(now, millis(), ulaziPloce, static_cast<unsigned long>(protekloOdTerminaMs));
     }
   }
 
   if (stanje.plate_phase != FAZA_STABILNO) {
-    obradiKorak(stanje, sadaMs);
+    obradiKorak(stanje);
     return;
   }
 
-  pokreniKorakAkoTreba(stanje, sadaMs);
+  pokreniKorakAkoTreba(stanje);
 }
 
 void postaviTrenutniPolozajPloce(int pozicija) {
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
   stanje.plate_position = static_cast<uint8_t>(constrain(pozicija, 0, BROJ_POZICIJA - 1));
   stanje.plate_phase = FAZA_STABILNO;
+  pocetakFazeRtcTick = 0;
   UnifiedMotionStateStore::spremiAkoPromjena(stanje);
 }
 
@@ -628,6 +689,7 @@ void postaviRucnuBlokaduPloce(bool blokirano) {
   }
 
   rucnaBlokadaPloce = blokirano;
+  pocetakFazeRtcTick = 0;
   zadnjiObradeniRtcTick = 0;
   zadnjiKljucCitanjaCavalaValjan = false;
 

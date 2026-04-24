@@ -1,6 +1,6 @@
-# 🧭 Analiza modularnosti: `postavke.cpp`, `menu_system.cpp`, `tipke.cpp`
+# 🧭 ZVONKO v. 1.0 - Analiza modularnosti: `postavke.cpp`, `menu_system.cpp`, `tipke.cpp`
 
-Ovaj dokument je zadrzan kao razvojna analiza granica odgovornosti izmedu modula. Dio tada navedenih problema je u meduvremenu vec ociscen, pa ga treba citati kao arhivsku analizu, a ne kao potpun opis danasnjeg stanja.
+Ovaj dokument je zadrzan kao razvojna analiza granica odgovornosti izmedu modula projekta `ZVONKO v. 1.0`. Dio tada navedenih problema je u meduvremenu vec ociscen, pa ga treba citati kao arhivsku analizu, a ne kao potpun opis danasnjeg stanja.
 
 ## 🎯 Sažetak preporuke
 
