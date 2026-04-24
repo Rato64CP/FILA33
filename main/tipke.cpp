@@ -5,6 +5,7 @@
 #include "lcd_display.h"
 #include "pc_serial.h"
 #include "debouncing.h"
+#include "esp_serial.h"
 #include "menu_system.h"
 #include "podesavanja_piny.h"
 #include "zvonjenje.h"
@@ -17,6 +18,7 @@ static const uint8_t BROJ_STUPACA = 5;
 static const uint8_t BROJ_LOGICKIH_TIPKI = 16;
 static const uint8_t DEBOUNCE_TIPKE_MS = 30;
 static const unsigned long DUGI_PRITISAK_TIPKE_MS = 1200UL;
+static const unsigned long DUGI_PRITISAK_SETUP_KOMBINACIJE_MS = 1500UL;
 
 static const uint8_t PINOVI_REDAKA[BROJ_REDAKA] = {
   PIN_KEYPAD_ROW_0,
@@ -70,6 +72,9 @@ static const MapiranjeTipke MAPIRANJA_TIPKI[BROJ_LOGICKIH_TIPKI] = {
 };
 
 static DebounceMatrice debounceTipki[BROJ_LOGICKIH_TIPKI];
+static bool setupKombinacijaAktivna = false;
+static bool setupKombinacijaObradena = false;
+static unsigned long setupKombinacijaPocetakMs = 0;
 
 static void postaviRetkeUMirnoStanje() {
   for (uint8_t i = 0; i < BROJ_REDAKA; ++i) {
@@ -226,6 +231,50 @@ static void provjeriDugaZadrzavanjaTipki(unsigned long sadaMs) {
   }
 }
 
+static bool jeTipkaStabilnoPritisnuta(KeyEvent trazeniEvent) {
+  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
+    if (MAPIRANJA_TIPKI[i].event == trazeniEvent) {
+      return debounceTipki[i].stabilnoPritisnuto;
+    }
+  }
+  return false;
+}
+
+static void provjeriSetupKombinacijuLijevoDesno(unsigned long sadaMs) {
+  if (dohvatiMenuState() != MENU_STATE_DISPLAY_TIME) {
+    setupKombinacijaAktivna = false;
+    setupKombinacijaObradena = false;
+    setupKombinacijaPocetakMs = 0;
+    return;
+  }
+
+  const bool lijevoPritisnuto = jeTipkaStabilnoPritisnuta(KEY_LEFT);
+  const bool desnoPritisnuto = jeTipkaStabilnoPritisnuta(KEY_RIGHT);
+
+  if (!lijevoPritisnuto || !desnoPritisnuto) {
+    setupKombinacijaAktivna = false;
+    setupKombinacijaObradena = false;
+    setupKombinacijaPocetakMs = 0;
+    return;
+  }
+
+  if (!setupKombinacijaAktivna) {
+    setupKombinacijaAktivna = true;
+    setupKombinacijaObradena = false;
+    setupKombinacijaPocetakMs = sadaMs;
+    return;
+  }
+
+  if (setupKombinacijaObradena ||
+      (sadaMs - setupKombinacijaPocetakMs) < DUGI_PRITISAK_SETUP_KOMBINACIJE_MS) {
+    return;
+  }
+
+  setupKombinacijaObradena = true;
+  posaljiESPKomandu("SETUPAP:START");
+  posaljiPCLog(F("Tipke: lijevo+desno (dugo) -> zahtjev za pokretanje setup WiFi mreze"));
+}
+
 }  // namespace
 
 void inicijalizirajTipke() {
@@ -247,4 +296,5 @@ void provjeriTipke() {
   }
 
   provjeriDugaZadrzavanjaTipki(sadaMs);
+  provjeriSetupKombinacijuLijevoDesno(sadaMs);
 }

@@ -48,8 +48,9 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 ## 📶 Setup WiFi
 
 - setup AP ima SSID `ZVONKO_setup`
-- lozinka setup AP-a je `toranj33`
+- lozinka setup AP-a je `zvonko`
 - na `ESP8266` AP se pali dugim pritiskom tipke na `GPIO14 / D5`
+- setup AP se moze pokrenuti i dugim istovremenim pritiskom `lijevo + desno` na Mega tipkovnici, ali samo s glavnog prikaza sata
 - na `ESP8266` status LED koristi `GPIO12 / D6`
 - na `ESP32` zadano se koristi tipka na `GPIO27` i status LED na `GPIO26`
 - setup stranica radi na `http://192.168.4.1/` i `http://192.168.4.1/setup`

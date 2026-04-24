@@ -29,7 +29,7 @@ bool wifiOmogucen = true;
 // Vrijednosti za privremenu setup mrezu toranjskog sata.
 // Pinovi ovise o odabranom ESP modulu.
 static const char WIFI_SETUP_AP_SSID[] = "ZVONKO_setup";
-static const char WIFI_SETUP_AP_LOZINKA[] = "toranj33";
+static const char WIFI_SETUP_AP_LOZINKA[] = "zvonko";
 #if defined(ESP8266)
 static const uint8_t WIFI_SETUP_PIN = 14;       // GPIO14 / NodeMCU D5
 static const uint8_t WIFI_STATUS_LED_PIN = 12;  // GPIO12 / NodeMCU D6
@@ -516,6 +516,9 @@ void obradiSerijskiUlaz() {
             Serial.println(WiFi.macAddress());
           }
           Serial.println("ACK:WIFISTATUS");
+        } else if (strcmp(linija, "SETUPAP:START") == 0) {
+          Serial.println("WIFI: zahtjev za setup AP primljen preko Mega tipki");
+          pokreniSetupPristupnuTocku();
         } else if (strncmp(linija, "WIFIEN:", 7) == 0) {
           char* payload = linija + 7;
           trimJednolinijskiBuffer(payload);

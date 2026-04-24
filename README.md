@@ -57,8 +57,9 @@
 ## 📶 Setup WiFi
 
 - `ESP8266` moze pokrenuti privremenu setup mrezu `ZVONKO_setup`
-- lozinka setup mreze je `toranj33`
+- lozinka setup mreze je `zvonko`
 - setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`
+- setup AP se moze aktivirati i dugim istovremenim pritiskom `lijevo + desno` na tipkovnici, ali samo s glavnog prikaza sata
 - status LED koristi `GPIO12 / D6`
 - setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`
 - nakon spremanja nove mreze `ESP8266` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
