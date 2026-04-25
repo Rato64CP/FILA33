@@ -11,7 +11,10 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - lokalne postavke preko LCD izbornika i tipki
 - pohrana postavki i stanja u `24C32 EEPROM`
 - recovery nakon watchdog i power-loss reseta
+- watchdog `safe mode` i servisno otkljucavanje nakon previse resetova
+- runtime dijagnostika `EEPROM-a` i latched fault potvrda preko LCD-a i tipki
 - obrada RTC i NTP izvora vremena
+- degradirani nacin rada za `RTC` i `EEPROM` kad se kvar ponavlja
 - jedinstveni tihi rezim, BAT logika i lokalni overridei
 
 ## 🧭 Podjela poslova Mega / ESP
@@ -45,6 +48,8 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `NTP` dolazi preko ESP modula, ali trenutak sinkronizacije bira `Mega 2560`
 - automatski prijelaz CET/CEST ostaje pod kontrolom firmwarea toranjskog sata
 - `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
+- nakon restarta se starost zadnje sinkronizacije rekonstruira iz RTC vremena kako novi boot ne bi lazno izgledao svjez `24 sata`
+- nakon vise uzastopnih nevaljanih RTC ocitanja aktivira se `RTC OGRANICEN RAD` i automatika se drzi na sigurnoj strani dok se RTC ne oporavi
 
 ## 🔄 Serijska komunikacija s ESP-om
 
@@ -59,7 +64,13 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 
 - `24C32 EEPROM` cuva postavke i kriticno radno stanje
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
+- svaki zapis `UnifiedMotionState` nosi checksum kako bi se preskocio korumpirani slot nakon prekida napajanja usred upisa
 - `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
+- watchdog resetovi se pamte u zasebnom EEPROM bloku i tek ponovljeni watchdog resetovi bez power-loss oznake vode u `safe mode`
+- `safe mode` blokira mehaniku i prikazuje `SUSTAV ZAKLJUCAN / PREVISE RESETA` dok operater ne drzi `ENT / SELECT` `5 s`
+- `power_recovery.*` radi periodicki `EEPROM` health-check svakih `6 sati`
+- latched fault `EEPROM-a` ostaje spremljen do rucne potvrde operatera i pali degradirani nacin rada za `EEPROM`
+- u degradiranom `EEPROM` nacinu rada pauziraju se periodicni backup i pomocni zapisi iz `time_glob.*`
 - `offset` ploce i MQTT tragovi vise nisu dio aktivnog modela
 - pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
 - `eeprom_konstante.h`
@@ -77,6 +88,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - 4x5 matricna tipkovnica, servisni ulazi i brojcani unos `HH:MM`
+- uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`
 
 ## ✅ Smjernice za razvoj
 

@@ -138,9 +138,12 @@ struct UnifiedMotionState {
   uint8_t plate_phase;
   uint8_t version;
   uint8_t reserved;
+  uint16_t checksum;
 };
 
-constexpr uint8_t UNIFIED_STANJE_VERZIJA = 2;
+// Revizija 3 dodaje checksum kako bi toranjski sat mogao odbaciti
+// djelomicno upisan ili korumpiran slot jedinstvenog stanja.
+constexpr uint8_t UNIFIED_STANJE_VERZIJA = 3;
 
 constexpr int BAZA_UNIFIED_STANJE =
   BAZA_BOOT_FLAGS + (SLOTOVI_BOOT_FLAGS * SLOT_SIZE_BOOT_FLAGS);
@@ -198,6 +201,58 @@ constexpr int SLOTOVI_SUNCEVI_DOGADAJI = 6;
 constexpr int SLOT_SIZE_SUNCEVI_DOGADAJI = sizeof(SunceviDogadajiSpremnik);
 
 // ==================== VALIDATION MACROS ====================
+
+// Zadnji dio 24C32 rezerviran je za metapodatke wear-levelinga.
+constexpr int BAZA_WEAR_LEVELING_META = 3968;
+
+// ==================== WATCHDOG SAFE MODE ====================
+// Perzistentni zapis za zakljucavanje toranjskog sata nakon vise
+// watchdog reset petlji u kratkom razdoblju. Namjerno je izvan
+// wear-leveling segmenata kako se ne bi brisao pri obicnom bootu.
+
+struct WatchdogSafeModeState {
+  uint16_t potpis;
+  uint8_t brojWatchdogResetova;
+  uint8_t lockdownAktivan;
+  uint32_t pocetakProzoraUnix;
+  uint32_t zadnjiWatchdogUnix;
+  uint16_t checksum;
+};
+
+struct LatchedFaultState {
+  uint16_t potpis;
+  uint8_t aktivan;
+  uint8_t kod;
+  uint32_t zadnjiFaultUnix;
+  uint16_t checksum;
+};
+
+constexpr uint16_t LATCHED_FAULT_POTPIS = 0x4C46;
+constexpr uint8_t LATCHED_FAULT_NONE = 0;
+constexpr uint8_t LATCHED_FAULT_EEPROM = 1;
+constexpr int BAZA_LATCHED_FAULT =
+  BAZA_WEAR_LEVELING_META -
+  static_cast<int>(sizeof(WatchdogSafeModeState)) -
+  static_cast<int>(sizeof(LatchedFaultState));
+constexpr uint16_t WATCHDOG_SAFE_MODE_POTPIS = 0x5744;
+constexpr int BAZA_WATCHDOG_SAFE_MODE =
+  BAZA_LATCHED_FAULT + static_cast<int>(sizeof(LatchedFaultState));
+
+static_assert(
+  (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <=
+      BAZA_LATCHED_FAULT,
+  "EEPROM layout overlaps latched fault block"
+);
+static_assert(
+  (BAZA_LATCHED_FAULT + static_cast<int>(sizeof(LatchedFaultState))) <=
+      BAZA_WATCHDOG_SAFE_MODE,
+  "EEPROM layout overlaps watchdog safe-mode block"
+);
+static_assert(
+  (BAZA_WATCHDOG_SAFE_MODE + static_cast<int>(sizeof(WatchdogSafeModeState))) <=
+      BAZA_WEAR_LEVELING_META,
+  "Watchdog safe-mode block overlaps wear-leveling metadata"
+);
 
 static_assert(
   (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <= 4096,

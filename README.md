@@ -11,6 +11,9 @@
 - podrzava blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - cuva postavke i kriticno stanje u `24C32 EEPROM-u`
 - vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
+- zakljucava mehaniku u `safe mode` ako se dogodi previse watchdog resetova u kratkom vremenu
+- prati zdravlje `RTC` i `EEPROM` podsustava i prelazi u ograniceni rad kad kvar postane ponovljiv
+- pamti latched kvar `EEPROM-a` do rucne potvrde operatera
 - podrzava jedinstveni tihi rezim za uskrsnu tisinu i rucni kip-prekidac
 
 ## 🧭 Arhitektura
@@ -68,7 +71,13 @@
 
 - `24C32 EEPROM` cuva postavke, `UnifiedMotionState`, DST status i kriticni backup
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
+- svaki `UnifiedMotionState` slot ima checksum i nevaljan ili polovicno upisan zapis se preskace
 - `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
+- watchdog resetovi se prate kroz perzistentni brojac i nakon vise uzastopnih watchdog resetova aktivira se `safe mode`
+- `safe mode` blokira kazaljke, plocu, zvona i cekice dok operater ne drzi `ENT / SELECT` `5 s`
+- zdravlje `EEPROM-a` se provjerava i pri bootu i periodicki svakih `6 sati`
+- kvar `EEPROM-a` ostaje latched u memoriji do rucne potvrde operatera
+- kad je `EEPROM` u degradiranom nacinu rada, periodicni backup i pomocni zapisi poput DST i zadnje sinkronizacije se pauziraju
 - stari `offset` ploce i MQTT tragovi vise nisu dio aktivnog EEPROM modela
 - kod izmjena koje diraju EEPROM raspored ili recovery logiku obavezno provjeri:
 - `main/eeprom_konstante.h`
@@ -92,6 +101,10 @@
 - reset `Mega 2560`: recovery iz spremljenog stanja
 - nestanak napajanja: nastavak iz zadnjeg valjanog stanja
 - gubitak RTC SQW impulsa: kazaljke i ploca imaju `millis()` fallback za sigurno gasenje aktivne faze
+- ponovljeni watchdog resetovi bez power-loss oznake: aktivira se `SUSTAV ZAKLJUCAN / PREVISE RESETA`
+- ponovljena nevaljana RTC ocitanja: aktivira se `RTC OGRANICEN RAD / CEKAM OPORAVAK` i automatika vremena se privremeno blokira
+- kvar `EEPROM-a`: aktivira se latched fault i periodicni EEPROM zapisi i health-checkovi se zaustavljaju do potvrde
+- lampica zvona tijekom inercije treperi kako bi operater znao da cekice jos ne treba dirati
 
 ## 🔧 Hardver
 
@@ -105,6 +118,7 @@
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - relejni izlazi za kazaljke, plocu, zvona i cekice
 - 4x5 matricna tipkovnica za lokalni izbornik, servisne funkcije i brojcani unos `HH:MM`
+- lokalni servisni sloj koristi `ENT / SELECT` i za otkljucavanje `safe mode-a` te potvrdu latched kvarova
 
 ## 📚 Dodatni README
 

@@ -10,6 +10,7 @@
 #include "podesavanja_piny.h"
 #include "zvonjenje.h"
 #include "slavljenje_mrtvacko.h"
+#include "power_recovery.h"
 
 namespace {
 
@@ -19,6 +20,7 @@ static const uint8_t BROJ_LOGICKIH_TIPKI = 16;
 static const uint8_t DEBOUNCE_TIPKE_MS = 30;
 static const unsigned long DUGI_PRITISAK_TIPKE_MS = 1200UL;
 static const unsigned long DUGI_PRITISAK_SETUP_KOMBINACIJE_MS = 1500UL;
+static const unsigned long DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS = 5000UL;
 
 static const uint8_t PINOVI_REDAKA[BROJ_REDAKA] = {
   PIN_KEYPAD_ROW_0,
@@ -75,6 +77,11 @@ static DebounceMatrice debounceTipki[BROJ_LOGICKIH_TIPKI];
 static bool setupKombinacijaAktivna = false;
 static bool setupKombinacijaObradena = false;
 static unsigned long setupKombinacijaPocetakMs = 0;
+static bool safeModeSelectZadnjeSirovoPritisnuto = false;
+static bool safeModeSelectStabilnoPritisnuto = false;
+static bool safeModeSelectOtkljucavanjeObradeno = false;
+static unsigned long safeModeSelectZadnjaPromjenaMs = 0;
+static unsigned long safeModeSelectVrijemePritiskaMs = 0;
 
 static void postaviRetkeUMirnoStanje() {
   for (uint8_t i = 0; i < BROJ_REDAKA; ++i) {
@@ -117,6 +124,13 @@ static void ocitajMatricu(bool stanja[BROJ_REDAKA][BROJ_STUPACA]) {
 }
 
 static void obradiPritisakTipke(const MapiranjeTipke& tipka) {
+  if (tipka.event == KEY_SELECT && jeLatchedFaultAktivan()) {
+    if (potvrdiLatchedFault()) {
+      posaljiPCLog(F("Power Recovery: latched fault potvrdjen tipkom SELECT"));
+    }
+    return;
+  }
+
   if (tipka.event == KEY_SELECT && jeUpozorenjeRtcBaterijeAktivno()) {
     potvrdiUpozorenjeRtcBaterije();
     posaljiPCLog(F("RTC: upozorenje za bateriju potvrdjeno tipkom SELECT"));
@@ -240,6 +254,17 @@ static bool jeTipkaStabilnoPritisnuta(KeyEvent trazeniEvent) {
   return false;
 }
 
+static bool jeTipkaSirovoPritisnuta(const bool stanja[BROJ_REDAKA][BROJ_STUPACA],
+                                    KeyEvent trazeniEvent) {
+  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
+    const MapiranjeTipke& tipka = MAPIRANJA_TIPKI[i];
+    if (tipka.event == trazeniEvent) {
+      return stanja[tipka.redak][tipka.stupac];
+    }
+  }
+  return false;
+}
+
 static void provjeriSetupKombinacijuLijevoDesno(unsigned long sadaMs) {
   if (dohvatiMenuState() != MENU_STATE_DISPLAY_TIME) {
     setupKombinacijaAktivna = false;
@@ -297,4 +322,45 @@ void provjeriTipke() {
 
   provjeriDugaZadrzavanjaTipki(sadaMs);
   provjeriSetupKombinacijuLijevoDesno(sadaMs);
+}
+
+bool provjeriOtkljucavanjeSafeMode() {
+  bool stanjaMatrice[BROJ_REDAKA][BROJ_STUPACA];
+  ocitajMatricu(stanjaMatrice);
+
+  const unsigned long sadaMs = millis();
+  const bool sirovoSelectPritisnuto = jeTipkaSirovoPritisnuta(stanjaMatrice, KEY_SELECT);
+
+  if (sirovoSelectPritisnuto != safeModeSelectZadnjeSirovoPritisnuto) {
+    safeModeSelectZadnjeSirovoPritisnuto = sirovoSelectPritisnuto;
+    safeModeSelectZadnjaPromjenaMs = sadaMs;
+  }
+
+  if ((sadaMs - safeModeSelectZadnjaPromjenaMs) >= DEBOUNCE_TIPKE_MS &&
+      sirovoSelectPritisnuto != safeModeSelectStabilnoPritisnuto) {
+    safeModeSelectStabilnoPritisnuto = sirovoSelectPritisnuto;
+
+    if (safeModeSelectStabilnoPritisnuto) {
+      safeModeSelectVrijemePritiskaMs = sadaMs;
+      safeModeSelectOtkljucavanjeObradeno = false;
+    } else {
+      safeModeSelectVrijemePritiskaMs = 0;
+      safeModeSelectOtkljucavanjeObradeno = false;
+    }
+  }
+
+  if (!safeModeSelectStabilnoPritisnuto ||
+      safeModeSelectOtkljucavanjeObradeno ||
+      safeModeSelectVrijemePritiskaMs == 0) {
+    return false;
+  }
+
+  if ((sadaMs - safeModeSelectVrijemePritiskaMs) <
+      DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS) {
+    return false;
+  }
+
+  safeModeSelectOtkljucavanjeObradeno = true;
+  posaljiPCLog(F("Tipka matrice SELECT (dugo): zahtjev za servisno otkljucavanje safe mode-a"));
+  return true;
 }

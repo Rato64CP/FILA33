@@ -10,6 +10,7 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 - pruža kratki servisni web sloj
 - prihvaća setup WiFi kroz privremeni AP
 - prenosi jednostavne API naredbe prema Megi
+- ostaje pomocni mrezni sloj i ne zaobilazi `safe mode`, `RTC` degraded ni `EEPROM` degraded odluke koje donosi `main/power_recovery.*` i `main/time_glob.*`
 
 ## 🌐 Aktivne web rute
 
@@ -34,6 +35,12 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 - `NTP:YYYY-MM-DDTHH:MM:SS;DST=0/1` šalje lokalno vrijeme Megi
 - `STATUS?` traži kratki runtime status od Mege
 - `CMD:<naredba>` prenosi servisne naredbe za zvona i modove rada
+
+## 🛡️ Rad uz sigurnosne blokade Mege
+
+- `ESP` i dalje moze odrzavati WiFi i NTP dok je `Mega` u ogranicenom radu
+- `ESP` ne otkljucava `safe mode` i ne potvrduje latched faultove; to ostaje lokalna servisna funkcija na tipkama i LCD-u
+- kad `Mega` blokira automatiku zbog `RTC` ili `EEPROM` problema, `ESP` ostaje samo pomocni izvor mreze i vremena bez ovlasti nad mehanikom toranjskog sata
 
 ## 🚫 Što više nije aktivno
 

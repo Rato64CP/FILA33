@@ -11,9 +11,20 @@ void odradiBootRecovery();
 // Periodicko spremanje kriticnog stanja kazaljki i okretne ploce.
 void spremiKriticalnoStanje();
 
+// Periodicki health-check i latched fault obrada za toranjski sat.
+void osvjeziPowerRecoveryDijagnostiku();
+
 // Provjera zdravlja vanjskog EEPROM-a za recovery toranjskog sata.
 bool provjeriZdravostEEPROM();
+bool jeLatchedFaultAktivan();
+bool potvrdiLatchedFault();
+bool jeEepromDegradiraniNacinAktivan();
 
-// Oznake uzroka reseta za recovery logiku.
-void oznaciWatchdogReset(bool resetiranWatchdog);
-void oznaciGubitakNapajanja(bool izgubljenoNapajanje);
+// True ako je toranjski sat zakljucan zbog vise watchdog reset petlji.
+bool jeSafeModeAktivan();
+
+// Primjenjuje lockdown blokade na mehaniku toranjskog sata.
+void primijeniSafeModeAkoTreba();
+
+// Servisno otkljucavanje toranjskog sata iz watchdog lockdowna.
+bool otkljucajSafeMode();

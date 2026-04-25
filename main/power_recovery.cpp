@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
+#include <string.h>
 #include "power_recovery.h"
 #include "podesavanja_piny.h"
 #include "i2c_eeprom.h"
@@ -18,6 +19,9 @@
 #include "watchdog.h"
 #include "lcd_display.h"
 #include "unified_motion_state.h"
+#include "zvonjenje.h"
+#include "otkucavanje.h"
+#include "slavljenje_mrtvacko.h"
 
 // ==================== POWER RECOVERY EEPROM LAYOUT ====================
 
@@ -32,18 +36,35 @@ constexpr uint8_t BROJ_POZICIJA_PLOCE = 64;
 constexpr uint16_t BROJ_MINUTA_CIKLUS = 720;
 constexpr uint32_t LEGACY_MIN_UNIX_TIMESTAMP = 1000000000UL;
 constexpr uint32_t EEPROM_DIJAGNOSTICKI_POTPIS = 0x12345678UL;
+constexpr int BAZA_LATCHED_FAULT = EepromLayout::BAZA_LATCHED_FAULT;
+constexpr uint16_t LATCHED_FAULT_POTPIS = EepromLayout::LATCHED_FAULT_POTPIS;
+constexpr uint8_t LATCHED_FAULT_NONE = EepromLayout::LATCHED_FAULT_NONE;
+constexpr uint8_t LATCHED_FAULT_EEPROM = EepromLayout::LATCHED_FAULT_EEPROM;
+constexpr int BAZA_WATCHDOG_SAFE_MODE = EepromLayout::BAZA_WATCHDOG_SAFE_MODE;
+constexpr uint16_t WATCHDOG_SAFE_MODE_POTPIS = EepromLayout::WATCHDOG_SAFE_MODE_POTPIS;
+constexpr uint8_t WATCHDOG_RESET_LOCKDOWN_PRAG = 3;
+constexpr uint32_t WATCHDOG_RESET_PROZOR_SEKUNDE = 600UL;
+constexpr unsigned long RUNTIME_EEPROM_HEALTH_INTERVAL_MS = 6UL * 60UL * 60UL * 1000UL;
+constexpr uint16_t MIN_VALJANA_GODINA_SAFE_MODE = 2024;
+constexpr uint16_t MAX_VALJANA_GODINA_SAFE_MODE = 2099;
 }
 
 // ==================== STATE VARIABLES ====================
 
 static bool watchdog_reset = false;
 static bool power_loss_detected = false;
-static unsigned long boot_time = 0;
-static unsigned long last_state_save_time = 0;
-static uint32_t reset_counter = 0;
 static bool boot_recovery_odraden = false;
 static uint32_t save_sequence = 1;
 using SystemStateBackup = EepromLayout::SystemStateBackup;
+using WatchdogSafeModeState = EepromLayout::WatchdogSafeModeState;
+using LatchedFaultState = EepromLayout::LatchedFaultState;
+static bool safe_mode_aktivan = false;
+static bool safe_mode_primijenjen = false;
+static bool latched_fault_aktivan = false;
+static uint8_t latched_fault_kod = PowerRecoveryLayout::LATCHED_FAULT_NONE;
+static bool eeprom_degraded_aktivan = false;
+static unsigned long zadnja_runtime_eeprom_provjera_ms = 0;
+static bool prijavljena_pauza_eeprom_degraded = false;
 
 static uint16_t izracunajChecksum(const SystemStateBackup& stanje) {
   uint16_t checksum = 0;
@@ -62,6 +83,223 @@ static bool jeStanjeValidno(const SystemStateBackup& stanje) {
 
 static bool jeLegacyBackupPoVremenu(const SystemStateBackup& stanje) {
   return stanje.rtc_timestamp >= PowerRecoveryLayout::LEGACY_MIN_UNIX_TIMESTAMP;
+}
+
+static uint16_t izracunajChecksumWatchdogSafeMode(const WatchdogSafeModeState& stanje) {
+  uint16_t checksum = stanje.potpis;
+  checksum += stanje.brojWatchdogResetova;
+  checksum += stanje.lockdownAktivan;
+  checksum += static_cast<uint16_t>((stanje.pocetakProzoraUnix >> 16) & 0xFFFF);
+  checksum += static_cast<uint16_t>(stanje.pocetakProzoraUnix & 0xFFFF);
+  checksum += static_cast<uint16_t>((stanje.zadnjiWatchdogUnix >> 16) & 0xFFFF);
+  checksum += static_cast<uint16_t>(stanje.zadnjiWatchdogUnix & 0xFFFF);
+  return checksum;
+}
+
+static uint16_t izracunajChecksumLatchedFault(const LatchedFaultState& stanje) {
+  uint16_t checksum = stanje.potpis;
+  checksum += stanje.aktivan;
+  checksum += stanje.kod;
+  checksum += static_cast<uint16_t>((stanje.zadnjiFaultUnix >> 16) & 0xFFFF);
+  checksum += static_cast<uint16_t>(stanje.zadnjiFaultUnix & 0xFFFF);
+  return checksum;
+}
+
+static void postaviPocetnoWatchdogSafeModeStanje(WatchdogSafeModeState& stanje) {
+  memset(&stanje, 0, sizeof(stanje));
+  stanje.potpis = PowerRecoveryLayout::WATCHDOG_SAFE_MODE_POTPIS;
+  stanje.checksum = izracunajChecksumWatchdogSafeMode(stanje);
+}
+
+static bool jeWatchdogSafeModeStanjeValjano(const WatchdogSafeModeState& stanje) {
+  return stanje.potpis == PowerRecoveryLayout::WATCHDOG_SAFE_MODE_POTPIS &&
+         stanje.checksum == izracunajChecksumWatchdogSafeMode(stanje);
+}
+
+static bool ucitajWatchdogSafeModeStanje(WatchdogSafeModeState& stanje) {
+  if (!VanjskiEEPROM::procitaj(PowerRecoveryLayout::BAZA_WATCHDOG_SAFE_MODE,
+                               &stanje,
+                               sizeof(stanje))) {
+    postaviPocetnoWatchdogSafeModeStanje(stanje);
+    return false;
+  }
+
+  if (!jeWatchdogSafeModeStanjeValjano(stanje)) {
+    postaviPocetnoWatchdogSafeModeStanje(stanje);
+    return false;
+  }
+
+  return true;
+}
+
+static void postaviPocetnoLatchedFaultStanje(LatchedFaultState& stanje) {
+  memset(&stanje, 0, sizeof(stanje));
+  stanje.potpis = PowerRecoveryLayout::LATCHED_FAULT_POTPIS;
+  stanje.kod = PowerRecoveryLayout::LATCHED_FAULT_NONE;
+  stanje.checksum = izracunajChecksumLatchedFault(stanje);
+}
+
+static bool jeLatchedFaultStanjeValjano(const LatchedFaultState& stanje) {
+  return stanje.potpis == PowerRecoveryLayout::LATCHED_FAULT_POTPIS &&
+         stanje.checksum == izracunajChecksumLatchedFault(stanje);
+}
+
+static bool ucitajLatchedFaultStanje(LatchedFaultState& stanje) {
+  if (!VanjskiEEPROM::procitaj(PowerRecoveryLayout::BAZA_LATCHED_FAULT,
+                               &stanje,
+                               sizeof(stanje))) {
+    postaviPocetnoLatchedFaultStanje(stanje);
+    return false;
+  }
+
+  if (!jeLatchedFaultStanjeValjano(stanje)) {
+    postaviPocetnoLatchedFaultStanje(stanje);
+    return false;
+  }
+
+  return true;
+}
+
+static bool spremiLatchedFaultStanje(LatchedFaultState& stanje) {
+  stanje.potpis = PowerRecoveryLayout::LATCHED_FAULT_POTPIS;
+  stanje.checksum = izracunajChecksumLatchedFault(stanje);
+  return VanjskiEEPROM::zapisi(PowerRecoveryLayout::BAZA_LATCHED_FAULT,
+                               &stanje,
+                               sizeof(stanje));
+}
+
+static bool spremiWatchdogSafeModeStanje(WatchdogSafeModeState& stanje) {
+  stanje.potpis = PowerRecoveryLayout::WATCHDOG_SAFE_MODE_POTPIS;
+  stanje.checksum = izracunajChecksumWatchdogSafeMode(stanje);
+  return VanjskiEEPROM::zapisi(PowerRecoveryLayout::BAZA_WATCHDOG_SAFE_MODE,
+                               &stanje,
+                               sizeof(stanje));
+}
+
+static bool jeRtcVrijemeValjanoZaSafeMode(const DateTime& vrijeme) {
+  return vrijeme.unixtime() != 0 &&
+         vrijeme.year() >= PowerRecoveryLayout::MIN_VALJANA_GODINA_SAFE_MODE &&
+         vrijeme.year() <= PowerRecoveryLayout::MAX_VALJANA_GODINA_SAFE_MODE;
+}
+
+static uint32_t dohvatiTrenutniUnixSafeMode() {
+  const DateTime trenutnoVrijeme = dohvatiTrenutnoVrijeme();
+  return jeRtcVrijemeValjanoZaSafeMode(trenutnoVrijeme)
+             ? trenutnoVrijeme.unixtime()
+             : 0UL;
+}
+
+static uint32_t dohvatiValjaniUnixZaDijagnostiku() {
+  return dohvatiTrenutniUnixSafeMode();
+}
+
+static void ucitajLatchedFaultPriBootu() {
+  LatchedFaultState stanje{};
+  const bool stanjeUcitano = ucitajLatchedFaultStanje(stanje);
+  latched_fault_aktivan = stanje.aktivan != 0;
+  latched_fault_kod = stanje.kod;
+  eeprom_degraded_aktivan =
+      latched_fault_aktivan &&
+      latched_fault_kod == PowerRecoveryLayout::LATCHED_FAULT_EEPROM;
+
+  if (!stanjeUcitano) {
+    posaljiPCLog(F("Power Recovery: latched fault zapis inicijaliziran"));
+    return;
+  }
+
+  if (latched_fault_aktivan &&
+      latched_fault_kod == PowerRecoveryLayout::LATCHED_FAULT_EEPROM) {
+    signalizirajLatchedFaultEEPROM();
+    posaljiPCLog(F("Power Recovery: ucitan latched EEPROM fault iz EEPROM-a"));
+  }
+}
+
+static void aktivirajLatchedFaultEEPROM(const __FlashStringHelper* razlog) {
+  LatchedFaultState stanje{};
+  ucitajLatchedFaultStanje(stanje);
+  stanje.aktivan = 1;
+  stanje.kod = PowerRecoveryLayout::LATCHED_FAULT_EEPROM;
+  stanje.zadnjiFaultUnix = dohvatiValjaniUnixZaDijagnostiku();
+
+  latched_fault_aktivan = true;
+  latched_fault_kod = stanje.kod;
+  eeprom_degraded_aktivan = true;
+  signalizirajLatchedFaultEEPROM();
+
+  if (!spremiLatchedFaultStanje(stanje)) {
+    posaljiPCLog(F("Power Recovery: WARNING - latched fault nije spremljen u EEPROM"));
+    signalizirajError_EEPROM();
+    return;
+  }
+
+  posaljiPCLog(razlog);
+}
+
+static void obradiWatchdogSafeModePriBootu() {
+  WatchdogSafeModeState stanje{};
+  const bool stanjeUcitano = ucitajWatchdogSafeModeStanje(stanje);
+  safe_mode_aktivan = stanje.lockdownAktivan != 0;
+
+  if (safe_mode_aktivan) {
+    posaljiPCLog(F("Power Recovery: Safe mode vec aktivan iz EEPROM-a"));
+  } else if (!stanjeUcitano) {
+    posaljiPCLog(F("Power Recovery: Watchdog safe-mode zapis inicijaliziran"));
+  }
+
+  if (!watchdog_reset) {
+    return;
+  }
+
+  if (power_loss_detected) {
+    posaljiPCLog(F("Power Recovery: Watchdog reset nije brojio za lockdown jer je prisutan i gubitak napajanja"));
+    return;
+  }
+
+  const uint32_t sadaUnix = dohvatiTrenutniUnixSafeMode();
+  if (sadaUnix == 0UL) {
+    posaljiPCLog(F("Power Recovery: Watchdog reset nije brojio za lockdown jer RTC vrijeme nije valjano"));
+    return;
+  }
+
+  const bool trebaNoviProzor =
+      stanje.pocetakProzoraUnix == 0UL ||
+      stanje.zadnjiWatchdogUnix == 0UL ||
+      sadaUnix < stanje.pocetakProzoraUnix ||
+      (sadaUnix - stanje.pocetakProzoraUnix) >
+          PowerRecoveryLayout::WATCHDOG_RESET_PROZOR_SEKUNDE;
+
+  if (trebaNoviProzor) {
+    stanje.brojWatchdogResetova = 1;
+    stanje.pocetakProzoraUnix = sadaUnix;
+  } else if (stanje.brojWatchdogResetova < 255U) {
+    ++stanje.brojWatchdogResetova;
+  }
+
+  stanje.zadnjiWatchdogUnix = sadaUnix;
+
+  if (stanje.brojWatchdogResetova >
+      PowerRecoveryLayout::WATCHDOG_RESET_LOCKDOWN_PRAG) {
+    stanje.lockdownAktivan = 1;
+    safe_mode_aktivan = true;
+    posaljiPCLog(F("Power Recovery: LOCKDOWN aktiviran zbog previse watchdog resetova unutar 10 minuta"));
+  }
+
+  if (!spremiWatchdogSafeModeStanje(stanje)) {
+    posaljiPCLog(F("Power Recovery: WARNING - watchdog safe-mode stanje nije spremljeno"));
+    signalizirajError_EEPROM();
+    return;
+  }
+
+  char logSafeMode[112];
+  snprintf_P(
+      logSafeMode,
+      sizeof(logSafeMode),
+      PSTR("Power Recovery: watchdog prozor start=%lu zadnji=%lu broj_resetova=%u lockdown=%s"),
+      stanje.pocetakProzoraUnix,
+      stanje.zadnjiWatchdogUnix,
+      stanje.brojWatchdogResetova,
+      stanje.lockdownAktivan ? "DA" : "NE");
+  posaljiPCLog(logSafeMode);
 }
 
 bool ucitajNajnovijiBackup(SystemStateBackup& backup, int* slotNajnoviji = nullptr) {
@@ -103,14 +341,6 @@ bool ucitajNajnovijiBackup(SystemStateBackup& backup, int* slotNajnoviji = nullp
   return pronadeno;
 }
 
-void oznaciWatchdogReset(bool resetiranWatchdog) {
-  watchdog_reset = resetiranWatchdog;
-}
-
-void oznaciGubitakNapajanja(bool izgubljenoNapajanje) {
-  power_loss_detected = izgubljenoNapajanje;
-}
-
 void odradiBootRecovery() {
   if (boot_recovery_odraden) {
     posaljiPCLog(F("Power Recovery: Boot recovery već odrađen, preskačem"));
@@ -124,8 +354,6 @@ void odradiBootRecovery() {
     posaljiPCLog(F("Power Recovery: Normal boot (no watchdog/power loss)"));
     return;
   }
-
-  reset_counter++;
 
   SystemStateBackup backup{};
   int ucitaniSlot = -1;
@@ -196,6 +424,14 @@ void spremiKriticalnoStanje() {
     return;
   }
 
+  if (eeprom_degraded_aktivan) {
+    if (!prijavljena_pauza_eeprom_degraded) {
+      posaljiPCLog(F("Power Recovery: spremanje pauzirano jer je EEPROM u degradiranom nacinu rada"));
+      prijavljena_pauza_eeprom_degraded = true;
+    }
+    return;
+  }
+
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     if (!prijavljenaPauzaSpremanja) {
       posaljiPCLog(F("Power Recovery: spremanje pauzirano dok vrijeme toranjskog sata nije potvrdeno"));
@@ -205,6 +441,7 @@ void spremiKriticalnoStanje() {
   }
 
   prijavljenaPauzaSpremanja = false;
+  prijavljena_pauza_eeprom_degraded = false;
   last_save = sada;
 
   SystemStateBackup backup;
@@ -220,7 +457,6 @@ void spremiKriticalnoStanje() {
   if (VanjskiEEPROM::zapisi(adresa, &backup, sizeof(SystemStateBackup))) {
     save_slot = (save_slot + 1) % PowerRecoveryLayout::SLOTOVI_BOOT_FLAGS;
     save_sequence = (save_sequence == 0xFFFFFFFFUL) ? 1UL : (save_sequence + 1UL);
-    last_state_save_time = sada;
   }
 }
 
@@ -246,12 +482,118 @@ bool provjeriZdravostEEPROM() {
   return read_back == test_value;
 }
 
+void osvjeziPowerRecoveryDijagnostiku() {
+  if (eeprom_degraded_aktivan) {
+    return;
+  }
+
+  const unsigned long sadaMs = millis();
+  if ((sadaMs - zadnja_runtime_eeprom_provjera_ms) <
+      PowerRecoveryLayout::RUNTIME_EEPROM_HEALTH_INTERVAL_MS) {
+    return;
+  }
+
+  zadnja_runtime_eeprom_provjera_ms = sadaMs;
+
+  if (!provjeriZdravostEEPROM()) {
+    aktivirajLatchedFaultEEPROM(
+        F("Power Recovery: runtime EEPROM health-check nije prosao, fault latched"));
+    return;
+  }
+
+  posaljiPCLog(F("Power Recovery: runtime EEPROM health-check uspjesan"));
+}
+
+bool jeLatchedFaultAktivan() {
+  return latched_fault_aktivan;
+}
+
+bool potvrdiLatchedFault() {
+  if (!latched_fault_aktivan) {
+    return true;
+  }
+
+  LatchedFaultState stanje{};
+  ucitajLatchedFaultStanje(stanje);
+  stanje.aktivan = 0;
+  stanje.kod = PowerRecoveryLayout::LATCHED_FAULT_NONE;
+  stanje.zadnjiFaultUnix = dohvatiValjaniUnixZaDijagnostiku();
+
+  if (!spremiLatchedFaultStanje(stanje)) {
+    posaljiPCLog(F("Power Recovery: WARNING - nije moguce potvrditi latched fault"));
+    signalizirajError_EEPROM();
+    return false;
+  }
+
+  latched_fault_aktivan = false;
+  latched_fault_kod = PowerRecoveryLayout::LATCHED_FAULT_NONE;
+  eeprom_degraded_aktivan = false;
+  prijavljena_pauza_eeprom_degraded = false;
+  zadnja_runtime_eeprom_provjera_ms = millis();
+  potvrdiLatchedFaultEEPROM();
+  posaljiPCLog(F("Power Recovery: operater potvrdio latched fault"));
+  return true;
+}
+
+bool jeEepromDegradiraniNacinAktivan() {
+  return eeprom_degraded_aktivan;
+}
+
+bool jeSafeModeAktivan() {
+  return safe_mode_aktivan;
+}
+
+void primijeniSafeModeAkoTreba() {
+  if (!safe_mode_aktivan) {
+    return;
+  }
+
+  postaviGlobalnuBlokaduZvona(true);
+  postaviGlobalnuBlokaduOtkucavanja(true);
+  postaviRucnuBlokaduKazaljki(true);
+  postaviRucnuBlokaduPloce(true);
+  zaustaviSlavljenje();
+  zaustaviMrtvacko();
+
+  if (!safe_mode_primijenjen) {
+    posaljiPCLog(F("Power Recovery: Safe mode blokade primijenjene na mehaniku toranjskog sata"));
+    safe_mode_primijenjen = true;
+  }
+}
+
+bool otkljucajSafeMode() {
+  WatchdogSafeModeState stanje{};
+  ucitajWatchdogSafeModeStanje(stanje);
+  stanje.brojWatchdogResetova = 0;
+  stanje.lockdownAktivan = 0;
+  stanje.pocetakProzoraUnix = 0UL;
+  stanje.zadnjiWatchdogUnix = 0UL;
+
+  if (!spremiWatchdogSafeModeStanje(stanje)) {
+    posaljiPCLog(F("Power Recovery: WARNING - neuspjelo servisno otkljucavanje safe mode-a"));
+    signalizirajError_EEPROM();
+    return false;
+  }
+
+  safe_mode_aktivan = false;
+  safe_mode_primijenjen = false;
+  watchdog_reset = false;
+
+  postaviGlobalnuBlokaduZvona(false);
+  postaviGlobalnuBlokaduOtkucavanja(false);
+  postaviRucnuBlokaduKazaljki(false);
+  postaviRucnuBlokaduPloce(false);
+
+  posaljiPCLog(F("Power Recovery: Safe mode servisno otkljucan"));
+  return true;
+}
+
 void inicijalizirajPowerRecovery() {
-  boot_time = millis();
-  last_state_save_time = boot_time;
   boot_recovery_odraden = false;
+  safe_mode_primijenjen = false;
   watchdog_reset = jeWatchdogResetDetektiran();
   power_loss_detected = jePowerLossResetDetektiran();
+  zadnja_runtime_eeprom_provjera_ms = millis();
 
   char logReset[96];
   snprintf_P(logReset, sizeof(logReset),
@@ -261,10 +603,15 @@ void inicijalizirajPowerRecovery() {
              power_loss_detected ? "DA" : "NE");
   posaljiPCLog(logReset);
 
+  ucitajLatchedFaultPriBootu();
+
   if (!provjeriZdravostEEPROM()) {
-    posaljiPCLog(F("Power Recovery: WARNING - EEPROM health issues detected"));
+    aktivirajLatchedFaultEEPROM(
+        F("Power Recovery: boot EEPROM health-check nije prosao, fault latched"));
     signalizirajError_EEPROM();
   }
+
+  obradiWatchdogSafeModePriBootu();
 
   spremiKriticalnoStanje();
 }

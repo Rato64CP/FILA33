@@ -20,7 +20,6 @@ constexpr float SUNCEV_ZENIT_RAD = 90.833f * (PI_F / 180.0f);
 constexpr int32_t SUNCEVA_LOKACIJA_SIRINA_E5 = 4350000L;
 constexpr int32_t SUNCEVA_LOKACIJA_DUZINA_E5 = 1695000L;
 constexpr int FIKSNO_PODNE_MINUTA = 12 * 60;
-constexpr uint8_t FIKSNO_PODNE_SEKUNDA = 30;
 constexpr unsigned long ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS = 1000UL;
 
 struct DnevniRasporedSuncevihDogadaja {
@@ -686,7 +685,11 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
     return;
   }
 
-  if (sada.hour() != 12 || sada.minute() != 0 || sada.second() != FIKSNO_PODNE_SEKUNDA) {
+  // Podnevno zvono toranjskog sata okidamo cim udemo u 12:00 minutu.
+  // Ako je satno otkucavanje jos aktivno, koristi se isti mehanizam zakazivanja
+  // kao i za ostale kolizije pa zvono krece odmah nakon dovrsetka otkucavanja,
+  // bez fiksne odgode od 30 s.
+  if (sada.hour() != 12 || sada.minute() != 0) {
     return;
   }
 
@@ -714,7 +717,13 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
   zakaziBlagdanskoSlavljenjeAkoTreba(SUNCEVI_DOGADAJ_PODNE, sada);
 
   char log[64];
-  snprintf_P(log, sizeof(log), PSTR("Suncevo zvonjenje: podne -> ZVONO%u u 12:00:30"), zvono);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Suncevo zvonjenje: podne -> ZVONO%u u %02u:%02u:%02u"),
+             zvono,
+             sada.hour(),
+             sada.minute(),
+             sada.second());
   posaljiPCLog(log);
 }
 

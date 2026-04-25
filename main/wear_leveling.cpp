@@ -14,7 +14,7 @@ constexpr int EEPROM_KAPACITET = 4096;
 // Zadnji dio 24C32 rezerviran je za metapodatke wear-levelinga.
 // Tu pamtimo koji je slot zadnji uspješno zapisan za pojedini segment
 // kako bi recovery u modulima iz main/ nakon boota čitao najnovije stanje.
-constexpr int BAZA_META = 3968;
+constexpr int BAZA_META = EepromLayout::BAZA_WEAR_LEVELING_META;
 constexpr int BROJ_META_ZAPISA = 16;
 
 struct MetaWearLeveling {

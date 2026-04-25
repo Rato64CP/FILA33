@@ -11,6 +11,7 @@
 #include "okretna_ploca.h"
 #include "esp_serial.h"
 #include "lcd_display.h"
+#include "power_recovery.h"
 
 // DS3231 RTC modul
 static RTC_DS3231 rtc;
@@ -55,6 +56,7 @@ static unsigned long rtcSqwZadnjiTickMs = 0;
 static bool dstAktivan = false;
 static bool dstStatusUcitan = false;
 static bool vrijemePotvrdjenoZaAutomatiku = false;
+static bool rtcDegradiraniNacinAktivan = false;
 static bool ntpSinkronizacijaZakazana = false;
 static DateTime zakazanoNtpVrijeme((uint32_t)0);
 static uint32_t zakazaniNtpRtcTick = 0;
@@ -73,6 +75,10 @@ static const uint16_t MAX_VALJANA_GODINA = 2099;
 static const uint32_t MAX_SKOK_BEZ_DODATNE_POTVRDE_S = 300UL;
 static const uint32_t MAX_RAZLIKA_IZMEDU_DVIJE_POTVRDE_S = 3UL;
 static const unsigned long ROK_SUMNJIVE_SINKRONIZACIJE_MS = 15UL * 60UL * 1000UL;
+static const uint8_t RTC_DEGRADED_PRAG_NEUSPJEHA = 3;
+static const uint8_t RTC_OPORAVAK_PRAG_USPJEHA = 3;
+static uint8_t rtcNeuspjesiZaredom = 0;
+static uint8_t rtcUspjesiZaredom = 0;
 
 void rtcSqwPrekid() {
   rtcSekundniBrojac++;
@@ -101,6 +107,9 @@ static void azurirajOznakuIzvora() {
 static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool imaEksplicitanDST,
                                   bool dstAktivanIzvori);
+static void evidentirajRtcUspjeh();
+static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
+void oznaciPovratakNaRTC();
 
 static bool jeVrijemeURasponuPouzdanosti(const DateTime& vrijeme) {
   return vrijeme.unixtime() != 0 &&
@@ -217,6 +226,10 @@ static void otkaziZakazanuNtpSinkronizaciju() {
 }
 
 static void spremiZadnjuSinkronizaciju() {
+  if (jeEepromDegradiraniNacinAktivan()) {
+    return;
+  }
+
   EepromLayout::ZadnjaSinkronizacija zs;
   zs.izvor = static_cast<int>(zadnjiPotvrdeniIzvor);
   zs.timestamp = zadnjaSinkronizacija.unixtime();
@@ -224,6 +237,32 @@ static void spremiZadnjuSinkronizaciju() {
                        EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
                        zs);
   zadnjaSinkronizacijaMs = millis();
+}
+
+static unsigned long izracunajZadnjuSinkronizacijuMsPriBootu(
+    const DateTime& trenutnoRtcVrijeme,
+    const DateTime& spremljenaSinkronizacija) {
+  if (!jeVrijemeURasponuPouzdanosti(spremljenaSinkronizacija)) {
+    return 0;
+  }
+
+  const unsigned long sadaMs = millis();
+  const uint32_t timeoutSekunde = TIMEOUT_SINKRONIZACIJE_MS / 1000UL;
+
+  if (!jeVrijemeURasponuPouzdanosti(trenutnoRtcVrijeme) ||
+      trenutnoRtcVrijeme.unixtime() < spremljenaSinkronizacija.unixtime()) {
+    // Ako RTC nakon restarta toranjskog sata nije pouzdan, sinkronizaciju tretiramo
+    // kao zastarjelu umjesto da joj damo laznih 24 sata svjezine.
+    return sadaMs - (TIMEOUT_SINKRONIZACIJE_MS + 1UL);
+  }
+
+  const uint32_t starostSekunde =
+      trenutnoRtcVrijeme.unixtime() - spremljenaSinkronizacija.unixtime();
+  if (starostSekunde > timeoutSekunde) {
+    return sadaMs - (TIMEOUT_SINKRONIZACIJE_MS + 1UL);
+  }
+
+  return sadaMs - (starostSekunde * 1000UL);
 }
 
 static uint16_t izracunajDSTChecksum(const EepromLayout::DSTStatus& stanje) {
@@ -277,6 +316,10 @@ static bool odrediDSTStatusSinkronizacije(const DateTime& vrijeme,
 }
 
 static void spremiDSTStatus() {
+  if (jeEepromDegradiraniNacinAktivan()) {
+    return;
+  }
+
   EepromLayout::DSTStatus stanje{};
   stanje.potpis = EepromLayout::DST_STATUS_POTPIS;
   stanje.dstAktivan = dstAktivan ? 1 : 0;
@@ -323,7 +366,12 @@ static void primijeniDSTPomak(int pomakSekundi, bool noviDSTAktivan, const __Fla
   if (rtc.begin()) {
     rtc.adjust(novoVrijeme);
     rtcBaterijaOk = true;
+    rtcDegradiraniNacinAktivan = false;
+    rtcNeuspjesiZaredom = 0;
+    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
   } else {
+    evidentirajRtcNeuspjeh(
+        F("RTC: neuspjela DST korekcija, ostajem u degradiranom nacinu rada"));
     signalizirajError_RTC();
   }
 
@@ -358,7 +406,8 @@ static void ucitajZadnjuSinkronizaciju() {
                           EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
                           zs)) {
     zadnjaSinkronizacija = DateTime(zs.timestamp);
-    zadnjaSinkronizacijaMs = 0;
+    zadnjaSinkronizacijaMs =
+        izracunajZadnjuSinkronizacijuMsPriBootu(trenutnoVrijeme, zadnjaSinkronizacija);
       if (zs.izvor == IZ_MAN) {
         zadnjiPotvrdeniIzvor = IZ_MAN;
       } else if (zs.izvor == IZ_NTP) {
@@ -376,6 +425,21 @@ static void ucitajZadnjuSinkronizaciju() {
   azurirajOznakuIzvora();
 }
 
+static bool osvjeziTrenutnoVrijemeIzRtc() {
+  const DateTime rtcVrijeme = rtc.now();
+  if (!jeVrijemeURasponuPouzdanosti(rtcVrijeme)) {
+    evidentirajRtcNeuspjeh(
+        F("RTC: uzastopna nevaljana ocitanja, ulazim u degradirani nacin rada"));
+    signalizirajError_RTC();
+    return false;
+  }
+
+  trenutnoVrijeme = rtcVrijeme;
+  rtcBaterijaOk = true;
+  evidentirajRtcUspjeh();
+  return true;
+}
+
 static void postaviVrijemePotvrdjenoZaAutomatiku(bool potvrdeno, const __FlashStringHelper* razlog) {
   if (vrijemePotvrdjenoZaAutomatiku == potvrdeno && razlog == nullptr) {
     return;
@@ -385,6 +449,45 @@ static void postaviVrijemePotvrdjenoZaAutomatiku(bool potvrdeno, const __FlashSt
   if (razlog != nullptr) {
     posaljiPCLog(razlog);
   }
+}
+
+static void evidentirajRtcUspjeh() {
+  rtcNeuspjesiZaredom = 0;
+  if (rtcUspjesiZaredom < 255U) {
+    ++rtcUspjesiZaredom;
+  }
+
+  if (!rtcDegradiraniNacinAktivan || rtcUspjesiZaredom < RTC_OPORAVAK_PRAG_USPJEHA) {
+    return;
+  }
+
+  rtcDegradiraniNacinAktivan = false;
+  if (rtcBaterijaOk) {
+    postaviVrijemePotvrdjenoZaAutomatiku(
+        true,
+        F("RTC: izlazim iz degradiranog nacina rada nakon uzastopnih valjanih ocitanja"));
+  } else {
+    posaljiPCLog(F("RTC: ocitanje se oporavilo, ali vrijeme jos nije potvrdeno zbog RTC baterije"));
+  }
+}
+
+static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog) {
+  rtcUspjesiZaredom = 0;
+  if (rtcNeuspjesiZaredom < 255U) {
+    ++rtcNeuspjesiZaredom;
+  }
+
+  if (rtcDegradiraniNacinAktivan || rtcNeuspjesiZaredom < RTC_DEGRADED_PRAG_NEUSPJEHA) {
+    return;
+  }
+
+  rtcDegradiraniNacinAktivan = true;
+  oznaciPovratakNaRTC();
+  postaviVrijemePotvrdjenoZaAutomatiku(
+      false,
+      F("RTC: degradirani nacin rada, automatika toranjskog sata je privremeno blokirana"));
+  signalizirajError_RTC();
+  posaljiPCLog(razlog);
 }
 
 DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
@@ -409,6 +512,9 @@ DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
 
 void inicijalizirajRTC() {
   if (!rtc.begin()) {
+    rtcDegradiraniNacinAktivan = true;
+    rtcNeuspjesiZaredom = RTC_DEGRADED_PRAG_NEUSPJEHA;
+    rtcUspjesiZaredom = 0;
     posaljiPCLog(F("RTC: DS3231 nije dostupan"));
     rtcBaterijaOk = false;
     postaviVrijemePotvrdjenoZaAutomatiku(
@@ -416,6 +522,9 @@ void inicijalizirajRTC() {
         F("Vrijeme: nije potvrdeno, automatika toranjskog sata ostaje blokirana"));
     signalizirajError_RTC();
   } else {
+    rtcDegradiraniNacinAktivan = false;
+    rtcNeuspjesiZaredom = 0;
+    rtcUspjesiZaredom = 0;
     // Provjera valjanosti RTC baterije
     if (rtc.lostPower()) {
       posaljiPCLog(F("RTC: baterija je prazna, vrijeme nije pouzdano"));
@@ -431,7 +540,7 @@ void inicijalizirajRTC() {
       postaviVrijemePotvrdjenoZaAutomatiku(true, nullptr);
       posaljiPCLog(F("RTC: baterija OK, vrijeme je pouzdano"));
     }
-    trenutnoVrijeme = rtc.now();
+    osvjeziTrenutnoVrijemeIzRtc();
     rtc.writeSqwPinMode(DS3231_SquareWave1Hz);
   }
   pinMode(PIN_RTC_SQW, INPUT_PULLUP);
@@ -491,10 +600,8 @@ DateTime dohvatiTrenutnoVrijeme() {
       ntpPrimijenjenNaOvomTicku = true;
       posaljiPCLog(F("NTP: sinkronizacija primijenjena na RTC SQW granici sekunde"));
     }
-    if (!ntpPrimijenjenNaOvomTicku && rtc.begin()) {
-      trenutnoVrijeme = rtc.now();
-    } else if (!ntpPrimijenjenNaOvomTicku) {
-      signalizirajError_RTC();
+    if (!ntpPrimijenjenNaOvomTicku) {
+      osvjeziTrenutnoVrijemeIzRtc();
     }
   } else if ((sadaMs - rtcSqwZadnjiTickMs) > 2500UL) {
     rtcSqwAktivan = false;
@@ -504,9 +611,7 @@ DateTime dohvatiTrenutnoVrijeme() {
     }
     if ((sadaMs - zadnjiFallbackPollMs) >= 1000UL || zadnjiFallbackPollMs == 0) {
       zadnjiFallbackPollMs = sadaMs;
-      if (rtc.begin()) {
-        trenutnoVrijeme = rtc.now();
-      }
+      osvjeziTrenutnoVrijemeIzRtc();
     }
   }
 
@@ -541,7 +646,12 @@ static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
   if (rtc.begin()) {
     rtc.adjust(ntpVrijeme);
     rtcBaterijaOk = true;
+    rtcDegradiraniNacinAktivan = false;
+    rtcNeuspjesiZaredom = 0;
+    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
   } else {
+    evidentirajRtcNeuspjeh(
+        F("RTC: neuspjela NTP primjena na RTC, ostajem u degradiranom nacinu rada"));
     signalizirajError_RTC();
   }
 
@@ -617,7 +727,12 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
   if (rtc.begin()) {
     rtc.adjust(rucnoVrijeme);
     rtcBaterijaOk = true;
+    rtcDegradiraniNacinAktivan = false;
+    rtcNeuspjesiZaredom = 0;
+    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
   } else {
+    evidentirajRtcNeuspjeh(
+        F("RTC: neuspjelo rucno postavljanje vremena na RTC, ostajem u degradiranom nacinu rada"));
     signalizirajError_RTC();
   }
 
@@ -654,6 +769,10 @@ bool jeZadnjaSvjezaSinkronizacijaIzNTP() {
 
 bool jeRtcSqwAktivan() {
   return rtcSqwAktivan;
+}
+
+bool jeRtcDegradiraniNacinAktivan() {
+  return rtcDegradiraniNacinAktivan;
 }
 
 bool jeVrijemePotvrdjenoZaAutomatiku() {

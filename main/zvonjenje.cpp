@@ -14,6 +14,7 @@
 
 static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
+static const unsigned long INTERVAL_TREPTANJA_LAMPICE_INERCIJE_MS = 500UL;
 
 static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
   PIN_ZVONO_1,
@@ -73,6 +74,28 @@ static unsigned long dohvatiTrajanjeInercijeZvonaMs(int indeks) {
   return 0UL;
 }
 
+static void osvjeziLampicuZvona(int indeks, unsigned long sadaMs) {
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
+  }
+
+  bool lampicaUkljucena = false;
+  if (zvona.aktivan[indeks]) {
+    lampicaUkljucena = true;
+  } else if (inercija.aktivna[indeks]) {
+    lampicaUkljucena =
+        ((sadaMs / INTERVAL_TREPTANJA_LAMPICE_INERCIJE_MS) % 2UL) == 0UL;
+  }
+
+  digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], lampicaUkljucena ? HIGH : LOW);
+}
+
+static void osvjeziLampiceZvona(unsigned long sadaMs) {
+  for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
+    osvjeziLampicuZvona(i, sadaMs);
+  }
+}
+
 static void pokreniInercijuZvona(int indeks) {
   if (!jeValjanIndeksZvona(indeks)) {
     return;
@@ -117,8 +140,8 @@ static void aktivirajBell_Relej(int indeks) {
   // Zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
   prekiniPosebneNacineZbogZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
-  digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], HIGH);
   pokreniInercijuZvona(indeks);
+  osvjeziLampicuZvona(indeks, millis());
 
   char log[56];
   snprintf_P(log,
@@ -136,7 +159,7 @@ static void deaktivirajBell_Relej(int indeks) {
   }
 
   digitalWrite(PINOVI_ZVONA[indeks], LOW);
-  digitalWrite(PINOVI_LAMPICA_ZVONA[indeks], LOW);
+  osvjeziLampicuZvona(indeks, millis());
   char log[32];
   snprintf_P(log, sizeof(log), PSTR("Zvono%d: deaktivirana"), indeks + 1);
   posaljiPCLog(log);
@@ -173,6 +196,7 @@ void ukljuciZvono(int zvono) {
     // postavlja vremenski ogranicen rad.
     zvona.start_ms[indeks] = millis();
     zvona.duration_ms[indeks] = 0;
+    osvjeziLampicuZvona(indeks, zvona.start_ms[indeks]);
   }
 }
 
@@ -188,6 +212,7 @@ void iskljuciZvono(int zvono) {
     zvona.start_ms[indeks] = 0;
     zvona.duration_ms[indeks] = 0;
     pokreniInercijuZvona(indeks);
+    osvjeziLampicuZvona(indeks, millis());
   }
 }
 
@@ -203,6 +228,7 @@ bool jeLiInerciaAktivna() {
     const unsigned long proteklo = sadaMs - inercija.vrijeme_pocetka[i];
     if (proteklo >= inercija.trajanje_ms[i]) {
       inercija.aktivna[i] = false;
+      osvjeziLampicuZvona(i, sadaMs);
       char log[48];
       snprintf_P(log,
                  sizeof(log),
@@ -216,6 +242,7 @@ bool jeLiInerciaAktivna() {
     baremJednaAktivna = true;
   }
 
+  osvjeziLampiceZvona(sadaMs);
   return baremJednaAktivna;
 }
 
@@ -272,6 +299,7 @@ void postaviGlobalnuBlokaduZvona(bool blokiraj) {
       zvona.start_ms[i] = 0UL;
       zvona.duration_ms[i] = 0UL;
     }
+    osvjeziLampiceZvona(millis());
     posaljiPCLog(F("Globalna blokada zvona: UKLJUCENA"));
   } else {
     posaljiPCLog(F("Globalna blokada zvona: ISKLJUCENA"));
@@ -364,6 +392,7 @@ void upravljajZvonom() {
   }
 
   jeLiInerciaAktivna();
+  osvjeziLampiceZvona(sadaMs);
 
   for (uint8_t i = 0; i < BROJ_ZVONA_MAX; i++) {
     const bool rucniOverride =

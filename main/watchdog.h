@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+// Odmah na pocetku boot-a ocita i pocisti MCU reset zastavice (MCUSR)
+// kako bi kasnija logika radila nad stabilnim snapshotom uzroka reseta.
+void pripremiResetFlagsMCU();
+
 // Inicijalizacija watchdog timera
 // Postavlja WDT na ~8 sekundi (maximum za ATmega2560)
 void inicijalizirajWatchdog();

@@ -15,6 +15,7 @@
 #include "postavke.h"
 #include "lcd_display.h"
 #include "sunceva_automatika.h"
+#include "watchdog.h"
 
 // UART prema mreznom mostu toranjskog sata bira se kroz main/podesavanja_piny.h.
 static HardwareSerial& espSerijskiPort = ESP_SERIJSKI_PORT;
@@ -26,6 +27,8 @@ static const unsigned long WIFI_STATUS_DRUGI_UPIT_ODGODA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_RECOVERY_INTERVAL_MS = 300000UL;
 static const uint8_t NTP_SIGURNA_SEKUNDA_MIN = 12;
 static const uint8_t NTP_SIGURNA_SEKUNDA_MAX = 50;
+static const uint16_t MIN_NTP_GODINA = 2000;
+static const uint16_t MAX_NTP_GODINA = 2099;
 
 // RTC + NTP tok toranjskog sata mora ostati uskladen s time_glob.cpp:
 // - boot krece iz RTC-a
@@ -53,7 +56,7 @@ static bool vrijemeProslo(unsigned long sadaMs, unsigned long ciljMs) {
 }
 
 static bool jeResetNakonGubitkaNapajanja() {
-  const uint8_t mcusr = MCUSR;
+  const uint8_t mcusr = dohvatiResetFlags();
   const bool imaBrownOutIliPowerOn = (mcusr & ((1 << BORF) | (1 << PORF))) != 0;
   const bool imaVanjskiReset = (mcusr & (1 << EXTRF)) != 0;
   return imaBrownOutIliPowerOn && !imaVanjskiReset;
@@ -316,6 +319,9 @@ void inicijalizirajESP() {
   zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
   postaviWiFiStatus(false);
   posaljiPCLog(F("Serijska veza prema mreznom mostu inicijalizirana"));
+  // Kratka pauza je samo za stabilizaciju serijske veze tijekom boot-a.
+  // Ovdje jos nismo usli u glavnu loop petlju niti su mehanike aktivirane,
+  // pa ovih 50 ms ne remeti vremenski kriticne dijelove toranjskog sata.
   delay(50);
   posaljiWifiPostavkeESP();
   posaljiWiFiStatusESP();
@@ -513,7 +519,14 @@ static bool parsirajISOVrijeme(const char* iso, DateTime& dt) {
   broj[1] = iso[18];
   const int sekunda = atoi(broj);
 
-  if (godina < 2024 || mjesec < 1 || mjesec > 12) return false;
+  // Ovdje parsiramo iskljucivo NTP payload koji dolazi s mreznog mosta.
+  // Donju granicu drzimo na 2000 jer RTClib::DateTime podrzava raspon 2000-2099,
+  // a ne zelimo da oporavak nakon loseg RTC stanja padne zbog proizvoljno
+  // previsoke godine u parseru.
+  if (godina < MIN_NTP_GODINA || godina > MAX_NTP_GODINA ||
+      mjesec < 1 || mjesec > 12) {
+    return false;
+  }
 
   static const uint8_t daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   const bool prijestupnaGodina =

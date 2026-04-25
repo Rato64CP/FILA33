@@ -3,4 +3,5 @@
 
 void inicijalizirajTipke();
 void provjeriTipke();
+bool provjeriOtkljucavanjeSafeMode();
 

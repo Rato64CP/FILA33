@@ -215,31 +215,6 @@ static int dohvatiPozicijuPloceIzUredjivanja() {
   return constrain(dohvatiPozicijuPloce(), 0, 63);
 }
 
-static bool dohvatiUnesenoVrijeme(int* sat, int* minuta);
-
-static bool postaviVrijemeIzUnosaZaPlocu() {
-  int sat = 0;
-  int minuta = 0;
-  int pozicija = 0;
-  if (!dohvatiUnesenoVrijeme(&sat, &minuta)) {
-    posaljiPCLog(F("Ploca: nepotpun unos vremena"));
-    return false;
-  }
-
-  if (sat < 0 || sat > 23 || minuta < 0 || minuta > 59 ||
-      !pretvoriVrijemeUPozicijuPloceZaPocetak(sat,
-                                              minuta,
-                                              plocaPocetakUredjivanjeMinuta,
-                                              &pozicija)) {
-    posaljiPCLog(F("Ploca: neispravan unos vremena, koristi korake 59/14/29/44"));
-    return false;
-  }
-
-  plocaSatUredjivanje = sat;
-  plocaMinutaUredjivanje = minuta;
-  return true;
-}
-
 static void pomakniUredjivanjePloceZaPozicije(int deltaPozicija) {
   int pozicija = dohvatiPozicijuPloceIzUredjivanja();
   pozicija = (pozicija + deltaPozicija) % 64;
@@ -861,7 +836,6 @@ static void prikaziPlocaMenu() {
   char redak2[17];
   char pocetak[6];
   char kraj[6];
-  char maska[6];
   formatirajMinuteUDanuHHMM(plocaPocetakUredjivanjeMinuta, pocetak, sizeof(pocetak));
   formatirajMinuteUDanuHHMM(plocaKrajUredjivanjeMinuta, kraj, sizeof(kraj));
   snprintf(redak1,
@@ -871,12 +845,7 @@ static void prikaziPlocaMenu() {
            pocetak,
            kraj);
 
-  if (unosVremenaAktivan) {
-    formatirajMaskuUnosaVremena(maska, sizeof(maska));
-    snprintf(redak2, sizeof(redak2), "POZ: %s", maska);
-  } else {
-    snprintf(redak2, sizeof(redak2), "POZ: %02d:%02d", plocaSatUredjivanje, plocaMinutaUredjivanje);
-  }
+  snprintf(redak2, sizeof(redak2), "POZ: %02d:%02d", plocaSatUredjivanje, plocaMinutaUredjivanje);
   prikaziPoruku(redak1, redak2);
 
   lcd.cursor();
@@ -1284,23 +1253,11 @@ static void obradiKlucMaticniSat(KeyEvent event) {
 }
 
 static void obradiKlucPloce(KeyEvent event) {
-  uint8_t znamenka = 0;
-  if (faza_postavki_ploce == 3 && dohvatiZnamenkuIzKljuce(event, &znamenka)) {
-    dodajZnamenkuUnosaVremena(znamenka);
-    return;
-  }
-
   switch (event) {
     case KEY_LEFT:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       faza_postavki_ploce = (faza_postavki_ploce - 1 + 4) % 4;
       break;
     case KEY_RIGHT:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       faza_postavki_ploce = (faza_postavki_ploce + 1) % 4;
       break;
     case KEY_UP:
@@ -1313,9 +1270,6 @@ static void obradiKlucPloce(KeyEvent event) {
         plocaKrajUredjivanjeMinuta =
             pomakniMinuteUDanuZaKorakPloce(plocaKrajUredjivanjeMinuta, 1);
       } else {
-        if (unosVremenaAktivan) {
-          resetirajUnosVremena();
-        }
         pomakniUredjivanjePloceZaPozicije(1);
       }
       break;
@@ -1329,20 +1283,10 @@ static void obradiKlucPloce(KeyEvent event) {
         plocaKrajUredjivanjeMinuta =
             pomakniMinuteUDanuZaKorakPloce(plocaKrajUredjivanjeMinuta, -1);
       } else {
-        if (unosVremenaAktivan) {
-          resetirajUnosVremena();
-        }
         pomakniUredjivanjePloceZaPozicije(-1);
       }
       break;
     case KEY_SELECT:
-      if (unosVremenaAktivan) {
-        if (!postaviVrijemeIzUnosaZaPlocu()) {
-          break;
-        }
-        resetirajUnosVremena();
-      }
-
       postaviKonfiguracijuPloce(plocaAktivnaUredjivanje,
                                 plocaPocetakUredjivanjeMinuta,
                                 plocaKrajUredjivanjeMinuta);
@@ -1368,10 +1312,6 @@ static void obradiKlucPloce(KeyEvent event) {
       vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_PLOCA);
       break;
     case KEY_BACK:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-        break;
-      }
       postaviRucnuBlokaduPloce(false);
       vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_PLOCA);
       break;

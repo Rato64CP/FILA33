@@ -37,6 +37,7 @@ static int last_date_minute = -1;
 static bool otkucavanje_poruka_aktivna = false;
 static bool hod_sata_prikaz_aktivan = false;
 static bool rtc_battery_warning_active = false;
+static bool latched_eeprom_fault_active = false;
 static bool wifi_ip_prikaz_aktivan = false;
 static unsigned long wifi_ip_prikaz_pocetak_ms = 0;
 static char wifi_ip_poruka[17];
@@ -87,10 +88,21 @@ static const char LCD_PORUKA_ERR_I2C[] PROGMEM = "ERROR: I2C comm ";
 static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
 static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
+static const char LCD_PORUKA_RTC_DEGRADED_1[] PROGMEM = "RTC OGRANICEN RAD";
+static const char LCD_PORUKA_RTC_DEGRADED_2[] PROGMEM = "CEKAM OPORAVAK  ";
+static const char LCD_PORUKA_LATCH_EEPROM_1[] PROGMEM = "EEPROM GRESKA   ";
+static const char LCD_PORUKA_LATCH_EEPROM_2[] PROGMEM = "ENT=POTVRDI     ";
 static const char LCD_PORUKA_INERCIJA[] PROGMEM = "Smirivanje zvona";
+static const char LCD_PORUKA_SAFE_MODE_1[] PROGMEM = "SUSTAV ZAKLJUCAN";
+static const char LCD_PORUKA_SAFE_MODE_2[] PROGMEM = "PREVISE RESETA  ";
+static const char LCD_PORUKA_SAFE_MODE_3[] PROGMEM = "DRZI ENT 5 SEK ";
 static const int LCD_BROJ_MINUTA_CIKLUS = 720;
 static const int LCD_MAKS_CEKANJE_KAZALJKI_MIN = 60;
 static const int LCD_PRAG_DUGE_KOREKCIJE_MIN = 2;
+static const unsigned long LCD_SAFE_MODE_BLINK_INTERVAL_MS = 500UL;
+static const unsigned long LCD_SAFE_MODE_UPUTA_INTERVAL_MS = 2000UL;
+static const unsigned long LCD_LATCHED_FAULT_INTERVAL_MS = 1500UL;
+static const unsigned long LCD_RTC_DEGRADED_INTERVAL_MS = 1500UL;
 
 static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
   strncpy_P(odrediste, izvor, velicina - 1);
@@ -315,6 +327,48 @@ static void build_date_string() {
 }
 
 static void build_line2() {
+  if (latched_eeprom_fault_active) {
+    static bool prikaziPotvrdu = false;
+    static unsigned long zadnjaIzmjenaPotvrdeMs = 0;
+    char poruka[17];
+    const unsigned long sadaMs = millis();
+
+    if (zadnjaIzmjenaPotvrdeMs == 0) {
+      zadnjaIzmjenaPotvrdeMs = sadaMs;
+    } else if ((sadaMs - zadnjaIzmjenaPotvrdeMs) >= LCD_LATCHED_FAULT_INTERVAL_MS) {
+      zadnjaIzmjenaPotvrdeMs = sadaMs;
+      prikaziPotvrdu = !prikaziPotvrdu;
+    }
+
+    kopirajTekstIzFlash(
+        poruka,
+        sizeof(poruka),
+        prikaziPotvrdu ? LCD_PORUKA_LATCH_EEPROM_2 : LCD_PORUKA_LATCH_EEPROM_1);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    return;
+  }
+
+  if (jeRtcDegradiraniNacinAktivan()) {
+    static bool prikaziDruguRtcPoruku = false;
+    static unsigned long zadnjaRtcPorukaMs = 0;
+    char poruka[17];
+    const unsigned long sadaMs = millis();
+
+    if (zadnjaRtcPorukaMs == 0) {
+      zadnjaRtcPorukaMs = sadaMs;
+    } else if ((sadaMs - zadnjaRtcPorukaMs) >= LCD_RTC_DEGRADED_INTERVAL_MS) {
+      zadnjaRtcPorukaMs = sadaMs;
+      prikaziDruguRtcPoruku = !prikaziDruguRtcPoruku;
+    }
+
+    kopirajTekstIzFlash(
+        poruka,
+        sizeof(poruka),
+        prikaziDruguRtcPoruku ? LCD_PORUKA_RTC_DEGRADED_2 : LCD_PORUKA_RTC_DEGRADED_1);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    return;
+  }
+
   if (rtc_battery_warning_active) {
     char poruka[17];
     kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BAT_RTC);
@@ -512,6 +566,18 @@ bool jeUpozorenjeRtcBaterijeAktivno() {
   return rtc_battery_warning_active;
 }
 
+void signalizirajLatchedFaultEEPROM() {
+  latched_eeprom_fault_active = true;
+  last_line2_refresh = 0;
+}
+
+void potvrdiLatchedFaultEEPROM() {
+  latched_eeprom_fault_active = false;
+  ocistiAktivnostDrugogRetka();
+  last_line2_refresh = 0;
+  last_date_minute = -1;
+}
+
 void signalizirajCelebration_Mode() {
   current_activity = ACTIVITY_CELEBRATION;
   set_activity_message(LCD_PORUKA_SLAVLJENJE, 0, false);
@@ -564,6 +630,47 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
 
   if (redak2) {
     upisiDrugiRedakNaLCDSaWiFiOznakom(redak2);
+  }
+}
+
+void prikaziZakljucaniSustav() {
+  lcd.backlight();
+  lcd_pozadinsko_stanje_poznato = true;
+  lcd_pozadinsko_stanje_ukljuceno = true;
+
+  static bool porukaVidljiva = true;
+  static unsigned long zadnjeTreptanjeMs = 0;
+  static unsigned long zadnjaIzmjenaUputeMs = 0;
+  static bool prikaziUputuOtkljucavanja = false;
+
+  const unsigned long sadaMs = millis();
+  if (zadnjeTreptanjeMs == 0) {
+    zadnjeTreptanjeMs = sadaMs;
+  } else if ((sadaMs - zadnjeTreptanjeMs) >= LCD_SAFE_MODE_BLINK_INTERVAL_MS) {
+    zadnjeTreptanjeMs = sadaMs;
+    porukaVidljiva = !porukaVidljiva;
+  }
+
+  if (zadnjaIzmjenaUputeMs == 0) {
+    zadnjaIzmjenaUputeMs = sadaMs;
+  } else if ((sadaMs - zadnjaIzmjenaUputeMs) >= LCD_SAFE_MODE_UPUTA_INTERVAL_MS) {
+    zadnjaIzmjenaUputeMs = sadaMs;
+    prikaziUputuOtkljucavanja = !prikaziUputuOtkljucavanja;
+  }
+
+  if (porukaVidljiva) {
+    char redak1[17];
+    char redak2[17];
+    kopirajTekstIzFlash(redak1, sizeof(redak1), LCD_PORUKA_SAFE_MODE_1);
+    kopirajTekstIzFlash(
+        redak2,
+        sizeof(redak2),
+        prikaziUputuOtkljucavanja ? LCD_PORUKA_SAFE_MODE_3 : LCD_PORUKA_SAFE_MODE_2);
+    upisiRedakNaLCD(0, redak1, zadnje_ispisani_redak1);
+    upisiRedakNaLCD(1, redak2, zadnje_ispisani_redak2);
+  } else {
+    upisiRedakNaLCD(0, "", zadnje_ispisani_redak1);
+    upisiRedakNaLCD(1, "", zadnje_ispisani_redak2);
   }
 }
 

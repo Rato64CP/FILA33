@@ -50,6 +50,7 @@ void inicijalizirajSigurnaPocetnaStanjaIzlaza() {
 }  // namespace
 
 void setup() {
+  pripremiResetFlagsMCU();
   inicijalizirajSigurnaPocetnaStanjaIzlaza();
 
   inicijalizirajLCD();
@@ -77,17 +78,29 @@ void setup() {
   // podici relej iz starog aktivnog stanja prije nego sto recovery
   // resetira prekinuti korak za pravilno 6-sekundno ponavljanje.
   inicijalizirajWatchdog();
-  oznaciWatchdogReset(jeWatchdogResetDetektiran());
-  oznaciGubitakNapajanja(jePowerLossResetDetektiran());
   inicijalizirajPowerRecovery();
   odradiBootRecovery();
 
   inicijalizirajKazaljke();
   inicijalizirajPlocu();
+  primijeniSafeModeAkoTreba();
 }
 
 void loop() {
   osvjeziWatchdog();
+
+  if (jeSafeModeAktivan()) {
+    primijeniSafeModeAkoTreba();
+    if (provjeriOtkljucavanjeSafeMode() && otkljucajSafeMode()) {
+      prikaziPoruku("SUSTAV OTKLJUCAN", "NASTAVLJAM RAD");
+      osvjeziWatchdog();
+      delay(1200);
+      return;
+    }
+    prikaziZakljucaniSustav();
+    osvjeziWatchdog();
+    return;
+  }
 
   obradiESPSerijskuKomunikaciju();
   upravljajMenuSistemom();
@@ -103,6 +116,7 @@ void loop() {
   upravljajPlocom();
   obradiAutomatskiNTPZahtjevESP();
   spremiKriticalnoStanje();
+  osvjeziPowerRecoveryDijagnostiku();
 
   osvjeziWatchdog();
 }

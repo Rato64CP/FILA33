@@ -7,15 +7,26 @@
 // ==================== WATCHDOG SETUP ====================
 
 static uint8_t zadnje_reset_zastavice = 0;
+static bool reset_zastavice_ucitane = false;
+
+void pripremiResetFlagsMCU() {
+  if (reset_zastavice_ucitane) {
+    return;
+  }
+
+  zadnje_reset_zastavice = MCUSR;
+  MCUSR = 0;
+  wdt_disable();
+  reset_zastavice_ucitane = true;
+}
 
 void inicijalizirajWatchdog() {
-  // ATmega2560 ima WDT s tim timeout vrijednostima:
-  // 16 ms, 32 ms, 64 ms, 125 ms, 250 ms, 500 ms, 1s, 2s, 4s, 8s
-  // Postavljamo na 8 sekundi kao maximum sigurnu vrijednost
-  
-  // Provjera razloga restart-a
-  uint8_t mcusr = MCUSR;
-  zadnje_reset_zastavice = mcusr;
+  // ATmega2560 ima WDT s timeout vrijednostima do 8 sekundi.
+  // Ovdje samo logiramo vec spremljeni uzrok reseta i ponovno
+  // ukljucujemo watchdog za redovni 24/7 rad.
+  pripremiResetFlagsMCU();
+
+  const uint8_t mcusr = zadnje_reset_zastavice;
   if (mcusr & (1 << WDRF)) {
     posaljiPCLog(F("WDT: Recovery nakon watchdog reset-a"));
   }
@@ -28,24 +39,15 @@ void inicijalizirajWatchdog() {
   if (mcusr & (1 << PORF)) {
     posaljiPCLog(F("WDT: Recovery nakon Power-on reset-a"));
   }
-  
-  MCUSR = 0; // Očisti sve zastavice
-  
-  // Disable WDT privremeno (osiguraj da se može prepisati)
-  wdt_disable();
-  
-  // Postavi na 8 sekundi (WDTO_8S)
-  // Ovo je sigurni timeout koji permet dovoljno vremena za sve operacije
+
   wdt_enable(WDTO_8S);
-  
   posaljiPCLog(F("WDT: Inicijaliziran sa timeoutom od 8 sekundi"));
 }
 
 // ==================== WATCHDOG REFRESH ====================
 
 void osvjeziWatchdog() {
-  // Resetiraj WDT brojač
-  // Mora se pozivati najmanje svakih 8 sekundi kako bi se izbjeglo resetiranje
+  // Mora se pozivati barem jednom unutar 8 sekundi.
   wdt_reset();
 }
 
@@ -58,7 +60,8 @@ bool jeWatchdogResetDetektiran() {
 }
 
 bool jePowerLossResetDetektiran() {
-  const bool imaBrownOutIliPowerOn = (zadnje_reset_zastavice & ((1 << BORF) | (1 << PORF))) != 0;
+  const bool imaBrownOutIliPowerOn =
+      (zadnje_reset_zastavice & ((1 << BORF) | (1 << PORF))) != 0;
   const bool imaVanjskiReset = (zadnje_reset_zastavice & (1 << EXTRF)) != 0;
   return imaBrownOutIliPowerOn && !imaVanjskiReset;
 }

@@ -22,13 +22,32 @@ bool cacheInicijaliziran = false;
 int cacheSlot = -1;
 EepromLayout::UnifiedMotionState cacheStanje{};
 
-bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
+uint16_t izracunajChecksum(const EepromLayout::UnifiedMotionState& stanje) {
+  uint16_t checksum = 0;
+  checksum += stanje.hand_position;
+  checksum += stanje.hand_active;
+  checksum += stanje.hand_relay;
+  checksum += (stanje.hand_start_ms >> 16) & 0xFFFF;
+  checksum += stanje.hand_start_ms & 0xFFFF;
+  checksum += stanje.plate_position;
+  checksum += stanje.plate_phase;
+  checksum += stanje.version;
+  checksum += stanje.reserved;
+  return checksum;
+}
+
+bool jeValjanSadrzajStanja(const EepromLayout::UnifiedMotionState& stanje) {
   return stanje.hand_position < BROJ_MINUTA_CIKLUS &&
          stanje.hand_active <= 1 &&
          stanje.hand_relay <= 2 &&
          stanje.plate_position < BROJ_POZICIJA_PLOCE &&
          stanje.plate_phase <= 2 &&
          stanje.version == UNIFIED_VERZIJA;
+}
+
+bool jeValjanoStanje(const EepromLayout::UnifiedMotionState& stanje) {
+  return jeValjanSadrzajStanja(stanje) &&
+         stanje.checksum == izracunajChecksum(stanje);
 }
 
 int izracunajDvanaestSatneMinute() {
@@ -93,8 +112,10 @@ bool jednakoLogickoStanje(EepromLayout::UnifiedMotionState lijevo,
                           EepromLayout::UnifiedMotionState desno) {
   lijevo.version = 0;
   lijevo.reserved = 0;
+  lijevo.checksum = 0;
   desno.version = 0;
   desno.reserved = 0;
+  desno.checksum = 0;
   return memcmp(&lijevo, &desno, sizeof(lijevo)) == 0;
 }
 
@@ -137,6 +158,7 @@ EepromLayout::UnifiedMotionState inicijalnoStanje() {
   ucitajLegacyPlocu(stanje.plate_position, stanje.plate_phase);
   stanje.version = UNIFIED_VERZIJA;
   stanje.reserved = RESERVED_SEKVENCA_POCETNA;
+  stanje.checksum = izracunajChecksum(stanje);
   return stanje;
 }
 
@@ -205,11 +227,14 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
   const uint8_t zadnjaSekvenca = cacheInicijaliziran ? cacheStanje.reserved : trenutno.reserved;
   stanjeZaSpremanje.reserved =
     (zadnjaSekvenca == 0) ? RESERVED_SEKVENCA_POCETNA : static_cast<uint8_t>(zadnjaSekvenca + 1);
+  stanjeZaSpremanje.checksum = izracunajChecksum(stanjeZaSpremanje);
 
   // UnifiedMotionState vec ima vlastitu sekvencu (`reserved`) i skeniranje
-  // svih konfiguriranih slotova pri citanju, pa ovdje namjerno ne koristimo zajednicki
-  // wear-leveling meta-zapis. Time cuvamo 24C32 od pregrijavanja istog
-  // meta bloka bez promjene recovery logike toranjskog sata.
+  // svih konfiguriranih slotova pri citanju. Checksum dodatno stiti
+  // kazaljke i okretnu plocu od djelomicnog zapisa pri nestanku napajanja,
+  // pa ovdje namjerno i dalje ne koristimo zajednicki wear-leveling meta-zapis.
+  // Time cuvamo 24C32 od pregrijavanja istog meta bloka bez promjene
+  // recovery logike toranjskog sata.
   const int sljedeciSlot =
       (trenutniSlot >= 0) ? ((trenutniSlot + 1) % EepromLayout::SLOTOVI_UNIFIED_STANJE) : 0;
   if (!zapisiDirektnoSlot(sljedeciSlot, stanjeZaSpremanje)) {

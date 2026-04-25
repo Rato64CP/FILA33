@@ -21,6 +21,7 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 const char* dohvatiOznakuIzvoraVremena();
 bool jeZadnjaSvjezaSinkronizacijaIzNTP();
 bool jeRtcSqwAktivan();
+bool jeRtcDegradiraniNacinAktivan();
 bool jeVrijemePotvrdjenoZaAutomatiku();
 DateTime dohvatiDatumUskrsaZaGodinu(int godina);
 bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
