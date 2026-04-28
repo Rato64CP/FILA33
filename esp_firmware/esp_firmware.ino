@@ -13,6 +13,7 @@ using ToranjWebServer = WebServer;
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <EEPROM.h>
+#include <pgmspace.h>
 #include <time.h>
 
 // Konfiguracija WiFi mreze za toranjski sat.
@@ -29,7 +30,7 @@ bool wifiOmogucen = true;
 // Vrijednosti za privremenu setup mrezu toranjskog sata.
 // Pinovi ovise o odabranom ESP modulu.
 static const char WIFI_SETUP_AP_SSID[] = "ZVONKO_setup";
-static const char WIFI_SETUP_AP_LOZINKA[] = "zvonko";
+static const char WIFI_SETUP_AP_LOZINKA[] = "zvonko10";
 #if defined(ESP8266)
 static const uint8_t WIFI_SETUP_PIN = 14;       // GPIO14 / NodeMCU D5
 static const uint8_t WIFI_STATUS_LED_PIN = 12;  // GPIO12 / NodeMCU D6
@@ -48,6 +49,7 @@ static const unsigned long WIFI_STATUS_LED_BLINK_MS = 400UL;
 char ntpPosluzitelj[40] = "pool.ntp.org";
 static const long NTP_OFFSET_SEKUNDI = 0;
 static const unsigned long NTP_INTERVAL_MS = 60000;
+static const unsigned long WIFI_WATCHDOG_NTP_ZASTOJ_MS = 7200000UL;
 static const size_t SERIJSKI_BUFFER_MAX = 1280;
 static const size_t SERIJSKI_BUDZET_BAJTOVA_PO_POZIVU = 192;
 static const size_t WEB_LOZINKA_MAX = 33;
@@ -78,6 +80,9 @@ enum CmdOdgovorMegai {
 
 // Statusne zastavice za faze rada.
 bool ntpIkadPostavljen = false;
+unsigned long ntpZadnjiUspjehMs = 0;
+unsigned long wifiSpojenOdMs = 0;
+bool wifiSpojenOdPoznat = false;
 
 // Upravljanje nenametljivim pokusajima WiFi spajanja.
 bool wifiPokusajUToku = false;
@@ -101,6 +106,7 @@ CmdOdgovorMegai zadnjiCmdOdgovorMega = CMD_ODGOVOR_CEKA;
 void poveziNaWiFi();
 bool postaviStatickuKonfiguraciju();
 void osvjeziNTPSat();
+void odrzavajWiFiWatchdogZaNTP();
 void posaljiNTPPremaMegai();
 void obradiSerijskiUlaz();
 void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout = 3000);
@@ -126,6 +132,24 @@ void zaustaviSetupPristupnuTocku(bool zbogTimeouta);
 void odrzavajSetupTipku();
 void odrzavajSetupPristupnuTocku();
 void osvjeziWiFiStatusLedicu();
+void posaljiHtmlStranicuIzProgMema(PGM_P stranica);
+
+static void resetirajNtpStanje() {
+  ntpIkadPostavljen = false;
+  ntpZadnjiUspjehMs = 0;
+}
+
+static void oznaciWiFiKaoOdspojen() {
+  wifiSpojenOdMs = 0;
+  wifiSpojenOdPoznat = false;
+}
+
+static void oznaciWiFiKaoSpojen(unsigned long sadaMs) {
+  if (!wifiSpojenOdPoznat) {
+    wifiSpojenOdMs = sadaMs;
+    wifiSpojenOdPoznat = true;
+  }
+}
 
 static void inicijalizirajSerijskiPortPremaMegi() {
 #if defined(ESP8266)
@@ -191,10 +215,36 @@ void loop() {
     }
 
     osvjeziNTPSat();
+    odrzavajWiFiWatchdogZaNTP();
   }
 
   webPosluzitelj.handleClient();
   yield();
+}
+
+void posaljiWiFiLcdSazetak() {
+  if (!wifiOmogucen || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  IPAddress ip = WiFi.localIP();
+  long rssiDbm = WiFi.RSSI();
+  if (rssiDbm < -99) {
+    rssiDbm = -99;
+  }
+  if (rssiDbm > 0) {
+    rssiDbm = 0;
+  }
+
+  char sazetak[17];
+  snprintf(sazetak,
+           sizeof(sazetak),
+           ".%u.%u RSSI%ld",
+           static_cast<unsigned>(ip[2]),
+           static_cast<unsigned>(ip[3]),
+           rssiDbm);
+  Serial.print("WIFI:LCD:");
+  Serial.println(sazetak);
 }
 
 void prijaviPromjenuWiFiStatusa() {
@@ -208,6 +258,7 @@ void prijaviPromjenuWiFiStatusa() {
     Serial.println("WIFI:CONNECTED");
     Serial.print("WIFI:LOCAL_IP:");
     Serial.println(WiFi.localIP().toString());
+    posaljiWiFiLcdSazetak();
     Serial.print("WIFI:MAC:");
     Serial.println(WiFi.macAddress());
   } else {
@@ -240,7 +291,8 @@ void primijeniWiFiOmogucenost(bool omogucen) {
   wifiPokusajPocetak = 0;
   wifiSljedeciPokusajDozvoljen = 0;
   wifiBrojPokusajaZaredom = 0;
-  ntpIkadPostavljen = false;
+  resetirajNtpStanje();
+  oznaciWiFiKaoOdspojen();
 
   if (!wifiOmogucen) {
     WiFi.disconnect();
@@ -262,11 +314,13 @@ void poveziNaWiFi() {
 
   if (!wifiOmogucen) {
     wifiPokusajUToku = false;
+    oznaciWiFiKaoOdspojen();
     prijaviPromjenuWiFiStatusa();
     return;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    oznaciWiFiKaoSpojen(sada);
     if (wifiPokusajUToku) {
       Serial.println();
       Serial.print("WIFI: Spojen, IP: ");
@@ -278,6 +332,7 @@ void poveziNaWiFi() {
     return;
   }
 
+  oznaciWiFiKaoOdspojen();
   prijaviPromjenuWiFiStatusa();
 
   if (!wifiPokusajUToku && sada >= wifiSljedeciPokusajDozvoljen) {
@@ -305,6 +360,8 @@ void poveziNaWiFi() {
     Serial.println();
     Serial.println("WIFI: Timeout pokusaja, odspajam i cekam prije novog pokusaja");
     WiFi.disconnect();
+    oznaciWiFiKaoOdspojen();
+    resetirajNtpStanje();
     wifiPokusajUToku = false;
     prijaviPromjenuWiFiStatusa();
 
@@ -352,6 +409,7 @@ void osvjeziNTPSat() {
   bool promjena = ntpKlijent.update();
 
   if (promjena && ntpKlijent.isTimeSet()) {
+    ntpZadnjiUspjehMs = sada;
     if (!ntpIkadPostavljen) {
       Serial.print("NTPLOG: Prvi put postavljeno vrijeme, epoch=");
       Serial.println(ntpKlijent.getEpochTime());
@@ -361,6 +419,32 @@ void osvjeziNTPSat() {
     Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
     zadnjiLog = sada;
   }
+}
+
+void odrzavajWiFiWatchdogZaNTP() {
+  if (!wifiOmogucen || setupApAktivan || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  const unsigned long sada = millis();
+  oznaciWiFiKaoSpojen(sada);
+
+  const unsigned long referentnoMs =
+      (ntpZadnjiUspjehMs != 0UL) ? ntpZadnjiUspjehMs : wifiSpojenOdMs;
+
+  if ((sada - referentnoMs) < WIFI_WATCHDOG_NTP_ZASTOJ_MS) {
+    return;
+  }
+
+  Serial.println("WIFI WATCHDOG: NTP nije uspio 2 sata, resetiram WiFi vezu");
+  WiFi.disconnect();
+  oznaciWiFiKaoOdspojen();
+  resetirajNtpStanje();
+  wifiPokusajUToku = false;
+  wifiPokusajPocetak = 0;
+  wifiSljedeciPokusajDozvoljen = 0;
+  wifiBrojPokusajaZaredom = 0;
+  prijaviPromjenuWiFiStatusa();
 }
 
 void posaljiNTPPremaMegai() {
@@ -512,6 +596,7 @@ void obradiSerijskiUlaz() {
           if (wifiOmogucen && WiFi.status() == WL_CONNECTED) {
             Serial.print("WIFI:LOCAL_IP:");
             Serial.println(WiFi.localIP().toString());
+            posaljiWiFiLcdSazetak();
             Serial.print("WIFI:MAC:");
             Serial.println(WiFi.macAddress());
           }
@@ -578,11 +663,12 @@ void obradiSerijskiUlaz() {
 
               if (konfiguracijaPromijenjena) {
                 WiFi.disconnect();
+                oznaciWiFiKaoOdspojen();
                 wifiPokusajUToku = false;
                 wifiPokusajPocetak = 0;
                 wifiSljedeciPokusajDozvoljen = 0;
                 wifiBrojPokusajaZaredom = 0;
-                ntpIkadPostavljen = false;
+                resetirajNtpStanje();
                 if (wifiOmogucen) {
                   Serial.println("WIFI RX: konfiguracija promijenjena, pokrecem novo spajanje");
                   poveziNaWiFi();
@@ -608,8 +694,8 @@ void obradiSerijskiUlaz() {
             if (WiFi.status() != WL_CONNECTED) {
               Serial.println("NTPLOG: NTP zahtjev odbijen jer WiFi nije spojen");
               Serial.println("ERR:NTPREQ");
-            } else if (!ntpKlijent.isTimeSet()) {
-              Serial.println("NTPLOG: NTP zahtjev odbijen jer NTP jos nije spreman");
+            } else if (ntpZadnjiUspjehMs == 0UL) {
+              Serial.println("NTPLOG: NTP zahtjev odbijen jer nema svjezeg NTP vremena nakon zadnjeg spajanja");
               Serial.println("ERR:NTPREQ");
             } else {
               posaljiNTPPremaMegai();
@@ -877,6 +963,34 @@ void posaljiJsonStatus() {
   webPosluzitelj.send(200, "application/json", tijelo);
 }
 
+void posaljiHtmlStranicuIzProgMema(PGM_P stranica) {
+  if (stranica == nullptr) {
+    webPosluzitelj.send(500, "text/plain", "HTML stranica nije dostupna");
+    return;
+  }
+
+  static const size_t HTML_CHUNK_VELICINA = 384;
+  char meduspremnik[HTML_CHUNK_VELICINA + 1];
+  const size_t duljina = strlen_P(stranica);
+
+  webPosluzitelj.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  webPosluzitelj.send(200, "text/html; charset=utf-8", "");
+
+  size_t pomak = 0;
+  while (pomak < duljina) {
+    const size_t preostalo = duljina - pomak;
+    const size_t trenutniKomad =
+        (preostalo > HTML_CHUNK_VELICINA) ? HTML_CHUNK_VELICINA : preostalo;
+    memcpy_P(meduspremnik, stranica + pomak, trenutniKomad);
+    meduspremnik[trenutniKomad] = '\0';
+    webPosluzitelj.sendContent(meduspremnik);
+    pomak += trenutniKomad;
+    yield();
+  }
+
+  webPosluzitelj.sendContent("");
+}
+
 static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
 <!doctype html>
 <html lang="hr">
@@ -885,40 +999,401 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ZVONKO v. 1.0</title>
   <style>
-    :root { color-scheme: light; --bg:#f3efe6; --panel:#fffaf1; --line:#c8baa1; --text:#2c2418; --soft:#e7dcc8; }
-    body { margin:0; font-family: Georgia, "Times New Roman", serif; background:linear-gradient(180deg,#efe6d3,#f7f3ea); color:var(--text); }
-    .wrap { max-width:680px; margin:0 auto; padding:20px; }
-    .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 10px 24px rgba(77,52,24,0.08); margin-bottom:14px; }
-    h1, h2 { margin-top:0; }
-    .muted { color:#7a6a56; font-size:14px; line-height:1.6; }
-    .links { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:14px; }
-    .links a { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fff; color:var(--text); font-weight:700; text-decoration:none; text-align:center; }
-    .links a:hover { background:var(--soft); }
-    ul { margin:10px 0 0 18px; padding:0; }
-    li { margin:0 0 8px; color:#5f4a32; }
-    code { font-family:"Courier New", monospace; font-size:13px; }
+    :root {
+      color-scheme: light;
+      --bg:#ece3d1;
+      --bg2:#f8f2e8;
+      --panel:#fffaf1;
+      --line:#c5b394;
+      --text:#2c2418;
+      --muted:#74624c;
+      --accent:#7c5b2f;
+      --accent-soft:#efe1c7;
+      --ok:#365b34;
+      --ok-soft:#dfead8;
+      --warn:#8a3a24;
+      --warn-soft:#f5ddd4;
+      --shadow:0 16px 36px rgba(67, 48, 24, 0.10);
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family: Georgia, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.55), transparent 28%),
+        linear-gradient(180deg, var(--bg), var(--bg2));
+      color:var(--text);
+    }
+    .wrap { max-width:1180px; margin:0 auto; padding:22px 18px 34px; }
+    .hero {
+      background:linear-gradient(135deg, rgba(255,250,241,0.98), rgba(246,235,212,0.96));
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:22px;
+      box-shadow:var(--shadow);
+      margin-bottom:16px;
+    }
+    .hero-top {
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+      flex-wrap:wrap;
+    }
+    h1, h2, h3 { margin:0; }
+    h1 { font-size:clamp(28px, 4vw, 40px); letter-spacing:0.02em; }
+    .subtitle {
+      margin-top:10px;
+      max-width:720px;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:15px;
+    }
+    .hero-actions {
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:18px;
+    }
+    .link-btn,
+    .card button {
+      appearance:none;
+      border:none;
+      border-radius:12px;
+      padding:12px 16px;
+      font:inherit;
+      font-weight:700;
+      cursor:pointer;
+      transition:transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    .link-btn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      color:var(--text);
+      background:#fff;
+      border:1px solid var(--line);
+      min-width:150px;
+    }
+    .link-btn:hover,
+    .card button:hover {
+      transform:translateY(-1px);
+      box-shadow:0 10px 20px rgba(67, 48, 24, 0.12);
+    }
+    .status-box {
+      min-width:260px;
+      background:rgba(255,255,255,0.72);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 16px;
+    }
+    .status-grid {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:10px;
+      margin-top:10px;
+    }
+    .status-item {
+      background:rgba(255,250,241,0.85);
+      border:1px solid rgba(197,179,148,0.65);
+      border-radius:12px;
+      padding:10px 12px;
+    }
+    .status-label {
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      color:var(--muted);
+      margin-bottom:4px;
+    }
+    .status-value {
+      font-size:15px;
+      font-weight:700;
+      word-break:break-word;
+    }
+    .status-badge {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:13px;
+      font-weight:700;
+      background:var(--warn-soft);
+      color:var(--warn);
+    }
+    .status-badge.ok {
+      background:var(--ok-soft);
+      color:var(--ok);
+    }
+    .dashboard {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+      gap:14px;
+    }
+    .card {
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:20px;
+      padding:18px;
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      min-height:220px;
+      position:relative;
+      overflow:hidden;
+    }
+    .card::before {
+      content:"";
+      position:absolute;
+      inset:auto -30px -40px auto;
+      width:120px;
+      height:120px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(239,225,199,0.7), transparent 72%);
+      pointer-events:none;
+    }
+    .card-header { position:relative; z-index:1; }
+    .eyebrow {
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      color:var(--muted);
+      margin-bottom:8px;
+    }
+    .card h2 {
+      font-size:26px;
+      line-height:1.05;
+      margin-bottom:6px;
+    }
+    .card p {
+      margin:0;
+      color:var(--muted);
+      line-height:1.5;
+      font-size:14px;
+      position:relative;
+      z-index:1;
+    }
+    .btn-row {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+      margin-top:auto;
+      position:relative;
+      z-index:1;
+    }
+    .btn-primary { background:var(--accent); color:#fffaf1; }
+    .btn-secondary {
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+    }
+    .log-panel {
+      margin-top:16px;
+      background:#2d2419;
+      color:#f7efe0;
+      border-radius:18px;
+      padding:16px 18px;
+      box-shadow:var(--shadow);
+    }
+    .log-panel h3 { font-size:16px; margin-bottom:10px; }
+    .log-text {
+      min-height:52px;
+      white-space:pre-wrap;
+      line-height:1.5;
+      font-size:14px;
+      color:#eadfcb;
+    }
+    .muted-small {
+      margin-top:10px;
+      color:#bfae92;
+      font-size:12px;
+    }
+    @media (max-width:700px) {
+      .wrap { padding:14px 12px 24px; }
+      .hero { padding:18px; }
+      .status-grid { grid-template-columns:1fr; }
+      .btn-row { grid-template-columns:1fr; }
+      .card { min-height:auto; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <section class="panel">
-      <h1>ESP servis toranjskog sata</h1>
-      <p class="muted">Ovaj ESP vodi mrezu toranjskog sata: WiFi, NTP, setup WiFi i kratke API naredbe prema Arduino Megi. Postavke kazaljki, okretne ploce, zvona, cekica, suncevih dogadjaja, sinkronizacije vremena i recovery logike ostaju na Megi.</p>
-      <div class="links">
-        <a href="/setup">Setup WiFi</a>
-        <a href="/status">JSON status</a>
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>Dashboard toranjskog sata</h1>
+          <p class="subtitle">
+            Ovaj ESP vodi mrezu toranjskog sata i prosljedjuje servisne naredbe prema Arduino Megi.
+            Kartice ispod salju API zahtjeve za zvona, slavljenje, mrtvacko i suncevu automatiku.
+          </p>
+          <div class="hero-actions">
+            <a class="link-btn" href="/setup">Setup WiFi</a>
+            <a class="link-btn" href="/status" target="_blank" rel="noopener">JSON status</a>
+          </div>
+        </div>
+        <div class="status-box">
+          <div id="wifiBadge" class="status-badge">WiFi: provjera...</div>
+          <div class="status-grid">
+            <div class="status-item">
+              <div class="status-label">IP adresa</div>
+              <div id="wifiIp" class="status-value">--</div>
+            </div>
+            <div class="status-item">
+              <div class="status-label">Autorizacija</div>
+              <div class="status-value">Basic Auth</div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
-    <section class="panel">
-      <h2>Sto je ostalo na ESP-u</h2>
-      <ul>
-        <li><code>/setup</code> za unos nove WiFi mreze.</li>
-        <li><code>/status</code> za kratki JSON pregled mreze.</li>
-        <li><code>/api/...</code> za rucne naredbe prema Megi.</li>
-      </ul>
-      <p class="muted">API i web koriste istu Basic Auth prijavu. ESP vise ne cuva nikakav poseban raspored zvona, nego samo prenosi mrezne i servisne zahtjeve prema Megi.</p>
+
+    <section class="dashboard">
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Rucna komanda</div>
+          <h2>Zvono 1</h2>
+          <p>Direktno ukljucenje ili gasenje prvog zvona toranjskog sata preko API puta prema Megi.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/bell1/on', 'Zvono 1 ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/bell1/off', 'Zvono 1 iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Rucna komanda</div>
+          <h2>Zvono 2</h2>
+          <p>Druga servisna kartica za zasebno upravljanje drugim zvonom bez ulaska u lokalni meni sata.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/bell2/on', 'Zvono 2 ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/bell2/off', 'Zvono 2 iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Posebni nacin</div>
+          <h2>Slavljenje</h2>
+          <p>Rucno pokretanje ili prekid slavljenja za servis, probu ili provjeru reakcije cekica i zvona.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/slavljenje/on', 'Slavljenje ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/slavljenje/off', 'Slavljenje iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Posebni nacin</div>
+          <h2>Mrtvacko</h2>
+          <p>Servisna kartica za ukljucenje ili zaustavljanje mrtvackog nacina rada s Megine strane.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/mrtvacko/on', 'Mrtvacko ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/mrtvacko/off', 'Mrtvacko iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Jutro</h2>
+          <p>Rucno dopusti ili zabrani jutarnji suncev dogadjaj bez mijenjanja glavnih postavki na LCD-u.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/solar/morning/on', 'Sunce jutro ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/solar/morning/off', 'Sunce jutro iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Podne</h2>
+          <p>Kontrola podnevnog suncevog zvonjenja preko jedne velike kartice, bez skrivene tekstualne rute.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/solar/noon/on', 'Sunce podne ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/solar/noon/off', 'Sunce podne iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Vecer</h2>
+          <p>Rucna servisna kartica za vecernju suncevu automatiku i brzu provjeru odgovora Megine logike.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="pozoviApi('/api/solar/evening/on', 'Sunce vecer ukljuci')">Ukljuci</button>
+          <button class="btn-secondary" onclick="pozoviApi('/api/solar/evening/off', 'Sunce vecer iskljuci')">Iskljuci</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="log-panel">
+      <h3>Zadnja web akcija</h3>
+      <div id="odgovor" class="log-text">Dashboard je spreman. Odaberi karticu i posalji naredbu prema Megi.</div>
+      <div class="muted-small">Napomena: API i dashboard koriste istu Basic Auth prijavu. Ako je Mega zauzeta, odgovor ce biti prikazan ovdje.</div>
     </section>
   </div>
+  <script>
+    function postaviLog(poruka) {
+      document.getElementById('odgovor').textContent = poruka;
+    }
+
+    async function pozoviApi(putanja, oznaka) {
+      postaviLog('Saljem naredbu: ' + oznaka + '...');
+      try {
+        const odgovor = await fetch(putanja, {
+          method: 'GET',
+          cache: 'no-store'
+        });
+        const tekst = await odgovor.text();
+        if (odgovor.ok) {
+          postaviLog(oznaka + ': ' + tekst);
+        } else {
+          postaviLog(oznaka + ': GRESKA ' + odgovor.status + ' - ' + tekst);
+        }
+      } catch (greska) {
+        postaviLog(oznaka + ': mreza ili autentikacija nisu uspjeli');
+      }
+    }
+
+    async function osvjeziStatus() {
+      try {
+        const odgovor = await fetch('/status', { cache: 'no-store' });
+        if (!odgovor.ok) {
+          throw new Error('status');
+        }
+        const podaci = await odgovor.json();
+        const badge = document.getElementById('wifiBadge');
+        const ip = document.getElementById('wifiIp');
+        ip.textContent = podaci.wifi_ip || '--';
+        if (podaci.wifi_connected) {
+          badge.textContent = 'WiFi: spojen';
+          badge.classList.add('ok');
+        } else {
+          badge.textContent = 'WiFi: nije spojen';
+          badge.classList.remove('ok');
+        }
+      } catch (greska) {
+        const badge = document.getElementById('wifiBadge');
+        document.getElementById('wifiIp').textContent = '--';
+        badge.textContent = 'WiFi: status nedostupan';
+        badge.classList.remove('ok');
+      }
+    }
+
+    osvjeziStatus();
+    setInterval(osvjeziStatus, 10000);
+  </script>
 </body>
 </html>
 )HTML";
@@ -1006,7 +1481,7 @@ void obradiNTPSerijskuNaredbu(const char* payload) {
   strncpy(ntpPosluzitelj, server, sizeof(ntpPosluzitelj) - 1);
   ntpPosluzitelj[sizeof(ntpPosluzitelj) - 1] = '\0';
   ntpKlijent.setPoolServerName(ntpPosluzitelj);
-  ntpIkadPostavljen = false;
+  resetirajNtpStanje();
 
   Serial.print("NTPLOG: postavljen novi NTP server ");
   Serial.println(ntpPosluzitelj);
@@ -1017,13 +1492,13 @@ void konfigurirajWebPosluzitelj() {
   Serial.println("WEB: Registriram / rutu");
   webPosluzitelj.on("/", []() {
     if (setupApAktivan) {
-      webPosluzitelj.send_P(200, "text/html; charset=utf-8", WEB_SETUP_STRANICA);
+      posaljiHtmlStranicuIzProgMema(WEB_SETUP_STRANICA);
       return;
     }
     if (!osigurajWebAutorizaciju()) {
       return;
     }
-    webPosluzitelj.send_P(200, "text/html; charset=utf-8", WEB_POCETNA_STRANICA);
+    posaljiHtmlStranicuIzProgMema(WEB_POCETNA_STRANICA);
   });
 
   Serial.println("WEB: Registriram /setup rutu");
@@ -1032,7 +1507,7 @@ void konfigurirajWebPosluzitelj() {
       webPosluzitelj.send(404, "text/plain", "Setup WiFi mreza trenutno nije aktivna");
       return;
     }
-    webPosluzitelj.send_P(200, "text/html; charset=utf-8", WEB_SETUP_STRANICA);
+    posaljiHtmlStranicuIzProgMema(WEB_SETUP_STRANICA);
   });
   webPosluzitelj.on("/setup", HTTP_POST, []() {
     if (!setupApAktivan) {

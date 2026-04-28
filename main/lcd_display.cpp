@@ -1,7 +1,8 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
 // Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/MAN) + oznaka dana za cavle (R/N)
-// + zvjezdica aktivnosti na zadnjem mjestu.
-// Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery) + WiFi oznaka na 16. znaku.
+// + zvjezdica aktivnosti i WiFi oznaka na zadnjim mjestima.
+// Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery),
+// a po potrebi i kratki WiFi sazetak iz mreznog mosta.
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "lcd_display.h"
+#include "flash_text_utils.h"
 #include "time_glob.h"
 #include "otkucavanje.h"
 #include "postavke.h"
@@ -18,6 +20,7 @@
 #include "slavljenje_mrtvacko.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
+#include "rs485_bridge.h"
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -84,7 +87,6 @@ static const char LCD_PORUKA_OBA_ZVONA[] PROGMEM = "Zvone oba zvona";
 static const char LCD_PORUKA_OTKUCAJ[] PROGMEM = "Otkucavanje...  ";
 static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERR:RTC baterija";
 static const char LCD_PORUKA_ERR_EEPROM[] PROGMEM = "ERROR: EEPROM   ";
-static const char LCD_PORUKA_ERR_I2C[] PROGMEM = "ERROR: I2C comm ";
 static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
 static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
@@ -93,6 +95,8 @@ static const char LCD_PORUKA_RTC_DEGRADED_2[] PROGMEM = "CEKAM OPORAVAK  ";
 static const char LCD_PORUKA_LATCH_EEPROM_1[] PROGMEM = "EEPROM GRESKA   ";
 static const char LCD_PORUKA_LATCH_EEPROM_2[] PROGMEM = "ENT=POTVRDI     ";
 static const char LCD_PORUKA_INERCIJA[] PROGMEM = "Smirivanje zvona";
+static const char LCD_PORUKA_RS485_1[] PROGMEM = "VEZA TORANJ     ";
+static const char LCD_PORUKA_RS485_2[] PROGMEM = "PREKINUTA       ";
 static const char LCD_PORUKA_SAFE_MODE_1[] PROGMEM = "SUSTAV ZAKLJUCAN";
 static const char LCD_PORUKA_SAFE_MODE_2[] PROGMEM = "PREVISE RESETA  ";
 static const char LCD_PORUKA_SAFE_MODE_3[] PROGMEM = "DRZI ENT 5 SEK ";
@@ -103,11 +107,7 @@ static const unsigned long LCD_SAFE_MODE_BLINK_INTERVAL_MS = 500UL;
 static const unsigned long LCD_SAFE_MODE_UPUTA_INTERVAL_MS = 2000UL;
 static const unsigned long LCD_LATCHED_FAULT_INTERVAL_MS = 1500UL;
 static const unsigned long LCD_RTC_DEGRADED_INTERVAL_MS = 1500UL;
-
-static void kopirajTekstIzFlash(char* odrediste, size_t velicina, PGM_P izvor) {
-  strncpy_P(odrediste, izvor, velicina - 1);
-  odrediste[velicina - 1] = '\0';
-}
+static const unsigned long LCD_RS485_PREKID_INTERVAL_MS = 1500UL;
 
 static void pripremiRedakZaLCD(const char* tekst, char* odrediste) {
   memset(odrediste, ' ', 16);
@@ -135,14 +135,7 @@ static void upisiRedakNaLCD(uint8_t redak, const char* tekst, char* zadnjiRedak)
 }
 
 static void pripremiDrugiRedakSaWiFiOznakom(const char* tekst) {
-  memset(line2_buffer, ' ', 16);
-
-  if (tekst != nullptr) {
-    strncpy(line2_buffer, tekst, 15);
-  }
-
-  line2_buffer[15] = wifi_status;
-  line2_buffer[16] = '\0';
+  pripremiRedakZaLCD(tekst, line2_buffer);
 }
 
 static void upisiDrugiRedakNaLCDSaWiFiOznakom(const char* tekst) {
@@ -298,11 +291,12 @@ static void build_line1() {
   const char oznaka_aktivnosti = jeSustavAktivanNaLCD() ? '*' : ' ';
 
   snprintf(line1_buffer, sizeof(line1_buffer),
-           "%02d:%02d:%02d %s %c%c",
+           "%02d:%02d:%02d %s %c%c%c",
            now.hour(), now.minute(), now.second(),
            source_str,
            oznaka_dana,
-           oznaka_aktivnosti);
+           oznaka_aktivnosti,
+           wifi_status);
   line1_buffer[16] = '\0';
 }
 
@@ -313,7 +307,7 @@ static void build_date_string() {
 
   char day_name[4];
   char datum_poruka[16];
-  kopirajTekstIzFlash(day_name, sizeof(day_name), dohvatiNazivDanaIzFlash(day_of_week));
+  FlashTekst::kopirajLiteral(day_name, sizeof(day_name), dohvatiNazivDanaIzFlash(day_of_week));
 
   snprintf(datum_poruka, sizeof(datum_poruka),
            "%s %02d.%02d.%04d",
@@ -340,7 +334,7 @@ static void build_line2() {
       prikaziPotvrdu = !prikaziPotvrdu;
     }
 
-    kopirajTekstIzFlash(
+    FlashTekst::kopirajLiteral(
         poruka,
         sizeof(poruka),
         prikaziPotvrdu ? LCD_PORUKA_LATCH_EEPROM_2 : LCD_PORUKA_LATCH_EEPROM_1);
@@ -361,7 +355,7 @@ static void build_line2() {
       prikaziDruguRtcPoruku = !prikaziDruguRtcPoruku;
     }
 
-    kopirajTekstIzFlash(
+    FlashTekst::kopirajLiteral(
         poruka,
         sizeof(poruka),
         prikaziDruguRtcPoruku ? LCD_PORUKA_RTC_DEGRADED_2 : LCD_PORUKA_RTC_DEGRADED_1);
@@ -371,7 +365,28 @@ static void build_line2() {
 
   if (rtc_battery_warning_active) {
     char poruka[17];
-    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BAT_RTC);
+    FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BAT_RTC);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    return;
+  }
+
+  if (jeRS485VezaPrekinuta()) {
+    static bool prikaziDruguRs485Poruku = false;
+    static unsigned long zadnjaRs485PorukaMs = 0;
+    char poruka[17];
+    const unsigned long sadaMs = millis();
+
+    if (zadnjaRs485PorukaMs == 0) {
+      zadnjaRs485PorukaMs = sadaMs;
+    } else if ((sadaMs - zadnjaRs485PorukaMs) >= LCD_RS485_PREKID_INTERVAL_MS) {
+      zadnjaRs485PorukaMs = sadaMs;
+      prikaziDruguRs485Poruku = !prikaziDruguRs485Poruku;
+    }
+
+    FlashTekst::kopirajLiteral(
+        poruka,
+        sizeof(poruka),
+        prikaziDruguRs485Poruku ? LCD_PORUKA_RS485_2 : LCD_PORUKA_RS485_1);
     pripremiDrugiRedakSaWiFiOznakom(poruka);
     return;
   }
@@ -385,19 +400,19 @@ static void build_line2() {
     char poruka[17];
 
     if (zvono1Aktivno && zvono2Aktivno) {
-      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_OBA_ZVONA);
+      FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_OBA_ZVONA);
       pripremiDrugiRedakSaWiFiOznakom(poruka);
       return;
     }
 
     if (zvono1Aktivno) {
-      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BELL1);
+      FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BELL1);
       pripremiDrugiRedakSaWiFiOznakom(poruka);
       return;
     }
 
     if (zvono2Aktivno) {
-      kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_BELL2);
+      FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BELL2);
       pripremiDrugiRedakSaWiFiOznakom(poruka);
       return;
     }
@@ -417,7 +432,7 @@ static void build_line2() {
 
   if (current_activity == ACTIVITY_NONE && jeLiInerciaAktivna()) {
     char poruka[17];
-    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_INERCIJA);
+    FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_INERCIJA);
     pripremiDrugiRedakSaWiFiOznakom(poruka);
     otkucavanje_poruka_aktivna = false;
     return;
@@ -436,7 +451,7 @@ static void build_line2() {
 
   if (current_activity == ACTIVITY_NONE && jeOtkucavanjeUTijeku()) {
     char poruka[17];
-    kopirajTekstIzFlash(poruka, sizeof(poruka), LCD_PORUKA_OTKUCAJ);
+    FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_OTKUCAJ);
     pripremiDrugiRedakSaWiFiOznakom(poruka);
     otkucavanje_poruka_aktivna = true;
     hod_sata_prikaz_aktivan = false;
@@ -498,7 +513,7 @@ static void build_line2() {
 }
 
 static void set_activity_message(PGM_P message, unsigned long timeout_ms, bool is_error) {
-  kopirajTekstIzFlash(activity_message, sizeof(activity_message), message);
+  FlashTekst::kopirajLiteral(activity_message, sizeof(activity_message), message);
 
   int len = strlen(activity_message);
   for (int i = len; i < 16; i++) {
@@ -536,6 +551,18 @@ void signalizirajHammer2_Active() {
   last_line2_refresh = 0;
 }
 
+static void oznaciDrugiRedakZaOsvjezavanje(bool prisiliDatum) {
+  last_line2_refresh = 0;
+  if (prisiliDatum) {
+    last_date_minute = -1;
+  }
+}
+
+static void postaviTrajnuAktivnostDrugogRetka(uint8_t aktivnost, PGM_P poruka) {
+  current_activity = aktivnost;
+  set_activity_message(poruka, 0, false);
+}
+
 void signalizirajError_RTC() {
   current_activity = ACTIVITY_ERROR;
   set_activity_message(LCD_PORUKA_ERR_RTC, 0, true);
@@ -546,20 +573,14 @@ void signalizirajError_EEPROM() {
   set_activity_message(LCD_PORUKA_ERR_EEPROM, 0, true);
 }
 
-void signalizirajError_I2C() {
-  current_activity = ACTIVITY_ERROR;
-  set_activity_message(LCD_PORUKA_ERR_I2C, 0, true);
-}
-
 void signalizirajUpozorenjeRtcBaterije() {
   rtc_battery_warning_active = true;
-  last_line2_refresh = 0;
+  oznaciDrugiRedakZaOsvjezavanje(false);
 }
 
 void potvrdiUpozorenjeRtcBaterije() {
   rtc_battery_warning_active = false;
-  last_line2_refresh = 0;
-  last_date_minute = -1;
+  oznaciDrugiRedakZaOsvjezavanje(true);
 }
 
 bool jeUpozorenjeRtcBaterijeAktivno() {
@@ -568,24 +589,21 @@ bool jeUpozorenjeRtcBaterijeAktivno() {
 
 void signalizirajLatchedFaultEEPROM() {
   latched_eeprom_fault_active = true;
-  last_line2_refresh = 0;
+  oznaciDrugiRedakZaOsvjezavanje(false);
 }
 
 void potvrdiLatchedFaultEEPROM() {
   latched_eeprom_fault_active = false;
   ocistiAktivnostDrugogRetka();
-  last_line2_refresh = 0;
-  last_date_minute = -1;
+  oznaciDrugiRedakZaOsvjezavanje(true);
 }
 
 void signalizirajCelebration_Mode() {
-  current_activity = ACTIVITY_CELEBRATION;
-  set_activity_message(LCD_PORUKA_SLAVLJENJE, 0, false);
+  postaviTrajnuAktivnostDrugogRetka(ACTIVITY_CELEBRATION, LCD_PORUKA_SLAVLJENJE);
 }
 
 void signalizirajFuneral_Mode() {
-  current_activity = ACTIVITY_FUNERAL;
-  set_activity_message(LCD_PORUKA_MRTVACKO, 0, false);
+  postaviTrajnuAktivnostDrugogRetka(ACTIVITY_FUNERAL, LCD_PORUKA_MRTVACKO);
 }
 
 void prikaziSat() {
@@ -619,6 +637,15 @@ void prikaziSat() {
     upisiRedakNaLCD(1, line2_buffer, zadnje_ispisani_redak2);
     osvjeziWatchdog();
   }
+}
+
+void prisiliOsvjezavanjeGlavnogPrikazaLCD() {
+  // Povratak iz izbornika mora odmah presloziti oba retka glavnog prikaza,
+  // bez cekanja sljedece minute ili redovnog perioda osvjezavanja.
+  last_line1_refresh = 0;
+  last_line1_rtc_tick = 0xFFFFFFFFUL;
+  last_line2_refresh = 0;
+  last_date_minute = -1;
 }
 
 void prikaziPoruku(const char* redak1, const char* redak2) {
@@ -661,8 +688,8 @@ void prikaziZakljucaniSustav() {
   if (porukaVidljiva) {
     char redak1[17];
     char redak2[17];
-    kopirajTekstIzFlash(redak1, sizeof(redak1), LCD_PORUKA_SAFE_MODE_1);
-    kopirajTekstIzFlash(
+    FlashTekst::kopirajLiteral(redak1, sizeof(redak1), LCD_PORUKA_SAFE_MODE_1);
+    FlashTekst::kopirajLiteral(
         redak2,
         sizeof(redak2),
         prikaziUputuOtkljucavanja ? LCD_PORUKA_SAFE_MODE_3 : LCD_PORUKA_SAFE_MODE_2);
@@ -676,18 +703,18 @@ void prikaziZakljucaniSustav() {
 
 void postaviWiFiStatus(bool aktivan) {
   wifi_status = aktivan ? 'W' : ' ';
-  // Prisili ponovno slaganje drugog retka kako bi se WiFi oznaka odmah
-  // pojavila ili nestala uz datum toranjskog sata, bez cekanja nove minute.
-  last_date_minute = -1;
-  last_line2_refresh = 0;
+  // WiFi oznaka sada zivi na kraju prvog retka i mora se odmah osvjeziti,
+  // bez cekanja RTC ticka ili redovnog sekundnog ciklusa.
+  last_line1_refresh = 0;
+  last_line1_rtc_tick = 0xFFFFFFFFUL;
 }
 
-void prikaziLokalnuWiFiIP(const char* ipAdresa) {
-  if (ipAdresa == nullptr || ipAdresa[0] == '\0') {
+void prikaziWiFiDijagnostiku(const char* tekst) {
+  if (tekst == nullptr || tekst[0] == '\0') {
     return;
   }
 
-  strncpy(wifi_ip_poruka, ipAdresa, sizeof(wifi_ip_poruka) - 1);
+  strncpy(wifi_ip_poruka, tekst, sizeof(wifi_ip_poruka) - 1);
   wifi_ip_poruka[sizeof(wifi_ip_poruka) - 1] = '\0';
 
   const int duljina = strlen(wifi_ip_poruka);

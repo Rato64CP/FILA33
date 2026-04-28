@@ -7,14 +7,15 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 - spaja toranjski sat na lokalnu WiFi mrežu
 - dohvaća NTP vrijeme i drži ga spremnim za `Arduino Megu 2560`
 - šalje NTP vrijeme Megi tek kad `Mega` pošalje `NTPREQ:SYNC`
-- pruža kratki servisni web sloj
+- pruža servisni web dashboard s karticama i API gumbima prema Megi
 - prihvaća setup WiFi kroz privremeni AP
 - prenosi jednostavne API naredbe prema Megi
 - ostaje pomocni mrezni sloj i ne zaobilazi `safe mode`, `RTC` degraded ni `EEPROM` degraded odluke koje donosi `main/power_recovery.*` i `main/time_glob.*`
+- ima interni WiFi watchdog: ako je `WiFi` prijavljen kao spojen, a `NTP` ne uspije osvjeziti vrijeme `2 sata`, `ESP` radi `WiFi.disconnect()` i pokrece novo spajanje
 
 ## 🌐 Aktivne web rute
 
-- `/` - kratka servisna početna stranica
+- `/` - dashboard s grid rasporedom kartica za zvona, slavljenje, mrtvačko i sunčevu automatiku
 - `/setup` - unos nove WiFi mreže
 - `/status` - JSON pregled WiFi stanja
 - `/api/...` - ručne servisne naredbe prema Megi
@@ -41,6 +42,7 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 - `ESP` i dalje moze odrzavati WiFi i NTP dok je `Mega` u ogranicenom radu
 - `ESP` ne otkljucava `safe mode` i ne potvrduje latched faultove; to ostaje lokalna servisna funkcija na tipkama i LCD-u
 - kad `Mega` blokira automatiku zbog `RTC` ili `EEPROM` problema, `ESP` ostaje samo pomocni izvor mreze i vremena bez ovlasti nad mehanikom toranjskog sata
+- nakon WiFi watchdog reseta `Mega` dobiva `NTP:` tek kad `ESP` ponovno potvrdi svjeze NTP vrijeme, a ne iz starog cachea klijenta
 
 ## 🚫 Što više nije aktivno
 
@@ -55,7 +57,7 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 ## 📶 Setup WiFi
 
 - setup AP ima SSID `ZVONKO_setup`
-- lozinka setup AP-a je `zvonko`
+- lozinka setup AP-a je `zvonko10`
 - na `ESP8266` AP se pali dugim pritiskom tipke na `GPIO14 / D5`
 - setup AP se moze pokrenuti i dugim istovremenim pritiskom `lijevo + desno` na Mega tipkovnici, ali samo s glavnog prikaza sata
 - na `ESP8266` status LED koristi `GPIO12 / D6`

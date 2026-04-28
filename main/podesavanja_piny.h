@@ -61,6 +61,15 @@
 #define PIN_KEYPAD_COL_3              10  // Vod 7 matrice
 #define PIN_KEYPAD_COL_4              11  // Vod 8 matrice
 
+// ==================== SUNCEVA AUTOMATIKA - LOKALNE TIPKE I LAMPICE ====================
+// Dvije fizicke tipke ukljucuju/iskljucuju jutarnju i vecernju automatiku,
+// a dvije LED lampice prikazuju stanje tih suncevih dogadaja.
+
+#define PIN_TIPKA_SUNCE_VECER         A9   // Tipka vecernje automatike (LOW=toggle)
+#define PIN_LAMPICA_SUNCE_VECER       A10  // LED za vecernju automatiku (HIGH=upali)
+#define PIN_TIPKA_SUNCE_JUTRO         A11  // Tipka jutarnje automatike (LOW=toggle)
+#define PIN_LAMPICA_SUNCE_JUTRO       A12  // LED za jutarnju automatiku (HIGH=upali)
+
 // ==================== SLAVLJENJE I MRTVACKO ULAZI ====================
 // Slavljenje koristi kip-prekidac, a mrtvacko zasebno tipkalo.
 
@@ -111,8 +120,13 @@
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
-// Serial1:        slobodno / rezerva (Rx1=pin19, Tx1=pin18)
+// Serial1:        rezerviran za buduci RS485 sloj (Rx1=pin19, Tx1=pin18)
 // Serial3:        9600 baud   - ugradeni ESP8266 na Mega+WiFi R3 plocici (Rx3=pin15, Tx3=pin14)
+
+// RS485 ostaje dodatni transportni sloj za toranjski sat. Postojeci relejni
+// izlazi ostaju aktivni, a RS485 se uvodi nerazorno za kasnije slanje naredbi.
+#define PIN_RS485_SMJER              35  // DE/RE upravljanje transceiverom (HIGH=TX, LOW=RX)
+#define RS485_SERIJSKI_PORT          Serial1
 
 // Toranjski sat koristi ESP kao jedini aktivni mrezni most i bezicni API sloj.
 #define ESP_SERIJSKI_PORT            Serial3

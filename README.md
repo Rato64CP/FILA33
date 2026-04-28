@@ -60,7 +60,7 @@
 ## 📶 Setup WiFi
 
 - `ESP8266` moze pokrenuti privremenu setup mrezu `ZVONKO_setup`
-- lozinka setup mreze je `zvonko`
+- lozinka setup mreze je `zvonko10`
 - setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`
 - setup AP se moze aktivirati i dugim istovremenim pritiskom `lijevo + desno` na tipkovnici, ali samo s glavnog prikaza sata
 - status LED koristi `GPIO12 / D6`

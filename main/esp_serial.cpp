@@ -21,7 +21,7 @@
 static HardwareSerial& espSerijskiPort = ESP_SERIJSKI_PORT;
 
 static const unsigned long ESP_BRZINA = 9600;
-static const size_t ESP_ULAZNI_BUFFER_MAX = 160;
+static const uint8_t ESP_ULAZNI_BUFFER_MAX = 96;
 static const unsigned long WIFI_POCETNA_ODGODA_NAKON_NAPAJANJA_MS = 120000UL;
 static const unsigned long WIFI_STATUS_DRUGI_UPIT_ODGODA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_RECOVERY_INTERVAL_MS = 300000UL;
@@ -37,7 +37,7 @@ static const uint16_t MAX_NTP_GODINA = 2099;
 // - automatski NTP ne smije remetiti osnovni rad sata ni prikaz izvora vremena
 
 static char ulazniBuffer[ESP_ULAZNI_BUFFER_MAX + 1];
-static size_t ulazniBufferDuljina = 0;
+static uint8_t ulazniBufferDuljina = 0;
 static bool ntpCekanjePrijavljeno = false;
 static bool wifiPovezanNaESP = false;
 static char zadnjaLokalnaWiFiIP[16] = "";
@@ -642,13 +642,25 @@ static void obradiESPRedak() {
     if (jeValjanaIPv4AdresaZaLCD(ipAdresa)) {
       strncpy(zadnjaLokalnaWiFiIP, ipAdresa, sizeof(zadnjaLokalnaWiFiIP) - 1);
       zadnjaLokalnaWiFiIP[sizeof(zadnjaLokalnaWiFiIP) - 1] = '\0';
-      prikaziLokalnuWiFiIP(ipAdresa);
 
       char log[64];
       snprintf(log, sizeof(log), "Mrezni most lokalna IP: %s", ipAdresa);
       posaljiPCLog(log);
     } else {
       logirajLinijuESP("Mrezni most: neispravna lokalna IP: ", ipAdresa);
+    }
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "WIFI:LCD:", 9) == 0) {
+    const char* payload = ulazniBuffer + 9;
+    if (payload[0] != '\0') {
+      prikaziWiFiDijagnostiku(payload);
+
+      char log[80];
+      snprintf(log, sizeof(log), "Mrezni most WiFi LCD sazetak: %s", payload);
+      posaljiPCLog(log);
     }
     resetirajUlazniBuffer();
     return;

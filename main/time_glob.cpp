@@ -109,7 +109,6 @@ static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool dstAktivanIzvori);
 static void evidentirajRtcUspjeh();
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
-void oznaciPovratakNaRTC();
 
 static bool jeVrijemeURasponuPouzdanosti(const DateTime& vrijeme) {
   return vrijeme.unixtime() != 0 &&

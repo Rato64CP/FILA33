@@ -20,6 +20,7 @@
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
 #include "prekidac_tisine.h"
+#include "rs485_bridge.h"
 
 namespace {
 
@@ -38,7 +39,10 @@ void inicijalizirajSigurnaPocetnaStanjaIzlaza() {
       PIN_LAMPICA_ZVONO_2,
       PIN_LAMPICA_SLAVLJENJE,
       PIN_LAMPICA_MRTVACKO,
-      PIN_LAMPICA_TIHI_REZIM
+      PIN_LAMPICA_TIHI_REZIM,
+      PIN_LAMPICA_SUNCE_JUTRO,
+      PIN_LAMPICA_SUNCE_VECER,
+      PIN_RS485_SMJER
   };
 
   for (uint8_t i = 0; i < (sizeof(izlazniPinovi) / sizeof(izlazniPinovi[0])); ++i) {
@@ -55,6 +59,7 @@ void setup() {
 
   inicijalizirajLCD();
   inicijalizirajPCSerijsku();
+  inicijalizirajRS485();
 
   posaljiPCLog(VanjskiEEPROM::inicijaliziraj()
                    ? F("EEPROM: vanjski EEPROM dostupan")
@@ -103,6 +108,7 @@ void loop() {
   }
 
   obradiESPSerijskuKomunikaciju();
+  obradiRS485();
   upravljajMenuSistemom();
   provjeriTipke();
   osvjeziPrekidacTisine();

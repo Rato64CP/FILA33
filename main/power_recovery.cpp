@@ -543,15 +543,19 @@ bool jeSafeModeAktivan() {
   return safe_mode_aktivan;
 }
 
+static void primijeniSafeModeBlokadeMehanike(bool aktivno) {
+  postaviGlobalnuBlokaduZvona(aktivno);
+  postaviGlobalnuBlokaduOtkucavanja(aktivno);
+  postaviRucnuBlokaduKazaljki(aktivno);
+  postaviRucnuBlokaduPloce(aktivno);
+}
+
 void primijeniSafeModeAkoTreba() {
   if (!safe_mode_aktivan) {
     return;
   }
 
-  postaviGlobalnuBlokaduZvona(true);
-  postaviGlobalnuBlokaduOtkucavanja(true);
-  postaviRucnuBlokaduKazaljki(true);
-  postaviRucnuBlokaduPloce(true);
+  primijeniSafeModeBlokadeMehanike(true);
   zaustaviSlavljenje();
   zaustaviMrtvacko();
 
@@ -579,10 +583,7 @@ bool otkljucajSafeMode() {
   safe_mode_primijenjen = false;
   watchdog_reset = false;
 
-  postaviGlobalnuBlokaduZvona(false);
-  postaviGlobalnuBlokaduOtkucavanja(false);
-  postaviRucnuBlokaduKazaljki(false);
-  postaviRucnuBlokaduPloce(false);
+  primijeniSafeModeBlokadeMehanike(false);
 
   posaljiPCLog(F("Power Recovery: Safe mode servisno otkljucan"));
   return true;

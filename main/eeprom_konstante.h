@@ -96,13 +96,14 @@ struct PostavkeSpremnik {
   char zadaniGateway[16];
   char ntpServer[40];
   bool wifiOmogucen;
+  bool rs485Omogucen;
   bool imaKazaljke;
   uint16_t checksum;
 };
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
-// Revizija 21 dodaje postavke mrtvackog za Svi sveti i Dusni dan.
-constexpr uint8_t POSTAVKE_VERZIJA = 21;
+// Revizija 22 dodaje ukljucivanje RS485 transporta kroz sustavske postavke.
+constexpr uint8_t POSTAVKE_VERZIJA = 22;
 
 constexpr int BAZA_POSTAVKE =
   BAZA_ZADNJA_SINKRONIZACIJA + (SLOTOVI_ZADNJA_SINKRONIZACIJA * SLOT_SIZE_ZADNJA_SINKRONIZACIJA);

@@ -106,6 +106,16 @@ static void pokreniInercijuZvona(int indeks) {
   inercija.trajanje_ms[indeks] = dohvatiTrajanjeInercijeZvonaMs(indeks);
 }
 
+static void zaustaviInercijuZvona(int indeks) {
+  if (!jeValjanIndeksZvona(indeks)) {
+    return;
+  }
+
+  inercija.aktivna[indeks] = false;
+  inercija.vrijeme_pocetka[indeks] = 0UL;
+  inercija.trajanje_ms[indeks] = 0UL;
+}
+
 static void prekiniPosebneNacineZbogZvona(int indeks) {
   bool prekinutoSlavljenje = false;
   bool prekinutoMrtvacko = false;
@@ -139,16 +149,15 @@ static void aktivirajBell_Relej(int indeks) {
 
   // Zvona imaju prioritet nad posebnim nacinima cekica toranjskog sata.
   prekiniPosebneNacineZbogZvona(indeks);
+  zaustaviInercijuZvona(indeks);
   digitalWrite(PINOVI_ZVONA[indeks], HIGH);
-  pokreniInercijuZvona(indeks);
   osvjeziLampicuZvona(indeks, millis());
 
-  char log[56];
+  char log[40];
   snprintf_P(log,
              sizeof(log),
-             PSTR("Zvono%d: aktivirana, inercija (%us) poceta"),
-             indeks + 1,
-             static_cast<unsigned>((inercija.trajanje_ms[indeks] + 500UL) / 1000UL));
+             PSTR("Zvono%d: aktivirana"),
+             indeks + 1);
   posaljiPCLog(log);
   signalizirajZvono_Ringing(indeks + 1);
 }
@@ -213,6 +222,14 @@ void iskljuciZvono(int zvono) {
     zvona.duration_ms[indeks] = 0;
     pokreniInercijuZvona(indeks);
     osvjeziLampicuZvona(indeks, millis());
+
+    char log[56];
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("Zvono%d: inercija (%us) poceta"),
+               indeks + 1,
+               static_cast<unsigned>((inercija.trajanje_ms[indeks] + 500UL) / 1000UL));
+    posaljiPCLog(log);
   }
 }
 

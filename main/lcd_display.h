@@ -10,8 +10,9 @@ void inicijalizirajLCD();
 void prikaziSat();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
 void prikaziZakljucaniSustav();
+void prisiliOsvjezavanjeGlavnogPrikazaLCD();
 void postaviWiFiStatus(bool aktivan);
-void prikaziLokalnuWiFiIP(const char* ipAdresa);
+void prikaziWiFiDijagnostiku(const char* tekst);
 void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci);
 
 // Signalizacija statusa otkucavanja na LCD-u
@@ -22,7 +23,6 @@ void signalizirajCelebration_Mode();
 void signalizirajFuneral_Mode();
 void signalizirajError_RTC();
 void signalizirajError_EEPROM();
-void signalizirajError_I2C();
 void signalizirajUpozorenjeRtcBaterije();
 void potvrdiUpozorenjeRtcBaterije();
 bool jeUpozorenjeRtcBaterijeAktivno();

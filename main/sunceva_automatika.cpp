@@ -12,6 +12,7 @@
 #include "slavljenje_mrtvacko.h"
 #include "pc_serial.h"
 #include "prekidac_tisine.h"
+#include "debouncing.h"
 
 namespace {
 
@@ -19,8 +20,10 @@ constexpr float PI_F = 3.14159265f;
 constexpr float SUNCEV_ZENIT_RAD = 90.833f * (PI_F / 180.0f);
 constexpr int32_t SUNCEVA_LOKACIJA_SIRINA_E5 = 4350000L;
 constexpr int32_t SUNCEVA_LOKACIJA_DUZINA_E5 = 1695000L;
+constexpr int NAJRANIJE_JUTARNJE_ZVONJENJE_MINUTA = 5 * 60;
 constexpr int FIKSNO_PODNE_MINUTA = 12 * 60;
 constexpr unsigned long ODGODA_SUNCA_DO_SLIJEDECE_PROVJERE_MS = 1000UL;
+constexpr unsigned long TREPTANJE_LAMPICE_SUNCA_MS = 500UL;
 
 struct DnevniRasporedSuncevihDogadaja {
   bool valjano;
@@ -63,6 +66,9 @@ static int32_t zadnjaDuzinaE5 = 0x7FFFFFFFL;
 static uint8_t zadnjaMaskaDogadaja = 0xFF;
 static uint8_t zadnjaZvona[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
 static int16_t zadnjeOdgode[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
+static bool aktivnoSuncevoZvonjenje[SUNCEVI_DOGADAJ_BROJ] = {false, false, false};
+static uint8_t aktivnoSuncevoZvono[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
+static unsigned long krajSuncevogZvonjenjaMs[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
 
 static uint32_t napraviDatumKljuc(const DateTime& vrijeme) {
   return static_cast<uint32_t>((vrijeme.year() - 2000) * 512L +
@@ -119,10 +125,35 @@ static int normalizirajMinuteUDanu(int minute) {
   return minute;
 }
 
+static int izracunajJutarnjeVrijemeZvonjenja(int izlazMinute) {
+  const int jutroSPrilagodbom =
+      izlazMinute + dohvatiOdgoduSuncevogDogadajaMin(SUNCEVI_DOGADAJ_JUTRO);
+
+  // Jutarnje suncevo zvonjenje toranjskog sata ne dopustamo prije 05:00,
+  // cak ni kad negativni pomak gura dogadaj ranije.
+  if (jutroSPrilagodbom < NAJRANIJE_JUTARNJE_ZVONJENJE_MINUTA) {
+    return NAJRANIJE_JUTARNJE_ZVONJENJE_MINUTA;
+  }
+
+  return normalizirajMinuteUDanu(jutroSPrilagodbom);
+}
+
 static bool jeLokacijaValjana(int32_t sirinaE5, int32_t duzinaE5) {
   return sirinaE5 >= -9000000L && sirinaE5 <= 9000000L &&
          duzinaE5 >= -18000000L && duzinaE5 <= 18000000L &&
          !(sirinaE5 == 0 && duzinaE5 == 0);
+}
+
+static bool jeRucnoUpravljivSuncevDogadaj(uint8_t dogadaj) {
+  return dogadaj == SUNCEVI_DOGADAJ_JUTRO || dogadaj == SUNCEVI_DOGADAJ_VECER;
+}
+
+static uint8_t dohvatiPinLampiceSuncevogDogadaja(uint8_t dogadaj) {
+  return (dogadaj == SUNCEVI_DOGADAJ_JUTRO) ? PIN_LAMPICA_SUNCE_JUTRO : PIN_LAMPICA_SUNCE_VECER;
+}
+
+static uint8_t dohvatiPinTipkeSuncevogDogadaja(uint8_t dogadaj) {
+  return (dogadaj == SUNCEVI_DOGADAJ_JUTRO) ? PIN_TIPKA_SUNCE_JUTRO : PIN_TIPKA_SUNCE_VECER;
 }
 
 static bool izracunajSunceveMinuteZaDatum(const DateTime& datum,
@@ -356,6 +387,92 @@ static bool vrijemeProslo(unsigned long ciljMs) {
   return static_cast<long>(millis() - ciljMs) >= 0;
 }
 
+static void oznaciSuncevoZvonjenjeAktivnim(uint8_t dogadaj,
+                                           uint8_t zvono,
+                                           unsigned long trajanjeMs) {
+  if (!jeRucnoUpravljivSuncevDogadaj(dogadaj)) {
+    return;
+  }
+
+  aktivnoSuncevoZvonjenje[dogadaj] = true;
+  aktivnoSuncevoZvono[dogadaj] = zvono;
+  krajSuncevogZvonjenjaMs[dogadaj] = millis() + trajanjeMs;
+}
+
+static void osvjeziAktivnaSuncevaZvonjenja() {
+  for (uint8_t dogadaj = 0; dogadaj < SUNCEVI_DOGADAJ_BROJ; ++dogadaj) {
+    if (!aktivnoSuncevoZvonjenje[dogadaj]) {
+      continue;
+    }
+
+    if (!jeZvonoAktivno(aktivnoSuncevoZvono[dogadaj]) ||
+        vrijemeProslo(krajSuncevogZvonjenjaMs[dogadaj])) {
+      aktivnoSuncevoZvonjenje[dogadaj] = false;
+      aktivnoSuncevoZvono[dogadaj] = 0;
+      krajSuncevogZvonjenjaMs[dogadaj] = 0;
+    }
+  }
+}
+
+static void postaviLampicuSuncevogDogadaja(uint8_t dogadaj, bool ukljuceno) {
+  digitalWrite(dohvatiPinLampiceSuncevogDogadaja(dogadaj), ukljuceno ? HIGH : LOW);
+}
+
+static void osvjeziLampiceSunceveAutomatike() {
+  const bool treptajUpaljen =
+      ((millis() / TREPTANJE_LAMPICE_SUNCA_MS) % 2UL) == 0UL;
+
+  for (uint8_t dogadaj = 0; dogadaj < SUNCEVI_DOGADAJ_BROJ; ++dogadaj) {
+    if (!jeRucnoUpravljivSuncevDogadaj(dogadaj)) {
+      continue;
+    }
+
+    if (aktivnoSuncevoZvonjenje[dogadaj]) {
+      postaviLampicuSuncevogDogadaja(dogadaj, treptajUpaljen);
+      continue;
+    }
+
+    postaviLampicuSuncevogDogadaja(dogadaj, jeSuncevDogadajOmogucen(dogadaj));
+  }
+}
+
+static void prebaciRucnoUpravljanjeSuncevimDogadajem(uint8_t dogadaj) {
+  if (!jeRucnoUpravljivSuncevDogadaj(dogadaj)) {
+    return;
+  }
+
+  const bool novoStanje = !jeSuncevDogadajOmogucen(dogadaj);
+  postaviSuncevDogadaj(dogadaj,
+                       novoStanje,
+                       dohvatiZvonoZaSuncevDogadaj(dogadaj),
+                       dohvatiOdgoduSuncevogDogadajaMin(dogadaj));
+
+  char log[96];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Sunce tipka: %s automatika %s"),
+             nazivDogadajaTekst(dogadaj),
+             novoStanje ? "ukljucena" : "iskljucena");
+  posaljiPCLog(log);
+}
+
+static void obradiRucneTipkeSunceveAutomatike() {
+  for (uint8_t dogadaj = 0; dogadaj < SUNCEVI_DOGADAJ_BROJ; ++dogadaj) {
+    if (!jeRucnoUpravljivSuncevDogadaj(dogadaj)) {
+      continue;
+    }
+
+    SwitchState novoStanje = SWITCH_RELEASED;
+    if (!obradiDebouncedInput(dohvatiPinTipkeSuncevogDogadaja(dogadaj), 30, &novoStanje)) {
+      continue;
+    }
+
+    if (novoStanje == SWITCH_PRESSED) {
+      prebaciRucnoUpravljanjeSuncevimDogadajem(dogadaj);
+    }
+  }
+}
+
 static bool jeMinutaKolizijeSOtkucavanjem(int minutaUDanu) {
   const uint8_t modOtkucavanja = dohvatiModOtkucavanja();
   if (modOtkucavanja == 0) {
@@ -449,6 +566,11 @@ static void obradiZakazanoSuncevoZvonjenje(const DateTime& sada) {
   }
 
   aktivirajZvonjenjeNaTrajanje(zakazanoZvonjenje.zvono, zakazanoZvonjenje.trajanjeMs);
+  if (jeZvonoAktivno(zakazanoZvonjenje.zvono)) {
+    oznaciSuncevoZvonjenjeAktivnim(zakazanoZvonjenje.dogadaj,
+                                   zakazanoZvonjenje.zvono,
+                                   zakazanoZvonjenje.trajanjeMs);
+  }
   evidentirajJutarnjiStartOtkucavanja(zakazanoZvonjenje.dogadaj, sada);
   zakaziBlagdanskoSlavljenjeAkoTreba(zakazanoZvonjenje.dogadaj, sada);
 
@@ -582,8 +704,7 @@ static void osvjeziDnevniRaspored(const DateTime& sada) {
     return;
   }
 
-  raspored.minute[SUNCEVI_DOGADAJ_JUTRO] =
-      normalizirajMinuteUDanu(izlazMinute + dohvatiOdgoduSuncevogDogadajaMin(SUNCEVI_DOGADAJ_JUTRO));
+  raspored.minute[SUNCEVI_DOGADAJ_JUTRO] = izracunajJutarnjeVrijemeZvonjenja(izlazMinute);
   raspored.minute[SUNCEVI_DOGADAJ_VECER] =
       normalizirajMinuteUDanu(zalazMinute + dohvatiOdgoduSuncevogDogadajaMin(SUNCEVI_DOGADAJ_VECER));
 }
@@ -661,6 +782,9 @@ static void obradiSuncevDogadaj(uint8_t dogadaj, const DateTime& sada) {
   }
 
   aktivirajZvonjenjeNaTrajanje(zvono, trajanjeZvona);
+  if (jeZvonoAktivno(zvono)) {
+    oznaciSuncevoZvonjenjeAktivnim(dogadaj, zvono, trajanjeZvona);
+  }
   evidentirajJutarnjiStartOtkucavanja(dogadaj, sada);
   zakaziBlagdanskoSlavljenjeAkoTreba(dogadaj, sada);
 
@@ -732,6 +856,12 @@ static void obradiFiksnoPodnevnoZvonjenje(const DateTime& sada) {
 void inicijalizirajSuncevuAutomatiku() {
   pinMode(PIN_RELEJ_NOCNE_RASVJETE, OUTPUT);
   postaviRelejNocneRasvjete(false);
+  pinMode(PIN_TIPKA_SUNCE_JUTRO, INPUT_PULLUP);
+  pinMode(PIN_TIPKA_SUNCE_VECER, INPUT_PULLUP);
+  pinMode(PIN_LAMPICA_SUNCE_JUTRO, OUTPUT);
+  pinMode(PIN_LAMPICA_SUNCE_VECER, OUTPUT);
+  postaviLampicuSuncevogDogadaja(SUNCEVI_DOGADAJ_JUTRO, false);
+  postaviLampicuSuncevogDogadaja(SUNCEVI_DOGADAJ_VECER, false);
   nocnaRasvjetaUkljucena = false;
   raspored.valjano = false;
   raspored.datumKljuc = 0;
@@ -744,6 +874,9 @@ void inicijalizirajSuncevuAutomatiku() {
     zadnjiOkinutiDatum[i] = 0;
     zadnjaZvona[i] = 0;
     zadnjeOdgode[i] = 0;
+    aktivnoSuncevoZvonjenje[i] = false;
+    aktivnoSuncevoZvono[i] = 0;
+    krajSuncevogZvonjenjaMs[i] = 0;
   }
   zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
   zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
@@ -760,9 +893,14 @@ void inicijalizirajSuncevuAutomatiku() {
     osigurajDnevniRaspored(sada);
     osvjeziNocnuRasvjetu(sada);
   }
+  osvjeziLampiceSunceveAutomatike();
 }
 
 void upravljajSuncevomAutomatikom() {
+  obradiRucneTipkeSunceveAutomatike();
+  osvjeziAktivnaSuncevaZvonjenja();
+  osvjeziLampiceSunceveAutomatike();
+
   const DateTime sada = dohvatiTrenutnoVrijeme();
   if (sada.unixtime() == 0) {
     return;

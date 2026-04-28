@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include "menu_system.h"
 #include "lcd_display.h"
+#include "flash_text_utils.h"
 #include "time_glob.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
@@ -73,9 +74,10 @@ static const char* const stavkeMreze[] PROGMEM = {
   TEKST_MREZA_POVRATAK
 };
 
-static const int BROJ_STAVKI_SUSTAVA = 6;
+static const int BROJ_STAVKI_SUSTAVA = 7;
 static const char TEKST_SUSTAV_LCD[] PROGMEM = "LCD svjetlo";
 static const char TEKST_SUSTAV_LOGIRANJE[] PROGMEM = "Logiranje";
+static const char TEKST_SUSTAV_RS485[] PROGMEM = "RS485";
 static const char TEKST_SUSTAV_CEKIC[] PROGMEM = "Impuls cekica";
 static const char TEKST_SUSTAV_INERCIJA_Z1[] PROGMEM = "Inercija Z1";
 static const char TEKST_SUSTAV_INERCIJA_Z2[] PROGMEM = "Inercija Z2";
@@ -83,6 +85,7 @@ static const char TEKST_SUSTAV_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeSustava[] PROGMEM = {
   TEKST_SUSTAV_LCD,
   TEKST_SUSTAV_LOGIRANJE,
+  TEKST_SUSTAV_RS485,
   TEKST_SUSTAV_CEKIC,
   TEKST_SUSTAV_INERCIJA_Z1,
   TEKST_SUSTAV_INERCIJA_Z2,
@@ -122,6 +125,7 @@ static uint8_t faza_postavki_maticnog_sata = 0; // 0 = dan, 1 = mjesec, 2 = godi
 
 static bool lcdPozadinskoOsvjetljenjeUredjivanje = true;
 static bool logiranjeUredjivanje = true;
+static bool rs485Uredjivanje = false;
 static unsigned int trajanjeImpulsaCekicaUredjivanje = 150;
 static uint8_t inercijaZvona1Uredjivanje = 90;
 static uint8_t inercijaZvona2Uredjivanje = 90;
@@ -413,6 +417,7 @@ static uint8_t prilagodiInercijuZvonaZaMeni(uint8_t trenutnoSekunde, int deltaKo
 static void ucitajSustavZaUredjivanje() {
   lcdPozadinskoOsvjetljenjeUredjivanje = jeLCDPozadinskoOsvjetljenjeUkljuceno();
   logiranjeUredjivanje = jePCLogiranjeOmoguceno();
+  rs485Uredjivanje = jeRS485Omogucen();
   trajanjeImpulsaCekicaUredjivanje = dohvatiTrajanjeImpulsaCekica();
   inercijaZvona1Uredjivanje = dohvatiInercijuZvona1Sekunde();
   inercijaZvona2Uredjivanje = dohvatiInercijuZvona2Sekunde();
@@ -541,16 +546,6 @@ static void otkrijI2CAdrese() {
   char logSummary[32];
   snprintf(logSummary, sizeof(logSummary), "Pronadjeno I2C uredjaja: %d", dostupnihAdresi);
   posaljiPCLog(logSummary);
-}
-
-static void ucitajTekstIzProgmem(const char* const* niz, int indeks, char* odrediste, size_t velicina) {
-  strncpy_P(odrediste, reinterpret_cast<PGM_P>(pgm_read_ptr(&niz[indeks])), velicina - 1);
-  odrediste[velicina - 1] = '\0';
-}
-
-static void kopirajLiteralIzFlash(char* odrediste, size_t velicina, PGM_P literal) {
-  strncpy_P(odrediste, literal, velicina - 1);
-  odrediste[velicina - 1] = '\0';
 }
 
 static int pretvoriMinuteUKazaljkeSat12h(int minutaKazaljki) {
@@ -737,9 +732,9 @@ static void potvrdiSpremanjeBlagdana() {
 static void prikaziGlavniMeni() {
   char redak1[17];
   char redak2[17];
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("GLAVNI MENI"));
+  FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("GLAVNI MENI"));
   char stavka[15];
-  ucitajTekstIzProgmem(stavkeGlavnogMenuja, odabraniIndex, stavka, sizeof(stavka));
+  FlashTekst::ucitajIzNiza(stavkeGlavnogMenuja, odabraniIndex, stavka, sizeof(stavka));
   snprintf(redak2, sizeof(redak2), "> %s", stavka);
   prikaziPoruku(redak1, redak2);
 }
@@ -788,13 +783,13 @@ static void prikaziMaticniSatMenu() {
 static void prikaziMrezuMenu() {
   char redak1[17];
   char redak2[17];
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("MREZA"));
+  FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("MREZA"));
   if (odabraniIndex == 0) {
     snprintf(redak2, sizeof(redak2), "> WiFi: %s",
              jeWiFiOmogucen() ? "ON" : "OFF");
   } else {
     char stavka[15];
-    ucitajTekstIzProgmem(stavkeMreze, odabraniIndex, stavka, sizeof(stavka));
+    FlashTekst::ucitajIzNiza(stavkeMreze, odabraniIndex, stavka, sizeof(stavka));
     snprintf(redak2, sizeof(redak2), "> %s", stavka);
   }
   prikaziPoruku(redak1, redak2);
@@ -803,7 +798,7 @@ static void prikaziMrezuMenu() {
 static void prikaziSustavMenu() {
   char redak1[17];
   char redak2[17];
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("SUSTAV"));
+  FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("SUSTAV"));
   if (odabraniIndex == 0) {
     snprintf(redak2, sizeof(redak2), "> LCD: %s",
              lcdPozadinskoOsvjetljenjeUredjivanje ? "ON" : "OFF");
@@ -811,22 +806,25 @@ static void prikaziSustavMenu() {
     snprintf(redak2, sizeof(redak2), "> Log: %s",
              logiranjeUredjivanje ? "ON" : "OFF");
   } else if (odabraniIndex == 2) {
+    snprintf(redak2, sizeof(redak2), "> RS485: %u",
+             rs485Uredjivanje ? 1U : 0U);
+  } else if (odabraniIndex == 3) {
     snprintf(redak2,
              sizeof(redak2),
              "> Cekic:%3ums",
              static_cast<unsigned>(trajanjeImpulsaCekicaUredjivanje));
-  } else if (odabraniIndex == 3) {
+  } else if (odabraniIndex == 4) {
     snprintf(redak2,
              sizeof(redak2),
              "> Z1 iner:%3us",
              static_cast<unsigned>(inercijaZvona1Uredjivanje));
-  } else if (odabraniIndex == 4) {
+  } else if (odabraniIndex == 5) {
     snprintf(redak2,
              sizeof(redak2),
              "> Z2 iner:%3us",
              static_cast<unsigned>(inercijaZvona2Uredjivanje));
   } else {
-    kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("> Povratak"));
+    FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("> Povratak"));
   }
   prikaziPoruku(redak1, redak2);
 }
@@ -930,7 +928,7 @@ static void prikaziPodesavanjeCavala() {
   char redak1[17];
   char redak2[17];
 
-  kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("STAPICI"));
+  FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("STAPICI"));
   snprintf(redak2,
            sizeof(redak2),
            "TR%d TN%d S+%02d TS%d",
@@ -962,7 +960,7 @@ static void prikaziSunceveDogadaje() {
   char redak1[17];
   char redak2[17];
   if (jeStranicaNocneRasvjeteUSuncu()) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("NOCNA RASVJETA"));
+    FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("NOCNA RASVJETA"));
     snprintf_P(redak2, sizeof(redak2), PSTR("AUTO:%u UD/LR"),
                nocnaRasvjetaUredjivanje ? 1U : 0U);
     prikaziPoruku(redak1, redak2);
@@ -983,7 +981,7 @@ static void prikaziSunceveDogadaje() {
     const int minuta = minuteDogadaja % 60;
     snprintf_P(redak1, sizeof(redak1), PSTR("Danas %02d:%02d LR"), sat, minuta);
   } else {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("Danas --:-- LR"));
+      FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("Danas --:-- LR"));
   }
 
   snprintf_P(redak2,
@@ -1087,17 +1085,17 @@ static void prikaziWiFiIP() {
   char redak2[17];
 
   if (wifiInfoStrana == 0) {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFi IP [LR]"));
+    FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("WiFi IP [LR]"));
     const char* ipAdresa = dohvatiESPWiFiLokalnuIP();
     if (ipAdresa != nullptr && ipAdresa[0] != '\0') {
       snprintf(redak2, sizeof(redak2), "%.16s", ipAdresa);
     } else if (jeWiFiPovezanNaESP()) {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("Cekam IP..."));
+      FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("Cekam IP..."));
     } else {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("Nije dostupna"));
+      FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("Nije dostupna"));
     }
   } else {
-    kopirajLiteralIzFlash(redak1, sizeof(redak1), PSTR("WiFiMAC [LR]"));
+    FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("WiFiMAC [LR]"));
     const char* macAdresa = dohvatiESPWiFiMACAdresu();
     if (macAdresa != nullptr && macAdresa[0] != '\0') {
       char kompaktniMac[13];
@@ -1110,9 +1108,9 @@ static void prikaziWiFiIP() {
       kompaktniMac[indeks] = '\0';
       snprintf(redak2, sizeof(redak2), "%.16s", kompaktniMac);
     } else if (jeWiFiPovezanNaESP()) {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("Cekam MAC..."));
+      FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("Cekam MAC..."));
     } else {
-      kopirajLiteralIzFlash(redak2, sizeof(redak2), PSTR("Nije dostupna"));
+      FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("Nije dostupna"));
     }
   }
   prikaziPoruku(redak1, redak2);
@@ -1390,6 +1388,7 @@ static void obradiKlucSustav(KeyEvent event) {
       postaviLCDPozadinskoOsvjetljenje(lcdPozadinskoOsvjetljenjeUredjivanje);
       primijeniLCDPozadinskoOsvjetljenje(lcdPozadinskoOsvjetljenjeUredjivanje);
       postaviPCLogiranjeOmoguceno(logiranjeUredjivanje);
+      postaviRS485Omogucen(rs485Uredjivanje);
       postaviTrajanjeImpulsaCekica(trajanjeImpulsaCekicaUredjivanje);
       postaviInercijeZvona(inercijaZvona1Uredjivanje, inercijaZvona2Uredjivanje);
       vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_SUSTAV);
@@ -1401,12 +1400,14 @@ static void obradiKlucSustav(KeyEvent event) {
       } else if (odabraniIndex == 1) {
         logiranjeUredjivanje = !logiranjeUredjivanje;
       } else if (odabraniIndex == 2) {
+        rs485Uredjivanje = !rs485Uredjivanje;
+      } else if (odabraniIndex == 3) {
         trajanjeImpulsaCekicaUredjivanje =
             prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, -1);
-      } else if (odabraniIndex == 3) {
+      } else if (odabraniIndex == 4) {
         inercijaZvona1Uredjivanje =
             prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, -1);
-      } else if (odabraniIndex == 4) {
+      } else if (odabraniIndex == 5) {
         inercijaZvona2Uredjivanje =
             prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, -1);
       }
@@ -1417,12 +1418,14 @@ static void obradiKlucSustav(KeyEvent event) {
       } else if (odabraniIndex == 1) {
         logiranjeUredjivanje = !logiranjeUredjivanje;
       } else if (odabraniIndex == 2) {
+        rs485Uredjivanje = !rs485Uredjivanje;
+      } else if (odabraniIndex == 3) {
         trajanjeImpulsaCekicaUredjivanje =
             prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, 1);
-      } else if (odabraniIndex == 3) {
+      } else if (odabraniIndex == 4) {
         inercijaZvona1Uredjivanje =
             prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, 1);
-      } else if (odabraniIndex == 4) {
+      } else if (odabraniIndex == 5) {
         inercijaZvona2Uredjivanje =
             prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, 1);
       }
@@ -1858,6 +1861,7 @@ void povratakNaGlavniPrikaz() {
   ucitajSunceveDogadajeZaUredjivanje();
   ucitajBlagdaneZaUredjivanje();
   ucitajVrijemePloceZaUredjivanjeIzPozicije(dohvatiPozicijuPloce());
+  prisiliOsvjezavanjeGlavnogPrikazaLCD();
   zadnjaAktivnost = millis();
   posaljiPCLog(F("Povratak na prikaz sata"));
 }
