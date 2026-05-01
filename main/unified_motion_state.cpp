@@ -120,6 +120,8 @@ bool jednakoLogickoStanje(EepromLayout::UnifiedMotionState lijevo,
 }
 
 void ucitajLegacyKazaljke(uint16_t& handPosition) {
+  // Legacy migracija ostaje kako bi toranjski sat nakon nadogradnje
+  // i dalje mogao povuci zadnju poznatu poziciju kazaljki iz starog segmenta.
   int legacyK = 0;
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_KAZALJKE,
                             EepromLayout::SLOTOVI_KAZALJKE,
@@ -130,6 +132,8 @@ void ucitajLegacyKazaljke(uint16_t& handPosition) {
 }
 
 void ucitajLegacyPlocu(uint8_t& platePosition, uint8_t& platePhase) {
+  // Legacy migracija ostaje kako bi se staro stanje okretne ploce
+  // jednokratno preuzelo u novi UnifiedMotionState model.
   struct LegacyPloce { char zapis[4]; } legacy{};
   if (!WearLeveling::ucitaj(EepromLayout::BAZA_STANJE_PLOCE,
                             EepromLayout::SLOTOVI_STANJE_PLOCE,

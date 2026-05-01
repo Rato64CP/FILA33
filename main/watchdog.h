@@ -13,6 +13,7 @@ void inicijalizirajWatchdog();
 
 // Osvježi watchdog brojač (mora se pozivati najmanje svaki 8 sekundi)
 void osvjeziWatchdog();
+void osvjeziWatchdogAkoJeAktivan();
 
 // Dohvati sirove MCU reset zastavice (MCUSR) očitane pri bootu.
 uint8_t dohvatiResetFlags();

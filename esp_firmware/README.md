@@ -85,3 +85,4 @@ Ova podmapa sadrži firmware projekta `ZVONKO v. 1.0` za `ESP8266` i `ESP32` koj
 ## 📄 Datoteke
 
 - `esp_firmware.ino` - glavni firmware za WiFi, setup AP, NTP i servisni web/API sloj toranjskog sata
+- [Popis ESP web API ruta toranjskog sata](/C:/Users/Rato/Documents/GitHub/FILA33/docs/esp_web_api_toranjskog_sata.md)

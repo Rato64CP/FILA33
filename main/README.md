@@ -7,6 +7,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - upravljanje kazaljkama sata
 - upravljanje okretnom plocom
 - upravljanje zvonima i cekicima
+- termalna zastita slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - lokalne postavke preko LCD izbornika i tipki
 - pohrana postavki i stanja u `24C32 EEPROM`
@@ -65,12 +66,15 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `24C32 EEPROM` cuva postavke i kriticno radno stanje
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
 - svaki zapis `UnifiedMotionState` nosi checksum kako bi se preskocio korumpirani slot nakon prekida napajanja usred upisa
+- zapis zadnje sinkronizacije vremena ima vlastiti checksum i kompatibilan legacy fallback
 - `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
 - watchdog resetovi se pamte u zasebnom EEPROM bloku i tek ponovljeni watchdog resetovi bez power-loss oznake vode u `safe mode`
 - `safe mode` blokira mehaniku i prikazuje `SUSTAV ZAKLJUCAN / PREVISE RESETA` dok operater ne drzi `ENT / SELECT` `5 s`
 - `power_recovery.*` radi periodicki `EEPROM` health-check svakih `6 sati`
 - latched fault `EEPROM-a` ostaje spremljen do rucne potvrde operatera i pali degradirani nacin rada za `EEPROM`
 - u degradiranom `EEPROM` nacinu rada pauziraju se periodicni backup i pomocni zapisi iz `time_glob.*`
+- `LCD`, `RTC`, `24C32` i servisni `I2C` scan koriste zajednicku pripremu `Wire` sabirnice s timeoutom
+- `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan
 - `offset` ploce i MQTT tragovi vise nisu dio aktivnog modela
 - pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
 - `eeprom_konstante.h`
@@ -87,7 +91,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
-- 4x5 matricna tipkovnica, servisni ulazi i brojcani unos `HH:MM`
+- 4x5 matricna tipkovnica i servisni ulazi; sve promjene vrijednosti idu preko strelica
 - uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`
 
 ## ✅ Smjernice za razvoj
@@ -95,4 +99,5 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - glavna petlja mora ostati neblokirajuca
 - Mega mora ostati sigurna i bez ovisnosti o stalnoj mrezi
 - kvar ili restart ESP-a ne smije ugroziti osnovni rad sata
+- `I2C` pristup za `LCD`, `RTC` i `24C32` treba ostati na zajednickoj pripremi sabirnice s timeoutom
 - svaka promjena koja dira kazaljke, plocu, zvona ili recovery treba se provjeriti u odnosu na postojece module u `main/`

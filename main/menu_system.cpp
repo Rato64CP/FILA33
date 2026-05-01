@@ -8,6 +8,7 @@
 #include "menu_system.h"
 #include "lcd_display.h"
 #include "flash_text_utils.h"
+#include "i2c_bus.h"
 #include "time_glob.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
@@ -29,7 +30,7 @@ static const unsigned long TIMEOUT_MENIJA_MS = 30000; // Auto-povratak na sat na
 // ==================== MENU NAVIGATION ====================
 
 static int odabraniIndex = 0;
-static const int BROJ_STAVKI_GLAVNI_MENU = 10;
+static const int BROJ_STAVKI_GLAVNI_MENU = 9;
 static const char TEKST_GLAVNI_MATICNI_SAT[] PROGMEM = "Maticni sat";
 static const char TEKST_GLAVNI_KAZALJKE[] PROGMEM = "Kazaljke";
 static const char TEKST_GLAVNI_PLOCA[] PROGMEM = "Okretna ploca";
@@ -39,7 +40,6 @@ static const char TEKST_GLAVNI_STAPICI[] PROGMEM = "Stapici";
 static const char TEKST_GLAVNI_SUNCE[] PROGMEM = "Sunce";
 static const char TEKST_GLAVNI_BLAGDANI[] PROGMEM = "Blagdani";
 static const char TEKST_GLAVNI_SUSTAV[] PROGMEM = "Sustav";
-static const char TEKST_GLAVNI_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeGlavnogMenuja[] PROGMEM = {
   TEKST_GLAVNI_MATICNI_SAT,
   TEKST_GLAVNI_KAZALJKE,
@@ -49,8 +49,7 @@ static const char* const stavkeGlavnogMenuja[] PROGMEM = {
   TEKST_GLAVNI_STAPICI,
   TEKST_GLAVNI_SUNCE,
   TEKST_GLAVNI_BLAGDANI,
-  TEKST_GLAVNI_SUSTAV,
-  TEKST_GLAVNI_POVRATAK
+  TEKST_GLAVNI_SUSTAV
 };
 
 static const int INDEX_POSTAVKE_MATICNI_SAT = 0;
@@ -62,50 +61,43 @@ static const int INDEX_POSTAVKE_STAPICI = 5;
 static const int INDEX_POSTAVKE_SUNCE = 6;
 static const int INDEX_POSTAVKE_BLAGDANI = 7;
 static const int INDEX_POSTAVKE_SUSTAV = 8;
-static const int INDEX_POSTAVKE_POVRATAK = 9;
 
-static const int BROJ_STAVKI_MREZE = 3;
+static const int BROJ_STAVKI_MREZE = 2;
 static const char TEKST_MREZA_WIFI[] PROGMEM = "WiFi";
 static const char TEKST_MREZA_WIFI_IP[] PROGMEM = "WiFi IP";
-static const char TEKST_MREZA_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeMreze[] PROGMEM = {
   TEKST_MREZA_WIFI,
-  TEKST_MREZA_WIFI_IP,
-  TEKST_MREZA_POVRATAK
+  TEKST_MREZA_WIFI_IP
 };
 
-static const int BROJ_STAVKI_SUSTAVA = 7;
+static const int BROJ_STAVKI_SUSTAVA = 6;
 static const char TEKST_SUSTAV_LCD[] PROGMEM = "LCD svjetlo";
 static const char TEKST_SUSTAV_LOGIRANJE[] PROGMEM = "Logiranje";
 static const char TEKST_SUSTAV_RS485[] PROGMEM = "RS485";
 static const char TEKST_SUSTAV_CEKIC[] PROGMEM = "Impuls cekica";
 static const char TEKST_SUSTAV_INERCIJA_Z1[] PROGMEM = "Inercija Z1";
 static const char TEKST_SUSTAV_INERCIJA_Z2[] PROGMEM = "Inercija Z2";
-static const char TEKST_SUSTAV_POVRATAK[] PROGMEM = "Povratak";
 static const char* const stavkeSustava[] PROGMEM = {
   TEKST_SUSTAV_LCD,
   TEKST_SUSTAV_LOGIRANJE,
   TEKST_SUSTAV_RS485,
   TEKST_SUSTAV_CEKIC,
   TEKST_SUSTAV_INERCIJA_Z1,
-  TEKST_SUSTAV_INERCIJA_Z2,
-  TEKST_SUSTAV_POVRATAK
+  TEKST_SUSTAV_INERCIJA_Z2
 };
 
 // ==================== HAND CORRECTION ====================
 
 static int korektnaMinuta = 0;
 static int korektniSat = 12;
-static int faza_korekcije = 0; // 0 = hours, 1 = minutes
+static int faza_korekcije = 0; // 0 = sati, 1 = minute
 static int pretvoriMinuteUKazaljkeSat12h(int minutaKazaljki);
-static void resetirajUnosVremena();
 
 static void ucitajKazaljkeZaUredjivanje() {
   const int memoriraneMinute = dohvatiMemoriraneKazaljkeMinuta();
   korektniSat = pretvoriMinuteUKazaljkeSat12h(memoriraneMinute);
   korektnaMinuta = ((memoriraneMinute % 60) + 60) % 60;
   faza_korekcije = 0;
-  resetirajUnosVremena();
 }
 
 // ==================== TIME ADJUSTMENT ====================
@@ -234,14 +226,7 @@ static void ucitajPostavkePloceZaUredjivanje() {
   plocaKrajUredjivanjeMinuta = dohvatiKrajPloceMinute();
   ucitajVrijemePloceZaUredjivanjeIzPozicije(dohvatiPozicijuPloce());
   faza_postavki_ploce = 3;
-  resetirajUnosVremena();
 }
-
-// ==================== BROJCANI UNOS VREMENA ====================
-
-static bool unosVremenaAktivan = false;
-static uint8_t uneseneZnamenkeVremena[4] = {0, 0, 0, 0};
-static uint8_t brojUnesenihZnamenkiVremena = 0;
 
 // ==================== QUIET HOURS ADJUSTMENT ====================
 
@@ -435,88 +420,10 @@ static bool jeTipkaZaOtvaranjeGlavnogMenija(KeyEvent event) {
   return event == KEY_UP || event == KEY_DOWN;
 }
 
-static void resetirajUnosVremena() {
-  unosVremenaAktivan = false;
-  brojUnesenihZnamenkiVremena = 0;
-  for (uint8_t i = 0; i < 4; ++i) {
-    uneseneZnamenkeVremena[i] = 0;
-  }
-}
-
-static bool dohvatiZnamenkuIzKljuce(KeyEvent event, uint8_t* znamenka) {
-  if (znamenka == NULL) {
-    return false;
-  }
-
-  switch (event) {
-    case KEY_DIGIT_0: *znamenka = 0; return true;
-    case KEY_DIGIT_1: *znamenka = 1; return true;
-    case KEY_DIGIT_2: *znamenka = 2; return true;
-    case KEY_DIGIT_3: *znamenka = 3; return true;
-    case KEY_DIGIT_4: *znamenka = 4; return true;
-    case KEY_DIGIT_5: *znamenka = 5; return true;
-    case KEY_DIGIT_6: *znamenka = 6; return true;
-    case KEY_DIGIT_7: *znamenka = 7; return true;
-    case KEY_DIGIT_8: *znamenka = 8; return true;
-    case KEY_DIGIT_9: *znamenka = 9; return true;
-    default:
-      return false;
-  }
-}
-
-static void dodajZnamenkuUnosaVremena(uint8_t znamenka) {
-  if (brojUnesenihZnamenkiVremena >= 4) {
-    brojUnesenihZnamenkiVremena = 0;
-  }
-
-  uneseneZnamenkeVremena[brojUnesenihZnamenkiVremena++] = znamenka;
-  unosVremenaAktivan = true;
-}
-
-static bool jeUnosVremenaPotpun() {
-  return unosVremenaAktivan && brojUnesenihZnamenkiVremena == 4;
-}
-
-static void formatirajMaskuUnosaVremena(char* odrediste, size_t velicina) {
-  char prikaz[6] = {'_', '_', ':', '_', '_', '\0'};
-  for (uint8_t i = 0; i < brojUnesenihZnamenkiVremena && i < 4; ++i) {
-    prikaz[i + (i >= 2 ? 1 : 0)] = static_cast<char>('0' + uneseneZnamenkeVremena[i]);
-  }
-  snprintf(odrediste, velicina, "%s", prikaz);
-}
-
-static bool dohvatiUnesenoVrijeme(int* sat, int* minuta) {
-  if (!jeUnosVremenaPotpun() || sat == NULL || minuta == NULL) {
-    return false;
-  }
-
-  *sat = (uneseneZnamenkeVremena[0] * 10) + uneseneZnamenkeVremena[1];
-  *minuta = (uneseneZnamenkeVremena[2] * 10) + uneseneZnamenkeVremena[3];
-  return true;
-}
-
-static bool postaviVrijemeIzUnosaZaKazaljke() {
-  int sat = 0;
-  int minuta = 0;
-  if (!dohvatiUnesenoVrijeme(&sat, &minuta)) {
-    posaljiPCLog(F("Kazaljke: nepotpun unos vremena"));
-    return false;
-  }
-
-  if (sat < 1 || sat > 12 || minuta < 0 || minuta > 59) {
-    posaljiPCLog(F("Kazaljke: neispravan unos vremena HH:MM"));
-    return false;
-  }
-
-  korektniSat = sat;
-  korektnaMinuta = minuta;
-  return true;
-}
-
 // ==================== I2C ADDRESS DETECTION ====================
 
 static void otkrijI2CAdrese() {
-  Wire.begin();
+  pripremiI2CSabirnicuSigurno();
   posaljiPCLog(F("Scanning I2C addresses..."));
 
   int dostupnihAdresi = 0;
@@ -760,22 +667,22 @@ static void prikaziMaticniSatMenu() {
   lcd.blink();
   switch (faza_postavki_maticnog_sata) {
     case 0:
-      lcd.setCursor(4, 0);
-      break;
-    case 1:
-      lcd.setCursor(7, 0);
-      break;
-    case 2:
-      lcd.setCursor(10, 0);
-      break;
-    case 3:
       lcd.setCursor(4, 1);
       break;
-    case 4:
+    case 1:
       lcd.setCursor(7, 1);
       break;
+    case 2:
+      lcd.setCursor(10, 1);
+      break;
+    case 3:
+      lcd.setCursor(4, 0);
+      break;
+    case 4:
+      lcd.setCursor(7, 0);
+      break;
     default:
-      lcd.setCursor(13, 1);
+      lcd.setCursor(13, 0);
       break;
   }
 }
@@ -823,8 +730,6 @@ static void prikaziSustavMenu() {
              sizeof(redak2),
              "> Z2 iner:%3us",
              static_cast<unsigned>(inercijaZvona2Uredjivanje));
-  } else {
-    FlashTekst::kopirajLiteral(redak2, sizeof(redak2), PSTR("> Povratak"));
   }
   prikaziPoruku(redak1, redak2);
 }
@@ -871,14 +776,7 @@ static void prikaziKazaljkeMenu() {
   const int satPozicije = pretvoriMinuteUKazaljkeSat12h(memoriraneMinute);
   const int minutaPozicije = ((memoriraneMinute % 60) + 60) % 60;
   snprintf(redak1, sizeof(redak1), "POZ: %02d:%02d", satPozicije, minutaPozicije);
-
-  if (unosVremenaAktivan) {
-    char maska[6];
-    formatirajMaskuUnosaVremena(maska, sizeof(maska));
-    snprintf(redak2, sizeof(redak2), "STANJE: %s", maska);
-  } else {
-    snprintf(redak2, sizeof(redak2), "STANJE: %02d:%02d", korektniSat, korektnaMinuta);
-  }
+  snprintf(redak2, sizeof(redak2), "STANJE: %02d:%02d", korektniSat, korektnaMinuta);
   prikaziPoruku(redak1, redak2);
 
   lcd.cursor();
@@ -1169,8 +1067,6 @@ static void obradiKlucGlavniMeni(KeyEvent event) {
         odabraniIndex = 0;
         trenutnoStanje = MENU_STATE_SYSTEM_SETTINGS;
         posaljiPCLog(F("Ulazak u sustavske postavke"));
-      } else if (odabraniIndex == INDEX_POSTAVKE_POVRATAK) {
-        povratakNaGlavniPrikaz();
       }
       break;
     case KEY_BACK:
@@ -1345,8 +1241,6 @@ static void obradiKlucMreza(KeyEvent event) {
       } else if (odabraniIndex == 1) {
         wifiInfoStrana = 0;
         trenutnoStanje = MENU_STATE_WIFI_IP_DISPLAY;
-      } else {
-        vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_MREZA);
       }
       break;
     case KEY_BACK:
@@ -1662,29 +1556,14 @@ static void obradiKlucBlagdani(KeyEvent event) {
 }
 
 static void obradiKlucPostavkeKazaljki(KeyEvent event) {
-  uint8_t znamenka = 0;
-  if (dohvatiZnamenkuIzKljuce(event, &znamenka)) {
-    dodajZnamenkuUnosaVremena(znamenka);
-    return;
-  }
-
   switch (event) {
     case KEY_LEFT:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       faza_korekcije = 0;
       break;
     case KEY_RIGHT:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       faza_korekcije = 1;
       break;
     case KEY_UP:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       if (faza_korekcije == 0) {
         korektniSat = (korektniSat >= 12) ? 1 : (korektniSat + 1);
       } else {
@@ -1692,9 +1571,6 @@ static void obradiKlucPostavkeKazaljki(KeyEvent event) {
       }
       break;
     case KEY_DOWN:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-      }
       if (faza_korekcije == 0) {
         korektniSat = (korektniSat <= 1) ? 12 : (korektniSat - 1);
       } else {
@@ -1702,13 +1578,6 @@ static void obradiKlucPostavkeKazaljki(KeyEvent event) {
       }
       break;
     case KEY_SELECT:
-      if (unosVremenaAktivan) {
-        if (!postaviVrijemeIzUnosaZaKazaljke()) {
-          break;
-        }
-        resetirajUnosVremena();
-      }
-
       {
         const int satKazaljke = (korektniSat % 12);
         postaviRucnuPozicijuKazaljki(satKazaljke, korektnaMinuta);
@@ -1727,10 +1596,6 @@ static void obradiKlucPostavkeKazaljki(KeyEvent event) {
       vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_KAZALJKE);
       break;
     case KEY_BACK:
-      if (unosVremenaAktivan) {
-        resetirajUnosVremena();
-        break;
-      }
       postaviRucnuBlokaduKazaljki(false);
       vratiNaGlavniMeniNaStavku(INDEX_POSTAVKE_KAZALJKE);
       break;
@@ -1749,7 +1614,6 @@ void inicijalizirajMenuSistem() {
   ntpOmogucenUredjivanje = jeNTPOmogucen();
   ucitajSustavZaUredjivanje();
   ucitajVrijemePloceZaUredjivanjeIzPozicije(dohvatiPozicijuPloce());
-  resetirajUnosVremena();
   ucitajPostavkeCavalaZaUredjivanje();
   ucitajSunceveDogadajeZaUredjivanje();
   ucitajBlagdaneZaUredjivanje();
@@ -1758,7 +1622,6 @@ void inicijalizirajMenuSistem() {
   faza_postavki_sunca = 0;
   stranica_postavki_blagdana = 0;
   faza_postavki_blagdana = 0;
-  resetirajUnosVremena();
 
   otkrijI2CAdrese();
 
@@ -1855,7 +1718,6 @@ void povratakNaGlavniPrikaz() {
   faza_postavki_sunca = 0;
   stranica_postavki_blagdana = 0;
   faza_postavki_blagdana = 0;
-  resetirajUnosVremena();
   ntpOmogucenUredjivanje = jeNTPOmogucen();
   ucitajSustavZaUredjivanje();
   ucitajSunceveDogadajeZaUredjivanje();

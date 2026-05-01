@@ -77,6 +77,8 @@ Ovi pinovi su izlazi iz `Arduino Mega 2560` prema relejima, cekicima i signalnim
 
 ## Matricna tipkovnica 4x5
 
+Aktivni firmware toranjskog sata trenutno koristi samo strelice, `Ent` i `Esc`, dok brojcane tipke matrice nisu dio lokalnog menija.
+
 ### Retci
 
 | Funkcija | Pin | Napomena |

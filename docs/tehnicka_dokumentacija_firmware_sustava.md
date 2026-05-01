@@ -261,6 +261,7 @@ Pravilo upravljanja tipkama je ujednaceno:
 - strelice sluze za kretanje po stavkama i promjenu vrijednosti
 - `Ent` sprema promjene za aktivnu granu menija
 - `Esc` izlazi bez spremanja i vraca se jednu granu natrag
+- brojcane tipke vise nisu dio aktivnog toka menija; korekcije kazaljki i ostalih vrijednosti rade se preko `Gore/Dolje`
 
 Meni `Sunce` trenutno uredjuje:
 - jutarnji dogadaj

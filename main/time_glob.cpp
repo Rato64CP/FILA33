@@ -4,6 +4,7 @@
 #include <RTClib.h>
 #include "time_glob.h"
 #include "eeprom_konstante.h"
+#include "i2c_bus.h"
 #include "podesavanja_piny.h"
 #include "wear_leveling.h"
 #include "pc_serial.h"
@@ -229,9 +230,16 @@ static void spremiZadnjuSinkronizaciju() {
     return;
   }
 
-  EepromLayout::ZadnjaSinkronizacija zs;
-  zs.izvor = static_cast<int>(zadnjiPotvrdeniIzvor);
+  EepromLayout::ZadnjaSinkronizacija zs{};
+  zs.izvor = static_cast<uint8_t>(zadnjiPotvrdeniIzvor);
   zs.timestamp = zadnjaSinkronizacija.unixtime();
+  zs.checksum = static_cast<uint8_t>(
+      0xA5U ^
+      zs.izvor ^
+      static_cast<uint8_t>(zs.timestamp & 0xFFU) ^
+      static_cast<uint8_t>((zs.timestamp >> 8) & 0xFFU) ^
+      static_cast<uint8_t>((zs.timestamp >> 16) & 0xFFU) ^
+      static_cast<uint8_t>((zs.timestamp >> 24) & 0xFFU));
   WearLeveling::spremi(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
                        EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
                        zs);
@@ -276,6 +284,43 @@ static bool jeDSTStatusValjan(const EepromLayout::DSTStatus& stanje) {
   return stanje.potpis == EepromLayout::DST_STATUS_POTPIS &&
          stanje.checksum == izracunajDSTChecksum(stanje) &&
          stanje.dstAktivan <= 1;
+}
+
+static uint8_t izracunajChecksumZadnjeSinkronizacije(
+    const EepromLayout::ZadnjaSinkronizacija& stanje) {
+  return static_cast<uint8_t>(
+      0xA5U ^
+      stanje.izvor ^
+      static_cast<uint8_t>(stanje.timestamp & 0xFFU) ^
+      static_cast<uint8_t>((stanje.timestamp >> 8) & 0xFFU) ^
+      static_cast<uint8_t>((stanje.timestamp >> 16) & 0xFFU) ^
+      static_cast<uint8_t>((stanje.timestamp >> 24) & 0xFFU));
+}
+
+static bool jeZadnjaSinkronizacijaValjana(const EepromLayout::ZadnjaSinkronizacija& stanje) {
+  return (stanje.izvor == IZ_RTC ||
+          stanje.izvor == IZ_MAN ||
+          stanje.izvor == IZ_NTP) &&
+         stanje.checksum == izracunajChecksumZadnjeSinkronizacije(stanje);
+}
+
+struct LegacyZadnjaSinkronizacija {
+  int izvor;
+  uint32_t timestamp;
+};
+
+static bool ucitajLegacyZadnjuSinkronizaciju(LegacyZadnjaSinkronizacija& stanje) {
+  // Legacy fallback ostaje kako bi toranjski sat procitao stare 6-bajtne zapise
+  // zadnje sinkronizacije i potom ih migrirao na checksum format bez gubitka stanja.
+  if (!WearLeveling::ucitaj(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
+                            EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
+                            stanje)) {
+    return false;
+  }
+
+  return stanje.izvor == IZ_RTC ||
+         stanje.izvor == IZ_NTP ||
+         stanje.izvor == IZ_MAN;
 }
 
 static uint8_t zadnjaNedjeljaUMjesecu(int godina, uint8_t mjesec) {
@@ -400,20 +445,45 @@ static void obradiAutomatskiDST() {
 }
 
 static void ucitajZadnjuSinkronizaciju() {
-  EepromLayout::ZadnjaSinkronizacija zs;
+  EepromLayout::ZadnjaSinkronizacija zs{};
+  bool imaValjaniZapis = false;
+  bool legacyMigracija = false;
+
   if (WearLeveling::ucitaj(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
-                          EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
-                          zs)) {
+                           EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
+                           zs) &&
+      jeZadnjaSinkronizacijaValjana(zs)) {
+    imaValjaniZapis = true;
+  } else {
+    LegacyZadnjaSinkronizacija legacy{};
+    if (ucitajLegacyZadnjuSinkronizaciju(legacy)) {
+      zs.izvor = static_cast<uint8_t>(legacy.izvor);
+      zs.timestamp = legacy.timestamp;
+      zs.checksum = izracunajChecksumZadnjeSinkronizacije(zs);
+      imaValjaniZapis = true;
+      legacyMigracija = true;
+    }
+  }
+
+  if (imaValjaniZapis) {
     zadnjaSinkronizacija = DateTime(zs.timestamp);
     zadnjaSinkronizacijaMs =
         izracunajZadnjuSinkronizacijuMsPriBootu(trenutnoVrijeme, zadnjaSinkronizacija);
-      if (zs.izvor == IZ_MAN) {
-        zadnjiPotvrdeniIzvor = IZ_MAN;
-      } else if (zs.izvor == IZ_NTP) {
-        zadnjiPotvrdeniIzvor = IZ_NTP;
-      } else {
-        zadnjiPotvrdeniIzvor = IZ_RTC;
-      }
+
+    if (zs.izvor == IZ_MAN) {
+      zadnjiPotvrdeniIzvor = IZ_MAN;
+    } else if (zs.izvor == IZ_NTP) {
+      zadnjiPotvrdeniIzvor = IZ_NTP;
+    } else {
+      zadnjiPotvrdeniIzvor = IZ_RTC;
+    }
+
+    if (legacyMigracija && !jeEepromDegradiraniNacinAktivan()) {
+      WearLeveling::spremi(EepromLayout::BAZA_ZADNJA_SINKRONIZACIJA,
+                           EepromLayout::SLOTOVI_ZADNJA_SINKRONIZACIJA,
+                           zs);
+      posaljiPCLog(F("Vrijeme: migriran legacy zapis zadnje sinkronizacije"));
+    }
   } else {
     zadnjaSinkronizacija = DateTime((uint32_t)0);
     zadnjaSinkronizacijaMs = 0;
@@ -510,6 +580,7 @@ DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
 // -------------------- JAVNE FUNKCIJE --------------------
 
 void inicijalizirajRTC() {
+  pripremiI2CSabirnicuSigurno();
   if (!rtc.begin()) {
     rtcDegradiraniNacinAktivan = true;
     rtcNeuspjesiZaredom = RTC_DEGRADED_PRAG_NEUSPJEHA;

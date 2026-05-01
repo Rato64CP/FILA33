@@ -8,6 +8,7 @@
 - upravlja kazaljkama sata uz korekciju i sinkronizaciju
 - upravlja okretnom plocom kroz dvofazne korake i citanje cavala
 - vodi zvona, cekice, slavljenje i mrtvacko
+- uvodi termalnu zastitu slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - podrzava blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - cuva postavke i kriticno stanje u `24C32 EEPROM-u`
 - vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
@@ -72,12 +73,15 @@
 - `24C32 EEPROM` cuva postavke, `UnifiedMotionState`, DST status i kriticni backup
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
 - svaki `UnifiedMotionState` slot ima checksum i nevaljan ili polovicno upisan zapis se preskace
+- zapis zadnje sinkronizacije vremena sada ima vlastiti checksum uz kompatibilno citanje starog formata
 - `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
 - watchdog resetovi se prate kroz perzistentni brojac i nakon vise uzastopnih watchdog resetova aktivira se `safe mode`
 - `safe mode` blokira kazaljke, plocu, zvona i cekice dok operater ne drzi `ENT / SELECT` `5 s`
 - zdravlje `EEPROM-a` se provjerava i pri bootu i periodicki svakih `6 sati`
 - kvar `EEPROM-a` ostaje latched u memoriji do rucne potvrde operatera
 - kad je `EEPROM` u degradiranom nacinu rada, periodicni backup i pomocni zapisi poput DST i zadnje sinkronizacije se pauziraju
+- `I2C` sabirnica koristi zajednicki `Wire` timeout i reset sabirnice za `LCD`, `DS3231`, `24C32` i servisno skeniranje
+- `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan kako pomocni zapisi ne bi nepotrebno gurali toranjski sat prema WDT resetu
 - stari `offset` ploce i MQTT tragovi vise nisu dio aktivnog EEPROM modela
 - kod izmjena koje diraju EEPROM raspored ili recovery logiku obavezno provjeri:
 - `main/eeprom_konstante.h`
@@ -105,6 +109,7 @@
 - ponovljena nevaljana RTC ocitanja: aktivira se `RTC OGRANICEN RAD / CEKAM OPORAVAK` i automatika vremena se privremeno blokira
 - kvar `EEPROM-a`: aktivira se latched fault i periodicni EEPROM zapisi i health-checkovi se zaustavljaju do potvrde
 - lampica zvona tijekom inercije treperi kako bi operater znao da cekice jos ne treba dirati
+- lampica slavljenja treperi dok traje termalna pauza, iako slavljenje ostaje aktivno
 
 ## 🔧 Hardver
 
@@ -117,13 +122,14 @@
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - relejni izlazi za kazaljke, plocu, zvona i cekice
-- 4x5 matricna tipkovnica za lokalni izbornik, servisne funkcije i brojcani unos `HH:MM`
+- 4x5 matricna tipkovnica za lokalni izbornik i servisne funkcije; sve promjene vrijednosti idu preko strelica
 - lokalni servisni sloj koristi `ENT / SELECT` i za otkljucavanje `safe mode-a` te potvrdu latched kvarova
 
 ## 📚 Dodatni README
 
 - [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
 - [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
+- [Popis ESP web API ruta toranjskog sata](/C:/Users/Rato/Documents/GitHub/FILA33/docs/esp_web_api_toranjskog_sata.md)
 - [Tehnicka dokumentacija firmware sustava](/C:/Users/Rato/Documents/GitHub/FILA33/docs/tehnicka_dokumentacija_firmware_sustava.md)
 
 ## 🛠️ Napomene Za Razvoj
@@ -131,4 +137,5 @@
 - glavna petlja mora ostati neblokirajuca
 - `Mega 2560` mora ostati autoritet za stanje toranjskog sata
 - kvar ili restart `ESP8266` ne smije utjecati na osnovni rad sata
+- `I2C` pristup za `LCD`, `RTC` i `24C32` treba ostati na zajednickoj pripremi sabirnice s timeoutom
 - promjene koje diraju kazaljke, plocu, zvona, sinkronizaciju vremena ili recovery treba provjeriti u odnosu na postojece module u `main/`

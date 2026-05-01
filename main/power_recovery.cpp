@@ -82,6 +82,9 @@ static bool jeStanjeValidno(const SystemStateBackup& stanje) {
 }
 
 static bool jeLegacyBackupPoVremenu(const SystemStateBackup& stanje) {
+  // Legacy backupi toranjskog sata koristili su RTC unix timestamp.
+  // Novi recovery zapis koristi monotonu sekvencu, ali stari format
+  // jos moramo razlikovati dok god postoji sansa da je ostao u EEPROM-u.
   return stanje.rtc_timestamp >= PowerRecoveryLayout::LEGACY_MIN_UNIX_TIMESTAMP;
 }
 

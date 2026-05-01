@@ -23,6 +23,9 @@ const unsigned long SLAVLJENJE_PAUZA_NAKON_CEKIC2_MS = 150UL;
 const unsigned long SLAVLJENJE_MOD2_TRAJANJE_IMPULSA_MS = 110UL;
 const unsigned long SLAVLJENJE_MOD2_PAUZA_NAKON_CEKIC1_MS = 90UL;
 const unsigned long SLAVLJENJE_MOD2_PAUZA_NAKON_CEKIC2_MS = 190UL;
+const unsigned long SLAVLJENJE_TERMALNA_ZASTITA_POCETAK_MS = 180000UL;
+const unsigned long SLAVLJENJE_TERMALNA_ZASTITA_INTERVAL_MS = 30000UL;
+const unsigned long SLAVLJENJE_TERMALNA_ZASTITA_PAUZA_MS = 3000UL;
 
 // Mrtvacko: oba cekica s konfiguriranim impulsom, zatim 10 s pauza.
 const unsigned long MRTVACKO_PAUZA_MS = 10000UL;
@@ -52,6 +55,10 @@ struct SlavljenjeStanje {
   unsigned long vrijemeKorakaMs;
   bool cekicAktivan;
   int aktivniPin;
+  bool termalnaPauzaAktivna;
+  bool termalnaZastitaAktivirana;
+  unsigned long vrijemePocetkaTermalnePauzeMs;
+  unsigned long sljedecaTermalnaPauzaMs;
 };
 
 struct MrtvackoStanje {
@@ -67,7 +74,7 @@ struct MrtvackoStanje {
   bool ignorirajThumbwheel;
 };
 
-SlavljenjeStanje slavljenje = {false, 0UL, 0, 1, 0UL, false, -1};
+SlavljenjeStanje slavljenje = {false, 0UL, 0, 1, 0UL, false, -1, false, false, 0UL, 0UL};
 MrtvackoStanje mrtvacko = {
     false, 0UL, false, 0UL, MOD_MRTVACKO_KLASICNO, MRTVACKO_FAZA_OBA_CEKICA, false, 0UL, 0, false};
 bool slavljenjeNaCekanju = false;
@@ -77,7 +84,9 @@ void osvjeziLampicePosebnihNacina(unsigned long sadaMs) {
   const bool treptajUkljucen = ((sadaMs / TREPTANJE_LAMPICE_CEKANJA_MS) % 2UL) == 0UL;
 
   digitalWrite(PIN_LAMPICA_SLAVLJENJE,
-               slavljenje.aktivno ? HIGH : (slavljenjeNaCekanju && treptajUkljucen ? HIGH : LOW));
+               slavljenje.aktivno
+                   ? (slavljenje.termalnaPauzaAktivna ? (treptajUkljucen ? HIGH : LOW) : HIGH)
+                   : (slavljenjeNaCekanju && treptajUkljucen ? HIGH : LOW));
   digitalWrite(PIN_LAMPICA_MRTVACKO,
                mrtvacko.aktivno ? HIGH : (mrtvackoNaCekanju && treptajUkljucen ? HIGH : LOW));
 }
@@ -103,6 +112,11 @@ void posaljiLogStartaSlavljenja(uint8_t modSlavljenja) {
                modSlavljenja);
   }
   posaljiPCLog(log);
+}
+
+void posaljiLogTermalneZastiteSlavljenja() {
+  posaljiPCLog(
+      F("Slavljenje: nakon 3 minute ukljucujem termalnu pauzu 3 s svakih 30 s radi zastite cekica"));
 }
 
 void posaljiLogStartaMrtvackog(uint8_t modMrtvackog,
@@ -219,6 +233,30 @@ void uskladiStanjeNakonSigurnosnogLimita(unsigned long sadaMs) {
 
 void azurirajSlavljenje(unsigned long sadaMs) {
   if (!slavljenje.aktivno) {
+    return;
+  }
+
+  if (slavljenje.termalnaPauzaAktivna) {
+    if ((sadaMs - slavljenje.vrijemePocetkaTermalnePauzeMs) <
+        SLAVLJENJE_TERMALNA_ZASTITA_PAUZA_MS) {
+      return;
+    }
+    slavljenje.termalnaPauzaAktivna = false;
+  }
+
+  if (!slavljenje.termalnaZastitaAktivirana &&
+      (sadaMs - slavljenje.vrijemePocetkaMs) >= SLAVLJENJE_TERMALNA_ZASTITA_POCETAK_MS) {
+    slavljenje.termalnaZastitaAktivirana = true;
+    slavljenje.sljedecaTermalnaPauzaMs = sadaMs;
+    posaljiLogTermalneZastiteSlavljenja();
+  }
+
+  if (slavljenje.termalnaZastitaAktivirana &&
+      !slavljenje.cekicAktivan &&
+      static_cast<long>(sadaMs - slavljenje.sljedecaTermalnaPauzaMs) >= 0) {
+    slavljenje.termalnaPauzaAktivna = true;
+    slavljenje.vrijemePocetkaTermalnePauzeMs = sadaMs;
+    slavljenje.sljedecaTermalnaPauzaMs = sadaMs + SLAVLJENJE_TERMALNA_ZASTITA_INTERVAL_MS;
     return;
   }
 
@@ -460,6 +498,10 @@ void inicijalizirajSlavljenjeIMrtvacko() {
   slavljenje.vrijemeKorakaMs = 0UL;
   slavljenje.cekicAktivan = false;
   slavljenje.aktivniPin = -1;
+  slavljenje.termalnaPauzaAktivna = false;
+  slavljenje.termalnaZastitaAktivirana = false;
+  slavljenje.vrijemePocetkaTermalnePauzeMs = 0UL;
+  slavljenje.sljedecaTermalnaPauzaMs = 0UL;
 
   mrtvacko.aktivno = false;
   mrtvacko.vrijemePocetkaMs = 0UL;
@@ -511,6 +553,11 @@ void zapocniSlavljenje() {
   slavljenje.vrijemeKorakaMs = sadaMs;
   slavljenje.cekicAktivan = true;
   slavljenje.aktivniPin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
+  slavljenje.termalnaPauzaAktivna = false;
+  slavljenje.termalnaZastitaAktivirana = false;
+  slavljenje.vrijemePocetkaTermalnePauzeMs = 0UL;
+  slavljenje.sljedecaTermalnaPauzaMs =
+      sadaMs + SLAVLJENJE_TERMALNA_ZASTITA_POCETAK_MS;
   aktivirajJedanCekicZaPosebniNacin(
       slavljenje.aktivniPin, dohvatiTrajanjeImpulsaSlavljenjaZaMod(modSlavljenja));
   digitalWrite(PIN_LAMPICA_SLAVLJENJE, HIGH);
@@ -529,6 +576,10 @@ void zaustaviSlavljenje() {
   deaktivirajObaCekicaZaPosebniNacin();
   slavljenje.cekicAktivan = false;
   slavljenje.aktivniPin = -1;
+  slavljenje.termalnaPauzaAktivna = false;
+  slavljenje.termalnaZastitaAktivirana = false;
+  slavljenje.vrijemePocetkaTermalnePauzeMs = 0UL;
+  slavljenje.sljedecaTermalnaPauzaMs = 0UL;
   digitalWrite(PIN_LAMPICA_SLAVLJENJE, LOW);
   posaljiPCLog(F("Slavljenje: zaustavljeno"));
 }

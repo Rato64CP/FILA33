@@ -50,6 +50,7 @@
 // Lokalni LCD izbornik toranjskog sata koristi matricu od 20 tipki s 9 vodova.
 // Preporuceno mapiranje logickih naredbi definira main/tipke.cpp:
 // strelice = navigacija, Ent = SELECT, ESC = BACK.
+// Brojcane tipke matrice vise nisu dio aktivnog firmware toka toranjskog sata.
 
 #define PIN_KEYPAD_ROW_0              3   // Vod 0 matrice
 #define PIN_KEYPAD_ROW_1              12  // Vod 1 matrice - testni premjestaj

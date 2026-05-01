@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include "lcd_display.h"
 #include "flash_text_utils.h"
+#include "i2c_bus.h"
 #include "time_glob.h"
 #include "otkucavanje.h"
 #include "postavke.h"
@@ -235,7 +236,7 @@ static void osvjeziAutomatskoLCDPozadinskoOsvjetljenje() {
 }
 
 void inicijalizirajLCD() {
-  Wire.begin();
+  pripremiI2CSabirnicuSigurno();
   delay(50);
 
   lcd.init();

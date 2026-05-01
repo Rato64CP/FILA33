@@ -1,0 +1,108 @@
+# 🌐 ESP Web API Toranjskog Sata
+
+Ovaj dokument popisuje web rute i servisne API pozive koje `ESP` firmware koristi za mrežni sloj toranjskog sata. `ESP` ostaje pomoćni modul: web zahtjev prima `ESP`, a stvarnu odluku i pogon nad `zvonima`, `čekićima`, `slavljenjem`, `mrtvačkim`, `sunčevom automatikom`, `sinkronizacijom vremena` i sigurnosnim blokadama i dalje donosi `Mega` kroz module u `main/`.
+
+Povezani moduli toranjskog sata:
+- `main/esp_serial.*` za serijski most između `ESP-a` i `Mege`
+- `main/zvonjenje.*` i `main/otkucavanje.*` za ručne i automatske radnje nad `zvonima` i `čekićima`
+- `main/slavljenje_mrtvacko.*` za ručne servisne modove `slavljenja` i `mrtvačkog`
+- `main/sunceva_automatika.*` za uključivanje i isključivanje sunčevih događaja
+- `main/time_glob.*` za sinkronizaciju vremena toranjskog sata
+- `main/power_recovery.*` za `safe mode`, recovery i latched fault ograničenja
+
+## 🔐 Autentikacija
+
+- `Basic Auth` koristi korisničko ime `admin`
+- lozinku `ESP` učitava iz vlastitog EEPROM-a ili pada na zadanu firmware vrijednost
+- rute `/api/...` i `/status` traže autentikaciju
+- `/setup` ne traži `Basic Auth` dok je aktivna privremena setup mreža toranjskog sata
+
+## 🧭 Glavne web rute
+
+| Ruta | Metoda | Auth | Svrha |
+|---|---|---|---|
+| `/` | `GET` | da, osim kad je aktivan setup AP | Glavni dashboard za ručne servisne naredbe nad `zvonima`, `slavljenjem`, `mrtvačkim` i `sunčevom automatikom` |
+| `/status` | `GET` | da | Vraća JSON status `WiFi` veze i lokalne IP adrese `ESP-a` |
+| `/setup` | `GET` | ne | Prikazuje setup stranicu za novu `WiFi` mrežu toranjskog sata dok je aktivan setup AP |
+| `/setup` | `POST` | ne | Sprema novi `SSID` i lozinku te ih šalje Megi radi sinkronizacije mrežnih postavki |
+
+## 📡 JSON status ruta
+
+### `GET /status`
+
+Vraća JSON tijelo oblika:
+
+```json
+{"wifi_ip":"192.168.1.50","wifi_connected":true}
+```
+
+Polja:
+- `wifi_ip`: lokalna IP adresa `ESP` modula
+- `wifi_connected`: je li `ESP` trenutno spojen na mrežu i spreman za `NTP` tok toranjskog sata
+
+## 📶 Setup WiFi API
+
+### `GET /setup`
+
+- radi samo dok je aktivan setup AP `ZVONKO_setup`
+- ako setup AP nije aktivan, vraća `404`
+
+### `POST /setup`
+
+Očekuje `form` parametre:
+- `ssid`
+- `lozinka`
+
+Ponašanje:
+- validira da su `SSID` i lozinka jednolinijski i bez znaka `|`
+- šalje novu mrežnu konfiguraciju Megi preko serijskog toka `SETUPWIFI:...`
+- Mega zatim sprema i koristi istu mrežnu konfiguraciju toranjskog sata
+
+Tipični statusi odgovora:
+- `200` uspješno prihvaćena nova mreža
+- `400` nedostaje `ssid` ili `lozinka`
+- `409` setup AP nije aktivan
+- `422` neispravan unos ili Mega nije prihvatila postavke
+
+## 🔧 Servisne API rute prema Megi
+
+Sve rute ispod:
+- koriste `GET`
+- traže `Basic Auth`
+- `ESP` ih prevodi u `CMD:<naredba>` prema Megi
+- stvarni učinak ovisi o stanju modula u `main/`, pa `safe mode`, `RTC` degraded ili `EEPROM` degraded i dalje mogu blokirati mehaniku toranjskog sata
+
+| Ruta | Mega naredba | Komponenta toranjskog sata | Opis |
+|---|---|---|---|
+| `/api/bell1/on` | `CMD:ZVONO1_ON` | `zvono 1`, `čekići` | Ručno uključi prvo zvono ako Mega dopusti naredbu |
+| `/api/bell1/off` | `CMD:ZVONO1_OFF` | `zvono 1`, `čekići` | Ručno isključi prvo zvono |
+| `/api/bell2/on` | `CMD:ZVONO2_ON` | `zvono 2`, `čekići` | Ručno uključi drugo zvono |
+| `/api/bell2/off` | `CMD:ZVONO2_OFF` | `zvono 2`, `čekići` | Ručno isključi drugo zvono |
+| `/api/slavljenje/on` | `CMD:SLAVLJENJE_ON` | `slavljenje`, `čekići` | Ručno pokrene `slavljenje` |
+| `/api/slavljenje/off` | `CMD:SLAVLJENJE_OFF` | `slavljenje`, `čekići` | Ručno zaustavi `slavljenje` |
+| `/api/mrtvacko/on` | `CMD:MRTVACKO_ON` | `mrtvačko`, `čekići` | Ručno pokrene `mrtvačko` |
+| `/api/mrtvacko/off` | `CMD:MRTVACKO_OFF` | `mrtvačko`, `čekići` | Ručno zaustavi `mrtvačko` |
+| `/api/solar/morning/on` | `CMD:SUNCE_JUTRO_ON` | `sunčeva automatika` | Uključi jutarnji sunčev događaj |
+| `/api/solar/morning/off` | `CMD:SUNCE_JUTRO_OFF` | `sunčeva automatika` | Isključi jutarnji sunčev događaj |
+| `/api/solar/noon/on` | `CMD:SUNCE_PODNE_ON` | `sunčeva automatika` | Uključi podnevni sunčev događaj |
+| `/api/solar/noon/off` | `CMD:SUNCE_PODNE_OFF` | `sunčeva automatika` | Isključi podnevni sunčev događaj |
+| `/api/solar/evening/on` | `CMD:SUNCE_VECER_ON` | `sunčeva automatika` | Uključi večernji sunčev događaj |
+| `/api/solar/evening/off` | `CMD:SUNCE_VECER_OFF` | `sunčeva automatika` | Isključi večernji sunčev događaj |
+
+## 🧾 Odgovori servisnog API-ja
+
+Za `/api/...` rute `ESP` koristi ove HTTP statuse:
+
+- `200` Mega je prihvatila naredbu i `ESP` vraća kratku tekstualnu potvrdu
+- `409` Mega je zauzeta i nije prihvatila servisnu naredbu
+- `502` Mega je eksplicitno odbila servisnu naredbu
+- `504` Mega nije odgovorila unutar timeouta
+- `500` lokalna konfiguracija rute na `ESP-u` nije valjana
+
+## 🧠 Napomene za rad toranjskog sata
+
+- API ne zaobilazi `safe mode` ni recovery odluke iz `main/power_recovery.*`
+- API ne potvrđuje latched fault niti `RTC` upozorenja; to ostaje lokalna funkcija tipki i LCD-a toranjskog sata
+- `ESP` ne upravlja izravno relejima `kazaljki`, `okretne ploče`, `zvona` ili `čekića`, nego samo šalje servisni zahtjev Megi
+- `NTP` sinkronizacija vremena toranjskog sata ne ide kroz `/api/...` rute nego kroz serijski protokol `NTPCFG:` i `NTPREQ:SYNC`
+

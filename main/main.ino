@@ -2,6 +2,7 @@
 #include <Arduino.h>
 
 #include "lcd_display.h"
+#include "i2c_bus.h"
 #include "i2c_eeprom.h"
 #include "time_glob.h"
 #include "pc_serial.h"
@@ -57,6 +58,7 @@ void setup() {
   pripremiResetFlagsMCU();
   inicijalizirajSigurnaPocetnaStanjaIzlaza();
 
+  pripremiI2CSabirnicuSigurno();
   inicijalizirajLCD();
   inicijalizirajPCSerijsku();
   inicijalizirajRS485();

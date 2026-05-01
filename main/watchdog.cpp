@@ -8,6 +8,7 @@
 
 static uint8_t zadnje_reset_zastavice = 0;
 static bool reset_zastavice_ucitane = false;
+static bool watchdog_inicijaliziran = false;
 
 void pripremiResetFlagsMCU() {
   if (reset_zastavice_ucitane) {
@@ -41,6 +42,7 @@ void inicijalizirajWatchdog() {
   }
 
   wdt_enable(WDTO_8S);
+  watchdog_inicijaliziran = true;
   posaljiPCLog(F("WDT: Inicijaliziran sa timeoutom od 8 sekundi"));
 }
 
@@ -48,6 +50,13 @@ void inicijalizirajWatchdog() {
 
 void osvjeziWatchdog() {
   // Mora se pozivati barem jednom unutar 8 sekundi.
+  wdt_reset();
+}
+
+void osvjeziWatchdogAkoJeAktivan() {
+  if (!watchdog_inicijaliziran) {
+    return;
+  }
   wdt_reset();
 }
 

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "i2c_bus.h"
+#include "watchdog.h"
 
 namespace {
 constexpr uint8_t EEPROM_ADRESA = 0x57;           // Tipicna adresa 24C32 na RTC plocici
@@ -19,13 +21,6 @@ unsigned long zadnjiPokusajInicijalizacijeMs = 0;
 
 bool jeUnutarOpsega(int adresa, size_t duljina) {
   return adresa >= 0 && (static_cast<size_t>(adresa) + duljina) <= UKUPNI_KAPACITET;
-}
-
-void pripremiI2CSabirnicu() {
-  Wire.begin();
-  #if defined(WIRE_HAS_TIMEOUT) || defined(TWBR)
-  Wire.setWireTimeout(25000, true);
-  #endif
 }
 
 bool provjeriDostupnostEEPROMa() {
@@ -48,13 +43,19 @@ bool inicijalizirajUnutarnje(bool preskociOdgodu) {
   }
 
   zadnjiPokusajInicijalizacijeMs = sadaMs;
-  pripremiI2CSabirnicu();
+  pripremiI2CSabirnicuSigurno();
   inicijaliziran = provjeriDostupnostEEPROMa();
   return inicijaliziran;
 }
 
 void oznaciI2CGresku() {
   inicijaliziran = false;
+}
+
+void kratkoCekajUzWatchdog(unsigned long trajanjeMs) {
+  osvjeziWatchdogAkoJeAktivan();
+  delay(trajanjeMs);
+  osvjeziWatchdogAkoJeAktivan();
 }
 
 bool procitajBlokJedanPokusaj(int adresa, uint8_t* odrediste, size_t duljina) {
@@ -83,8 +84,9 @@ bool procitajBlokJedanPokusaj(int adresa, uint8_t* odrediste, size_t duljina) {
 
 bool procitajBlokUzPokusaje(int adresa, uint8_t* odrediste, size_t duljina) {
   for (uint8_t pokusaj = 0; pokusaj < BROJ_POKUSAJA_I2C; ++pokusaj) {
+    osvjeziWatchdogAkoJeAktivan();
     if (!inicijalizirajUnutarnje(pokusaj != 0)) {
-      delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+      kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
       continue;
     }
 
@@ -93,7 +95,7 @@ bool procitajBlokUzPokusaje(int adresa, uint8_t* odrediste, size_t duljina) {
     }
 
     oznaciI2CGresku();
-    delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+    kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
   }
 
   return false;
@@ -113,11 +115,12 @@ bool zapisiBlokJedanPokusaj(int adresa, const uint8_t* izvor, size_t duljina) {
 bool cekajDovrsetakInternogZapisa() {
   const unsigned long pocetakMs = millis();
   while ((millis() - pocetakMs) <= TIMEOUT_ACK_POLLING_ZAPISA_MS) {
+    osvjeziWatchdogAkoJeAktivan();
     Wire.beginTransmission(EEPROM_ADRESA);
     if (Wire.endTransmission() == 0) {
       return true;
     }
-    delay(1);
+    kratkoCekajUzWatchdog(1);
   }
   return false;
 }
@@ -143,21 +146,22 @@ bool provjeriZapisBloka(int adresa, const uint8_t* izvor, size_t duljina) {
 
 bool zapisiBlokUzPokusaje(int adresa, const uint8_t* izvor, size_t duljina) {
   for (uint8_t pokusaj = 0; pokusaj < BROJ_POKUSAJA_I2C; ++pokusaj) {
+    osvjeziWatchdogAkoJeAktivan();
     if (!inicijalizirajUnutarnje(pokusaj != 0)) {
-      delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+      kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
       continue;
     }
 
     if (!zapisiBlokJedanPokusaj(adresa, izvor, duljina)) {
       oznaciI2CGresku();
-      delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+      kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
       continue;
     }
 
-    delay(CEKANJE_ZAPISA_MS);
+    kratkoCekajUzWatchdog(CEKANJE_ZAPISA_MS);
     if (!cekajDovrsetakInternogZapisa()) {
       oznaciI2CGresku();
-      delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+      kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
       continue;
     }
 
@@ -166,7 +170,7 @@ bool zapisiBlokUzPokusaje(int adresa, const uint8_t* izvor, size_t duljina) {
     }
 
     oznaciI2CGresku();
-    delay(CEKANJE_IZMEDU_POKUSAJA_MS);
+    kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);
   }
 
   return false;
@@ -192,6 +196,7 @@ bool procitaj(int adresa, void* odrediste, size_t duljina) {
   size_t preostalo = duljina;
 
   while (preostalo > 0) {
+    osvjeziWatchdogAkoJeAktivan();
     const size_t blok = (preostalo < MAX_I2C_PODATAKA_PO_PAKETU)
                             ? preostalo
                             : MAX_I2C_PODATAKA_PO_PAKETU;
@@ -221,6 +226,7 @@ bool zapisi(int adresa, const void* izvor, size_t duljina) {
   size_t preostalo = duljina;
 
   while (preostalo > 0) {
+    osvjeziWatchdogAkoJeAktivan();
     size_t offset = static_cast<size_t>(adresa % static_cast<int>(VELICINA_STRANICE));
     size_t prostorDoKrajaStranice = VELICINA_STRANICE - offset;
     size_t blok = (preostalo < prostorDoKrajaStranice) ? preostalo : prostorDoKrajaStranice;

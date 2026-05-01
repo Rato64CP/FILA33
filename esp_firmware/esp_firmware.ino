@@ -18,12 +18,12 @@ using ToranjWebServer = WebServer;
 
 // Konfiguracija WiFi mreze za toranjski sat.
 // Mega moze ove vrijednosti prepisati preko serijske veze naredbom WIFI:...
-String wifiSsid = "SVETI PETAR";
-String wifiLozinka = "cista2906";
+char wifiSsid[33] = "SVETI PETAR";
+char wifiLozinka[33] = "cista2906";
 bool koristiDhcp = true;
-String statickaIp = "192.168.1.200";
-String mreznaMaska = "255.255.255.0";
-String zadaniGateway = "192.168.1.1";
+char statickaIp[16] = "192.168.1.200";
+char mreznaMaska[16] = "255.255.255.0";
+char zadaniGateway[16] = "192.168.1.1";
 bool primljenaWifiKonfiguracija = false;
 bool wifiOmogucen = true;
 
@@ -49,6 +49,7 @@ static const unsigned long WIFI_STATUS_LED_BLINK_MS = 400UL;
 char ntpPosluzitelj[40] = "pool.ntp.org";
 static const long NTP_OFFSET_SEKUNDI = 0;
 static const unsigned long NTP_INTERVAL_MS = 60000;
+static const unsigned long NTP_MAKSIMALNA_STAROST_ODGOVORA_MS = 3UL * NTP_INTERVAL_MS;
 static const unsigned long WIFI_WATCHDOG_NTP_ZASTOJ_MS = 7200000UL;
 static const size_t SERIJSKI_BUFFER_MAX = 1280;
 static const size_t SERIJSKI_BUDZET_BAJTOVA_PO_POZIVU = 192;
@@ -57,13 +58,14 @@ static const size_t ESP_EEPROM_VELICINA = 512;
 static const uint16_t WEB_AUTH_POTPIS = 0x5741;
 static const int ESP_EEPROM_ADRESA_WEB = 0;
 static const unsigned long CMD_CEKANJE_NA_MEGU_MS = 1500UL;
+static const unsigned long WEB_AUTH_NEUSPJEH_ODGODA_MS = 750UL;
 
 WiFiUDP ntpUDP;
 NTPClient ntpKlijent(ntpUDP, ntpPosluzitelj, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
 
 ToranjWebServer webPosluzitelj(80);
 
-String webLozinka = "cista2906";
+char webLozinka[WEB_LOZINKA_MAX] = "cista2906";
 
 struct WebAuthConfig {
   uint16_t potpis;
@@ -105,7 +107,7 @@ CmdOdgovorMegai zadnjiCmdOdgovorMega = CMD_ODGOVOR_CEKA;
 
 void poveziNaWiFi();
 bool postaviStatickuKonfiguraciju();
-void osvjeziNTPSat();
+bool osvjeziNTPSat(bool prisilno = false);
 void odrzavajWiFiWatchdogZaNTP();
 void posaljiNTPPremaMegai();
 void obradiSerijskiUlaz();
@@ -177,7 +179,6 @@ void setup() {
   pinMode(WIFI_STATUS_LED_PIN, OUTPUT);
   digitalWrite(WIFI_STATUS_LED_PIN, LOW);
   EEPROM.begin(ESP_EEPROM_VELICINA);
-  webLozinka.reserve(WEB_LOZINKA_MAX - 1);
   ucitajWebAutentikaciju();
 
   Serial.println("ESP BOOT");
@@ -350,7 +351,7 @@ void poveziNaWiFi() {
     Serial.print("WIFI: Spajam se na SSID: ");
     Serial.println(wifiSsid);
 
-    WiFi.begin(wifiSsid.c_str(), wifiLozinka.c_str());
+    WiFi.begin(wifiSsid, wifiLozinka);
     wifiPokusajUToku = true;
     wifiPokusajPocetak = sada;
     wifiBrojPokusajaZaredom++;
@@ -402,11 +403,16 @@ void pokupiWifiKonfiguracijuIzSerijske(unsigned long millisTimeout) {
   }
 }
 
-void osvjeziNTPSat() {
+static bool jeNtpVrijemeSvjezeZaMegu(unsigned long sadaMs) {
+  return ntpZadnjiUspjehMs != 0UL &&
+         (sadaMs - ntpZadnjiUspjehMs) <= NTP_MAKSIMALNA_STAROST_ODGOVORA_MS;
+}
+
+bool osvjeziNTPSat(bool prisilno) {
   static unsigned long zadnjiLog = 0;
   unsigned long sada = millis();
 
-  bool promjena = ntpKlijent.update();
+  bool promjena = prisilno ? ntpKlijent.forceUpdate() : ntpKlijent.update();
 
   if (promjena && ntpKlijent.isTimeSet()) {
     ntpZadnjiUspjehMs = sada;
@@ -419,6 +425,8 @@ void osvjeziNTPSat() {
     Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
     zadnjiLog = sada;
   }
+
+  return ntpKlijent.isTimeSet();
 }
 
 void odrzavajWiFiWatchdogZaNTP() {
@@ -546,8 +554,10 @@ bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &od
         return false;
       }
 
-      wifiSsid = ssid;
-      wifiLozinka = lozinka;
+      strncpy(wifiSsid, ssid.c_str(), sizeof(wifiSsid) - 1);
+      wifiSsid[sizeof(wifiSsid) - 1] = '\0';
+      strncpy(wifiLozinka, lozinka.c_str(), sizeof(wifiLozinka) - 1);
+      wifiLozinka[sizeof(wifiLozinka) - 1] = '\0';
       primljenaWifiKonfiguracija = true;
       primijeniWiFiOmogucenost(true);
       setupApZakazanoGasenjeMs = millis() + WIFI_SETUP_GASENJE_NAKON_SPREMANJA_MS;
@@ -641,19 +651,24 @@ void obradiSerijskiUlaz() {
             if (noviSsid[0] != '\0' && novaLozinka[0] != '\0' && dhcpZastavica[0] != '\0') {
               const bool noviDhcp = strcmp(dhcpZastavica, "1") == 0;
               const bool konfiguracijaPromijenjena =
-                  (wifiSsid != noviSsid) ||
-                  (wifiLozinka != novaLozinka) ||
+                  (strcmp(wifiSsid, noviSsid) != 0) ||
+                  (strcmp(wifiLozinka, novaLozinka) != 0) ||
                   (koristiDhcp != noviDhcp) ||
-                  (statickaIp != novaIp) ||
-                  (mreznaMaska != novaMaska) ||
-                  (zadaniGateway != noviGateway);
+                  (strcmp(statickaIp, novaIp) != 0) ||
+                  (strcmp(mreznaMaska, novaMaska) != 0) ||
+                  (strcmp(zadaniGateway, noviGateway) != 0);
 
-              wifiSsid = noviSsid;
-              wifiLozinka = novaLozinka;
+              strncpy(wifiSsid, noviSsid, sizeof(wifiSsid) - 1);
+              wifiSsid[sizeof(wifiSsid) - 1] = '\0';
+              strncpy(wifiLozinka, novaLozinka, sizeof(wifiLozinka) - 1);
+              wifiLozinka[sizeof(wifiLozinka) - 1] = '\0';
               koristiDhcp = noviDhcp;
-              statickaIp = novaIp;
-              mreznaMaska = novaMaska;
-              zadaniGateway = noviGateway;
+              strncpy(statickaIp, novaIp, sizeof(statickaIp) - 1);
+              statickaIp[sizeof(statickaIp) - 1] = '\0';
+              strncpy(mreznaMaska, novaMaska, sizeof(mreznaMaska) - 1);
+              mreznaMaska[sizeof(mreznaMaska) - 1] = '\0';
+              strncpy(zadaniGateway, noviGateway, sizeof(zadaniGateway) - 1);
+              zadaniGateway[sizeof(zadaniGateway) - 1] = '\0';
               primljenaWifiKonfiguracija = true;
 
               Serial.print("WIFI RX: primljen SSID ");
@@ -690,13 +705,22 @@ void obradiSerijskiUlaz() {
 
           Serial.println(uspjeh ? "ACK:WIFI" : "ERR:WIFI");
         } else if (strcmp(linija, "NTPREQ:SYNC") == 0) {
+            unsigned long sada = millis();
             osvjeziNTPSat();
             if (WiFi.status() != WL_CONNECTED) {
               Serial.println("NTPLOG: NTP zahtjev odbijen jer WiFi nije spojen");
               Serial.println("ERR:NTPREQ");
-            } else if (ntpZadnjiUspjehMs == 0UL) {
-              Serial.println("NTPLOG: NTP zahtjev odbijen jer nema svjezeg NTP vremena nakon zadnjeg spajanja");
-              Serial.println("ERR:NTPREQ");
+            } else if (!jeNtpVrijemeSvjezeZaMegu(sada)) {
+              osvjeziNTPSat(true);
+              sada = millis();
+              if (!jeNtpVrijemeSvjezeZaMegu(sada)) {
+                Serial.println("NTPLOG: NTP zahtjev odbijen jer nema dovoljno svjezeg NTP vremena");
+                Serial.println("ERR:NTPREQ");
+              } else {
+                posaljiNTPPremaMegai();
+                Serial.println("NTPLOG: NTP zahtjev izvrsen nakon prisilnog osvjezavanja");
+                Serial.println("ACK:NTPREQ");
+              }
             } else {
               posaljiNTPPremaMegai();
               Serial.println("NTPLOG: NTP zahtjev izvrsen");
@@ -885,12 +909,14 @@ void ucitajWebAutentikaciju() {
 
   if (cfg.potpis == WEB_AUTH_POTPIS && cfg.lozinka[0] != '\0') {
     cfg.lozinka[WEB_LOZINKA_MAX - 1] = '\0';
-    webLozinka = String(cfg.lozinka);
+    strncpy(webLozinka, cfg.lozinka, sizeof(webLozinka) - 1);
+    webLozinka[sizeof(webLozinka) - 1] = '\0';
     Serial.println("WEB AUTH: ucitana spremljena lozinka");
     return;
   }
 
-  webLozinka = "cista2906";
+  strncpy(webLozinka, "cista2906", sizeof(webLozinka) - 1);
+  webLozinka[sizeof(webLozinka) - 1] = '\0';
   Serial.println("WEB AUTH: koristim zadanu lozinku");
 }
 
@@ -942,10 +968,17 @@ CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long 
 }
 
 bool osigurajWebAutorizaciju() {
-  if (webPosluzitelj.authenticate("admin", webLozinka.c_str())) {
+  if (webPosluzitelj.authenticate("admin", webLozinka)) {
     return true;
   }
 
+  // Blaga odgoda nakon pogresne prijave usporava skripte za pogadanje
+  // lozinke, ali ne remeti uobicajeni rad web dashboarda toranjskog sata.
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < WEB_AUTH_NEUSPJEH_ODGODA_MS) {
+    delay(1);
+    yield();
+  }
   webPosluzitelj.requestAuthentication(BASIC_AUTH, "ZVONKO v. 1.0", "Unesite web lozinku");
   return false;
 }

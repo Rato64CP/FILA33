@@ -33,7 +33,8 @@ constexpr int SLOT_SIZE_STANJE_PLOCE = 4;
 // Tracks which source provided current time (RTC or NTP)
 
 struct ZadnjaSinkronizacija {
-  int izvor;
+  uint8_t izvor;
+  uint8_t checksum;
   uint32_t timestamp;
 };
 
@@ -41,6 +42,8 @@ constexpr int BAZA_ZADNJA_SINKRONIZACIJA =
   BAZA_STANJE_PLOCE + (SLOTOVI_STANJE_PLOCE * SLOT_SIZE_STANJE_PLOCE);
 constexpr int SLOTOVI_ZADNJA_SINKRONIZACIJA = 6;
 constexpr int SLOT_SIZE_ZADNJA_SINKRONIZACIJA = sizeof(ZadnjaSinkronizacija);
+static_assert(SLOT_SIZE_ZADNJA_SINKRONIZACIJA == 6,
+              "Zadnja sinkronizacija mora ostati u 6 bajtova radi kompatibilnosti EEPROM rasporeda");
 
 // ==================== SYSTEM SETTINGS ====================
 // User-configurable settings persisted in EEPROM

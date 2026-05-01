@@ -8,17 +8,14 @@
 #include "esp_serial.h"
 #include "menu_system.h"
 #include "podesavanja_piny.h"
-#include "zvonjenje.h"
-#include "slavljenje_mrtvacko.h"
 #include "power_recovery.h"
 
 namespace {
 
 static const uint8_t BROJ_REDAKA = 4;
 static const uint8_t BROJ_STUPACA = 5;
-static const uint8_t BROJ_LOGICKIH_TIPKI = 16;
+static const uint8_t BROJ_LOGICKIH_TIPKI = 6;
 static const uint8_t DEBOUNCE_TIPKE_MS = 30;
-static const unsigned long DUGI_PRITISAK_TIPKE_MS = 1200UL;
 static const unsigned long DUGI_PRITISAK_SETUP_KOMBINACIJE_MS = 1500UL;
 static const unsigned long DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS = 5000UL;
 
@@ -47,30 +44,18 @@ struct MapiranjeTipke {
 struct DebounceMatrice {
   bool zadnjeSirovoPritisnuto;
   bool stabilnoPritisnuto;
-  bool odgodenaObradaNaOtpustanju;
-  bool dugoZadrzavanjeObradeno;
   unsigned long zadnjaPromjenaMs;
-  unsigned long vrijemePritiskaMs;
 };
 
 // Raspored je mapiran prema stvarnom ocitanju tipkovnice na toranjskom satu.
+// Aktivni firmware koristi samo strelice, SELECT i BACK.
 static const MapiranjeTipke MAPIRANJA_TIPKI[BROJ_LOGICKIH_TIPKI] = {
   {3, 3, KEY_UP, "UP"},
   {3, 2, KEY_DOWN, "DOWN"},
   {0, 0, KEY_LEFT, "LEFT"},
   {2, 0, KEY_RIGHT, "RIGHT"},
   {3, 0, KEY_SELECT, "ENT"},
-  {3, 1, KEY_BACK, "ESC"},
-  {1, 0, KEY_DIGIT_0, "0"},
-  {0, 3, KEY_DIGIT_1, "1"},
-  {1, 3, KEY_DIGIT_2, "2"},
-  {2, 3, KEY_DIGIT_3, "3"},
-  {0, 2, KEY_DIGIT_4, "4"},
-  {1, 2, KEY_DIGIT_5, "5"},
-  {2, 2, KEY_DIGIT_6, "6"},
-  {0, 1, KEY_DIGIT_7, "7"},
-  {1, 1, KEY_DIGIT_8, "8"},
-  {2, 1, KEY_DIGIT_9, "9"}
+  {3, 1, KEY_BACK, "ESC"}
 };
 
 static DebounceMatrice debounceTipki[BROJ_LOGICKIH_TIPKI];
@@ -101,10 +86,7 @@ static void inicijalizirajDebounceMatrice() {
   for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
     debounceTipki[i].zadnjeSirovoPritisnuto = false;
     debounceTipki[i].stabilnoPritisnuto = false;
-    debounceTipki[i].odgodenaObradaNaOtpustanju = false;
-    debounceTipki[i].dugoZadrzavanjeObradeno = false;
     debounceTipki[i].zadnjaPromjenaMs = 0;
-    debounceTipki[i].vrijemePritiskaMs = 0;
   }
 }
 
@@ -143,53 +125,6 @@ static void obradiPritisakTipke(const MapiranjeTipke& tipka) {
   obradiKluc(tipka.event);
 }
 
-static bool jeTipkaZaDugoZadrzavanje(const MapiranjeTipke& tipka) {
-  return tipka.event == KEY_DIGIT_1 || tipka.event == KEY_DIGIT_2;
-}
-
-static bool trebaOdgoditiKratkiPritisak(const MapiranjeTipke& tipka) {
-  return jeTipkaZaDugoZadrzavanje(tipka) && dohvatiMenuState() == MENU_STATE_DISPLAY_TIME;
-}
-
-static void obradiDugoZadrzavanjeTipke(const MapiranjeTipke& tipka) {
-  if (tipka.event == KEY_DIGIT_1) {
-    const bool biloAktivno = jeSlavljenjeUTijeku();
-    if (biloAktivno) {
-      zaustaviSlavljenje();
-    } else {
-      zapocniSlavljenje();
-    }
-
-    const bool sadaAktivno = jeSlavljenjeUTijeku();
-    if (sadaAktivno != biloAktivno) {
-      posaljiPCLog(sadaAktivno
-                       ? F("Tipka matrice 1 (dugo): slavljenje pokrenuto")
-                       : F("Tipka matrice 1 (dugo): slavljenje zaustavljeno"));
-    } else {
-      posaljiPCLog(F("Tipka matrice 1 (dugo): slavljenje nije promijenjeno"));
-    }
-    return;
-  }
-
-  if (tipka.event == KEY_DIGIT_2) {
-    const bool biloAktivno = jeMrtvackoUTijeku();
-    if (biloAktivno) {
-      zaustaviMrtvacko();
-    } else {
-      zapocniMrtvacko();
-    }
-
-    const bool sadaAktivno = jeMrtvackoUTijeku();
-    if (sadaAktivno != biloAktivno) {
-      posaljiPCLog(sadaAktivno
-                       ? F("Tipka matrice 2 (dugo): mrtvacko pokrenuto")
-                       : F("Tipka matrice 2 (dugo): mrtvacko zaustavljeno"));
-    } else {
-      posaljiPCLog(F("Tipka matrice 2 (dugo): mrtvacko nije promijenjeno"));
-    }
-  }
-}
-
 static void obradiLogickuTipku(uint8_t indeksTipke, bool sirovoPritisnuto, unsigned long sadaMs) {
   DebounceMatrice& stanje = debounceTipki[indeksTipke];
 
@@ -208,40 +143,7 @@ static void obradiLogickuTipku(uint8_t indeksTipke, bool sirovoPritisnuto, unsig
 
   stanje.stabilnoPritisnuto = sirovoPritisnuto;
   if (stanje.stabilnoPritisnuto) {
-    stanje.vrijemePritiskaMs = sadaMs;
-    stanje.dugoZadrzavanjeObradeno = false;
-    stanje.odgodenaObradaNaOtpustanju = trebaOdgoditiKratkiPritisak(MAPIRANJA_TIPKI[indeksTipke]);
-
-    if (!stanje.odgodenaObradaNaOtpustanju) {
-      obradiPritisakTipke(MAPIRANJA_TIPKI[indeksTipke]);
-    }
-  } else {
-    if (stanje.odgodenaObradaNaOtpustanju && !stanje.dugoZadrzavanjeObradeno) {
-      obradiPritisakTipke(MAPIRANJA_TIPKI[indeksTipke]);
-    }
-
-    stanje.odgodenaObradaNaOtpustanju = false;
-    stanje.dugoZadrzavanjeObradeno = false;
-    stanje.vrijemePritiskaMs = 0;
-  }
-}
-
-static void provjeriDugaZadrzavanjaTipki(unsigned long sadaMs) {
-  for (uint8_t i = 0; i < BROJ_LOGICKIH_TIPKI; ++i) {
-    DebounceMatrice& stanje = debounceTipki[i];
-    const MapiranjeTipke& tipka = MAPIRANJA_TIPKI[i];
-
-    if (!stanje.stabilnoPritisnuto || !stanje.odgodenaObradaNaOtpustanju ||
-        stanje.dugoZadrzavanjeObradeno || !jeTipkaZaDugoZadrzavanje(tipka)) {
-      continue;
-    }
-
-    if ((sadaMs - stanje.vrijemePritiskaMs) < DUGI_PRITISAK_TIPKE_MS) {
-      continue;
-    }
-
-    stanje.dugoZadrzavanjeObradeno = true;
-    obradiDugoZadrzavanjeTipke(tipka);
+    obradiPritisakTipke(MAPIRANJA_TIPKI[indeksTipke]);
   }
 }
 
@@ -307,7 +209,7 @@ void inicijalizirajTipke() {
   inicijalizirajMatricnePinove();
   inicijalizirajDebounceMatrice();
 
-  posaljiPCLog(F("Tipke: inicijalizirana 4x5 matricna tipkovnica (strelice, Ent, Esc, 0-9)"));
+  posaljiPCLog(F("Tipke: inicijalizirana 4x5 matricna tipkovnica (strelice, Ent, Esc)"));
 }
 
 void provjeriTipke() {
@@ -320,7 +222,6 @@ void provjeriTipke() {
     obradiLogickuTipku(i, stanjaMatrice[tipka.redak][tipka.stupac], sadaMs);
   }
 
-  provjeriDugaZadrzavanjaTipki(sadaMs);
   provjeriSetupKombinacijuLijevoDesno(sadaMs);
 }
 

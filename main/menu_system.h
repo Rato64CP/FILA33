@@ -25,16 +25,6 @@ typedef enum {
   KEY_RIGHT,
   KEY_SELECT,
   KEY_BACK,
-  KEY_DIGIT_0,
-  KEY_DIGIT_1,
-  KEY_DIGIT_2,
-  KEY_DIGIT_3,
-  KEY_DIGIT_4,
-  KEY_DIGIT_5,
-  KEY_DIGIT_6,
-  KEY_DIGIT_7,
-  KEY_DIGIT_8,
-  KEY_DIGIT_9,
   KEY_NONE
 } KeyEvent;
 
