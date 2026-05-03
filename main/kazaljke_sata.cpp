@@ -9,6 +9,7 @@
 #include "postavke.h"
 #include "unified_motion_state.h"
 #include "watchdog.h"
+#include "ups_nadzor.h"
 
 namespace {
 constexpr int BROJ_MINUTA_CIKLUS = 720;
@@ -55,7 +56,7 @@ void ugasiRelejeKazaljki() {
 }
 
 bool jeAutomatikaKazaljkiBlokirana() {
-  return rucnaBlokadaKazaljki || !jeVrijemePotvrdjenoZaAutomatiku();
+  return rucnaBlokadaKazaljki || jeUPSModAktivan() || !jeVrijemePotvrdjenoZaAutomatiku();
 }
 
 int izracunajDvanaestSatneMinute(const DateTime& vrijeme) {
@@ -240,6 +241,8 @@ void upravljajKorekcijomKazaljki() {
       UnifiedMotionStateStore::spremiAkoPromjena(stanje);
       if (rucnaBlokadaKazaljki) {
         posaljiPCLog(F("Kazaljke: automatika rucno blokirana za namjestanje"));
+      } else if (jeUPSModAktivan()) {
+        posaljiPCLog(F("Kazaljke: automatika blokirana jer toranjski sat radi samo s UPS-a"));
       } else {
         posaljiPCLog(F("Kazaljke: automatika blokirana dok vrijeme nije potvrdeno"));
       }

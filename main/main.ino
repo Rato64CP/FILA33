@@ -22,6 +22,7 @@
 #include "sunceva_automatika.h"
 #include "prekidac_tisine.h"
 #include "rs485_bridge.h"
+#include "ups_nadzor.h"
 
 namespace {
 
@@ -69,6 +70,7 @@ void setup() {
   inicijalizirajRTC();
   ucitajPostavke();
   primijeniLCDPozadinskoOsvjetljenje(jeLCDPozadinskoOsvjetljenjeUkljuceno());
+  inicijalizirajUPSNadzor();
 
   inicijalizirajTipke();
   inicijalizirajESP();
@@ -114,6 +116,7 @@ void loop() {
   upravljajMenuSistemom();
   provjeriTipke();
   osvjeziPrekidacTisine();
+  osvjeziUPSNadzor();
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
 
   upravljajZvonom();

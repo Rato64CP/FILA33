@@ -18,12 +18,16 @@ constexpr int PLOCA_MINUTNI_BLOK = 15;
 constexpr int PLOCA_ZADNJA_CETVRT = 23 * 60 + 59;
 constexpr int OTKUCAVANJE_CIJELI_DAN_OD = 0;
 constexpr int OTKUCAVANJE_CIJELI_DAN_DO = 23;
+constexpr uint8_t FIKSNI_BROJ_ZVONA = 2;
+constexpr uint8_t FIKSNI_BROJ_MJESTA_ZA_CAVLE = 5;
+constexpr uint8_t FIKSNI_CAVAO_SLAVLJENJA = 5;
 constexpr int16_t DOPUSTENE_SUNCEVE_ODGODE_MIN[] = {-30, -20, -10, 0, 10, 20, 30};
 constexpr size_t BROJ_DOPUSTENIH_SUNCEVIH_ODGODA =
     sizeof(DOPUSTENE_SUNCEVE_ODGODE_MIN) / sizeof(DOPUSTENE_SUNCEVE_ODGODE_MIN[0]);
 constexpr uint8_t MASKA_SUNCEVIH_DOGADAJA = 0x07;
 constexpr uint8_t MASKA_BLAGDANSKOG_SLAVLJENJA = 0x07;
 constexpr uint8_t MASKA_BLAGDANSKIH_RAZDOBLJA = 0x07;
+constexpr uint8_t ZASTAVICA_UPS_MODA = 0x80;
 constexpr uint8_t SVI_SVETI_ZADANI_POCETAK_SAT = 15;
 constexpr uint8_t SVI_SVETI_ZADANI_ZAVRSETAK_SAT = 8;
 
@@ -42,11 +46,8 @@ struct RadnePostavke {
   uint8_t slavljenjePrijeZvonjenja;
   uint8_t inercijaZvona1Sekunde;
   uint8_t inercijaZvona2Sekunde;
-  uint8_t brojZvona;
-  uint8_t brojMjestaZaCavle;
   uint8_t cavliRadni[4];
   uint8_t cavliNedjelja[4];
-  uint8_t cavaoSlavljenje;
   bool koristiDhcp;
   bool lcdPozadinskoOsvjetljenje;
   bool logiranjeOmoguceno;
@@ -61,6 +62,7 @@ struct RadnePostavke {
   bool ntpOmogucen;
   bool wifiOmogucen;
   bool rs485Omogucen;
+  bool upsModOmogucen;
   bool imaKazaljke;
   uint8_t maskaSuncevihDogadaja;
   bool nocnaRasvjetaOmogucena;
@@ -94,11 +96,11 @@ static EepromLayout::PostavkeSpremnik napraviZadanePostavke() {
     15,
     90,
     90,
-    2,
-    5,
+    FIKSNI_BROJ_ZVONA,
+    FIKSNI_BROJ_MJESTA_ZA_CAVLE,
     {1, 2, 0, 0},
     {3, 4, 0, 0},
-    5,
+    FIKSNI_CAVAO_SLAVLJENJA,
     "SVETI PETAR",
     "cista2906",
     true,
@@ -213,16 +215,6 @@ static uint8_t ogranicenaInercijaZvonaSekunde(uint8_t sekunde) {
   return static_cast<uint8_t>(constrain(static_cast<int>(sekunde), 10, 180));
 }
 
-static uint8_t ograniceniBrojZvona(uint8_t brojZvona) {
-  (void)brojZvona;
-  return 2;
-}
-
-static uint8_t ograniceniBrojMjestaZaCavle(uint8_t brojMjestaZaCavle) {
-  (void)brojMjestaZaCavle;
-  return 5;
-}
-
 static bool jeValjanSuncevDogadaj(uint8_t dogadaj) {
   return dogadaj < SUNCEVI_DOGADAJ_BROJ;
 }
@@ -261,6 +253,20 @@ static uint8_t sanitizirajMaskuBlagdanskogSlavljenja(uint8_t maska) {
 
 static uint8_t sanitizirajMaskuBlagdanskihRazdoblja(uint8_t maska) {
   return maska & MASKA_BLAGDANSKIH_RAZDOBLJA;
+}
+
+static bool procitajUPSModIzMaskeRazdoblja(uint8_t maska) {
+  return (maska & ZASTAVICA_UPS_MODA) != 0;
+}
+
+static uint8_t kodirajMaskuRazdobljaSUpsModom(uint8_t maskaRazdoblja, bool upsModOmogucen) {
+  const uint8_t osnovnaMaska = sanitizirajMaskuBlagdanskihRazdoblja(maskaRazdoblja);
+  return upsModOmogucen ? static_cast<uint8_t>(osnovnaMaska | ZASTAVICA_UPS_MODA)
+                        : osnovnaMaska;
+}
+
+static uint8_t sanitizirajPohranjenuMaskuBlagdanskihRazdoblja(uint8_t maska) {
+  return kodirajMaskuRazdobljaSUpsModom(maska, procitajUPSModIzMaskeRazdoblja(maska));
 }
 
 static uint8_t ograniceniSviSvetiPocetakSat(uint8_t sat) {
@@ -583,12 +589,12 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
       trebaSpremiti = true;
     }
   }
-  if (spremnik.brojZvona != 2) {
-    spremnik.brojZvona = 2;
+  if (spremnik.brojZvona != FIKSNI_BROJ_ZVONA) {
+    spremnik.brojZvona = FIKSNI_BROJ_ZVONA;
     trebaSpremiti = true;
   }
-  if (spremnik.brojMjestaZaCavle != 5) {
-    spremnik.brojMjestaZaCavle = 5;
+  if (spremnik.brojMjestaZaCavle != FIKSNI_BROJ_MJESTA_ZA_CAVLE) {
+    spremnik.brojMjestaZaCavle = FIKSNI_BROJ_MJESTA_ZA_CAVLE;
     trebaSpremiti = true;
   }
 
@@ -608,7 +614,7 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
     }
   }
 
-  const uint8_t noviSlavljenje = 5;
+  const uint8_t noviSlavljenje = FIKSNI_CAVAO_SLAVLJENJA;
   if (noviSlavljenje != spremnik.cavaoSlavljenje) {
     spremnik.cavaoSlavljenje = noviSlavljenje;
     trebaSpremiti = true;
@@ -660,7 +666,8 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
   }
 
   {
-    const uint8_t novaMaska = sanitizirajMaskuBlagdanskihRazdoblja(spremnik.blagdaniRazdobljaMaska);
+    const uint8_t novaMaska =
+        sanitizirajPohranjenuMaskuBlagdanskihRazdoblja(spremnik.blagdaniRazdobljaMaska);
     if (novaMaska != spremnik.blagdaniRazdobljaMaska) {
       spremnik.blagdaniRazdobljaMaska = novaMaska;
       trebaSpremiti = true;
@@ -706,11 +713,8 @@ static void ucitajRadnePostavkeIzSpremnika(const EepromLayout::PostavkeSpremnik&
   postavke.slavljenjePrijeZvonjenja = spremnik.slavljenjePrijeZvonjenja;
   postavke.inercijaZvona1Sekunde = spremnik.inercijaZvona1Sekunde;
   postavke.inercijaZvona2Sekunde = spremnik.inercijaZvona2Sekunde;
-  postavke.brojZvona = spremnik.brojZvona;
-  postavke.brojMjestaZaCavle = spremnik.brojMjestaZaCavle;
   memcpy(postavke.cavliRadni, spremnik.cavliRadni, sizeof(postavke.cavliRadni));
   memcpy(postavke.cavliNedjelja, spremnik.cavliNedjelja, sizeof(postavke.cavliNedjelja));
-  postavke.cavaoSlavljenje = spremnik.cavaoSlavljenje;
   postavke.koristiDhcp = spremnik.koristiDhcp;
   postavke.lcdPozadinskoOsvjetljenje = spremnik.lcdPozadinskoOsvjetljenje;
   postavke.logiranjeOmoguceno = spremnik.logiranjeOmoguceno;
@@ -718,6 +722,7 @@ static void ucitajRadnePostavkeIzSpremnika(const EepromLayout::PostavkeSpremnik&
       sanitizirajMaskuBlagdanskogSlavljenja(spremnik.blagdaniSlavljenjeMaska);
   postavke.blagdaniRazdobljaMaska =
       sanitizirajMaskuBlagdanskihRazdoblja(spremnik.blagdaniRazdobljaMaska);
+  postavke.upsModOmogucen = procitajUPSModIzMaskeRazdoblja(spremnik.blagdaniRazdobljaMaska);
   postavke.sviSvetiOmoguceno = spremnik.sviSvetiOmoguceno;
   postavke.sviSvetiPocetakSat = ograniceniSviSvetiPocetakSat(spremnik.sviSvetiPocetakSat);
   postavke.sviSvetiZavrsetakSat = ograniceniSviSvetiZavrsetakSat(spremnik.sviSvetiZavrsetakSat);
@@ -745,18 +750,18 @@ static void upisiRadnePostavkeUSpremnik(EepromLayout::PostavkeSpremnik& spremnik
   spremnik.slavljenjePrijeZvonjenja = postavke.slavljenjePrijeZvonjenja;
   spremnik.inercijaZvona1Sekunde = postavke.inercijaZvona1Sekunde;
   spremnik.inercijaZvona2Sekunde = postavke.inercijaZvona2Sekunde;
-  spremnik.brojZvona = postavke.brojZvona;
-  spremnik.brojMjestaZaCavle = postavke.brojMjestaZaCavle;
+  spremnik.brojZvona = FIKSNI_BROJ_ZVONA;
+  spremnik.brojMjestaZaCavle = FIKSNI_BROJ_MJESTA_ZA_CAVLE;
   memcpy(spremnik.cavliRadni, postavke.cavliRadni, sizeof(spremnik.cavliRadni));
   memcpy(spremnik.cavliNedjelja, postavke.cavliNedjelja, sizeof(spremnik.cavliNedjelja));
-  spremnik.cavaoSlavljenje = postavke.cavaoSlavljenje;
+  spremnik.cavaoSlavljenje = FIKSNI_CAVAO_SLAVLJENJA;
   spremnik.koristiDhcp = postavke.koristiDhcp;
   spremnik.lcdPozadinskoOsvjetljenje = postavke.lcdPozadinskoOsvjetljenje;
   spremnik.logiranjeOmoguceno = postavke.logiranjeOmoguceno;
   spremnik.blagdaniSlavljenjeMaska =
       sanitizirajMaskuBlagdanskogSlavljenja(postavke.blagdaniSlavljenjeMaska);
   spremnik.blagdaniRazdobljaMaska =
-      sanitizirajMaskuBlagdanskihRazdoblja(postavke.blagdaniRazdobljaMaska);
+      kodirajMaskuRazdobljaSUpsModom(postavke.blagdaniRazdobljaMaska, postavke.upsModOmogucen);
   spremnik.sviSvetiOmoguceno = postavke.sviSvetiOmoguceno;
   spremnik.sviSvetiPocetakSat = ograniceniSviSvetiPocetakSat(postavke.sviSvetiPocetakSat);
   spremnik.sviSvetiZavrsetakSat =
@@ -1015,7 +1020,7 @@ void ucitajPostavke() {
   snprintf_P(
       log,
       sizeof(log),
-      PSTR("Postavke: sat %d-%d, WiFi: %s SSID=%s, NTP: %s (%s), RS485: %s, LCD: %s, Kazaljke: %s, Slavljenje: %u, Otkucavanje: %u, Mrtvacko: %u, Stapici TR/TN/TS=%u/%u/%u S=+%u, Zvona=%u, Mjesta=%u, Sunce maska=%u, Nocna rasvjeta=%s"),
+      PSTR("Postavke: sat %d-%d, WiFi: %s SSID=%s, NTP: %s (%s), RS485: %s, UPS: %s, LCD: %s, Kazaljke: %s, Slavljenje: %u, Otkucavanje: %u, Mrtvacko: %u, Stapici TR/TN/TS=%u/%u/%u S=+%u, Zvona=%u, Mjesta=%u, Sunce maska=%u, Nocna rasvjeta=%s"),
       spremnik.satOd,
       spremnik.satDo,
       spremnik.wifiOmogucen ? "ON" : "OFF",
@@ -1023,6 +1028,7 @@ void ucitajPostavke() {
       dohvatiNtpServerBezZastavice(spremnik.ntpServer),
       procitajNtpOmogucenostIzTeksta(spremnik.ntpServer) ? "ON" : "OFF",
       spremnik.rs485Omogucen ? "ON" : "OFF",
+      procitajUPSModIzMaskeRazdoblja(spremnik.blagdaniRazdobljaMaska) ? "ON" : "OFF",
       spremnik.lcdPozadinskoOsvjetljenje ? "ON" : "OFF",
       spremnik.imaKazaljke ? "ON" : "OFF",
       spremnik.modSlavljenja,
@@ -1044,29 +1050,29 @@ void ucitajPostavke() {
 }
 
 uint8_t dohvatiBrojZvona() {
-  return ograniceniBrojZvona(postavke.brojZvona);
+  return FIKSNI_BROJ_ZVONA;
 }
 
 uint8_t dohvatiBrojMjestaZaCavle() {
-  return ograniceniBrojMjestaZaCavle(postavke.brojMjestaZaCavle);
+  return FIKSNI_BROJ_MJESTA_ZA_CAVLE;
 }
 
 uint8_t dohvatiCavaoRadniZaZvono(uint8_t zvono) {
-  if (zvono < 1 || zvono > 2) {
+  if (zvono < 1 || zvono > FIKSNI_BROJ_ZVONA) {
     return 0;
   }
   return sanitizirajOznakuCavla(postavke.cavliRadni[zvono - 1], dohvatiBrojMjestaZaCavle());
 }
 
 uint8_t dohvatiCavaoNedjeljaZaZvono(uint8_t zvono) {
-  if (zvono < 1 || zvono > 2) {
+  if (zvono < 1 || zvono > FIKSNI_BROJ_ZVONA) {
     return 0;
   }
   return sanitizirajOznakuCavla(postavke.cavliNedjelja[zvono - 1], dohvatiBrojMjestaZaCavle());
 }
 
 uint8_t dohvatiCavaoSlavljenja() {
-  return 5;
+  return FIKSNI_CAVAO_SLAVLJENJA;
 }
 
 bool jeDozvoljenoOtkucavanjeUSatu(int sat) {
@@ -1279,6 +1285,10 @@ bool jeRS485Omogucen() {
   return postavke.rs485Omogucen;
 }
 
+bool jeUPSModOmogucen() {
+  return postavke.upsModOmogucen;
+}
+
 bool koristiDhcpMreza() {
   return postavke.koristiDhcp;
 }
@@ -1417,6 +1427,23 @@ void postaviRS485Omogucen(bool omogucen) {
   spremiSpremnikPostavki(spremnik);
 
   posaljiPCLog(omogucen ? F("Postavke: RS485 ukljucen") : F("Postavke: RS485 iskljucen"));
+}
+
+void postaviUPSModOmogucen(bool omogucen) {
+  if (postavke.upsModOmogucen == omogucen) {
+    return;
+  }
+
+  postavke.upsModOmogucen = omogucen;
+
+  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
+  ucitajSpremnikIliZadano(spremnik);
+  upisiRadnePostavkeUSpremnik(spremnik);
+  spremiSpremnikPostavki(spremnik);
+
+  posaljiPCLog(omogucen
+                   ? F("Postavke: UPS mod ukljucen")
+                   : F("Postavke: UPS mod iskljucen"));
 }
 
 void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odgodaMin) {

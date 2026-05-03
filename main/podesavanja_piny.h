@@ -84,6 +84,12 @@
 #define PIN_PREKIDAC_TISINE           41  // Globalni tihi rad (LOW=ON)
 #define PIN_LAMPICA_TIHI_REZIM        46  // Lampica tihog rezima (HIGH=upali)
 
+// ==================== NADZOR MREZNOG NAPONA ====================
+// Optokapler prati prisutnost mreznog 230 V napona za UPS mod.
+// Predvidena logika je LOW=mreza prisutna, HIGH=rad samo s UPS-a.
+
+#define PIN_NADZOR_MREZE              40  // UPS nadzor mreze (LOW=mreza, HIGH=UPS)
+
 // ==================== SIGNALNE LAMPICE STANJA ====================
 // Pojedinacne LED lampice za lokalnu signalizaciju rada zvona i posebnih nacina.
 
@@ -121,7 +127,7 @@
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
-// Serial1:        rezerviran za buduci RS485 sloj (Rx1=pin19, Tx1=pin18)
+// Serial1:        aktivni RS485 transport toranjskog sata (Rx1=pin19, Tx1=pin18)
 // Serial3:        9600 baud   - ugradeni ESP8266 na Mega+WiFi R3 plocici (Rx3=pin15, Tx3=pin14)
 
 // RS485 ostaje dodatni transportni sloj za toranjski sat. Postojeci relejni

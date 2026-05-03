@@ -105,7 +105,7 @@ Ako su kazaljke malo naprijed, sustav ne forsira puni krug nego pusta da ih stva
 ### Logika koraka svakih 15 minuta
 Ciljna pozicija ploce racuna se iz vremena u `15`-minutnim blokovima. Aktivni dnevni prozor je po postavkama konfigurabilan, a zadani prozor je:
 - od `04:59` do `20:44` kao logicki raspon pozicija
-- citanje cavala ide minutu kasnije, na `HH:MM:30 + 1 min`
+- citanje cavala ide minutu kasnije, na `HH:MM:25 + 1 min`
 
 ### Dvofazni model
 Jedan korak ploce nije trenutan, nego ide kroz dvije faze:
@@ -139,13 +139,13 @@ Cavli se ne citaju tijekom pomaka ploce. Citanje je dozvoljeno samo kad:
 - ploca je u `FAZA_STABILNO`
 - ploca je na ciljnoj poziciji za aktualni termin
 
-Referentni trenutak citanja je pomaknut na **minutu nakon logickog termina**, u sekundi `:30`.
+Referentni trenutak citanja je pomaknut na **minutu nakon logickog termina**, u sekundi `:25`.
 
 Primjer sa zadanim pocetkom:
-- slot `04:59` cita se u `05:00:30`
-- slot `05:14` cita se u `05:15:30`
-- slot `05:29` cita se u `05:30:30`
-- slot `05:44` cita se u `05:45:30`
+- slot `04:59` cita se u `05:00:25`
+- slot `05:14` cita se u `05:15:25`
+- slot `05:29` cita se u `05:30:25`
+- slot `05:44` cita se u `05:45:25`
 
 ### Sinkronizacija ploce nakon nestanka napajanja
 Kod boota sustav ucitava zadnje poznato stanje iz EEPROM-a. Nakon toga u runtime-u:
@@ -299,9 +299,20 @@ Druga stranica menija `Blagdani` uredjuje Svi sveti i Dusni dan:
 Meni `Sustav` trenutno uredjuje:
 - `LCD svjetlo`
 - `Logiranje`
+- `RS485`
+- `UPS mod`
 - `Impuls cekica`
-- `Inercija Z1`
-- `Inercija Z2`
+- `INR1` - vrijeme smirivanja za `Zvono 1`
+- `INR2` - vrijeme smirivanja za `Zvono 2`
+
+`UPS mod` koristi odvojeni ulaz za nadzor mreznog napona. Kad je ukljucen i `Mega` prijavi da mreza vise nije prisutna, firmware toranjskog sata:
+- blokira zvona kroz [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp)
+- blokira otkucavanje i druge udare cekica kroz [main/otkucavanje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/otkucavanje.cpp) i [main/slavljenje_mrtvacko.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/slavljenje_mrtvacko.cpp)
+- blokira automatiku kazaljki kroz [main/kazaljke_sata.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/kazaljke_sata.cpp)
+- ostavlja okretnu plocu aktivnom, ali gasi cavao-zvonjenja i posebne nacine u [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp)
+- pali lampicu tihog rezima i na glavnom LCD prikazu umjesto datuma ispisuje `NEMA STRUJE!`
+
+Kad se mreza vrati, blokade se skidaju i kazaljke nastavljaju redovno automatsko poravnanje prema stvarnom vremenu.
 
 ### EEPROM verzioniranje i validacija
 Postavke imaju trostruku zastitu:
@@ -365,6 +376,7 @@ Ako su podaci nevaljani:
 - medusobno iskljucivi nacini (`slavljenje` vs `mrtvacko`)
 - zabrana paralelnih sekvenci otkucavanja
 - sigurno gasenje releja kod prekida i pri inicijalizaciji
+- `UPS mod` moze zadrzati logiku toranjskog sata zivom na pomocnom napajanju, ali bez izlaza prema kazaljkama, zvonima i cekicima dok nema mreze
 
 ---
 

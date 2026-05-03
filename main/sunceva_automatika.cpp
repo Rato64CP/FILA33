@@ -13,6 +13,7 @@
 #include "pc_serial.h"
 #include "prekidac_tisine.h"
 #include "debouncing.h"
+#include "ups_nadzor.h"
 
 namespace {
 
@@ -69,6 +70,23 @@ static int16_t zadnjeOdgode[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
 static bool aktivnoSuncevoZvonjenje[SUNCEVI_DOGADAJ_BROJ] = {false, false, false};
 static uint8_t aktivnoSuncevoZvono[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
 static unsigned long krajSuncevogZvonjenjaMs[SUNCEVI_DOGADAJ_BROJ] = {0, 0, 0};
+
+static void ponistiSuncevaZvonjenjaISlavljenjaZbogUPSModa() {
+  zakazanoZvonjenje.aktivno = false;
+  zakazanoBlagdanskoSlavljenje.aktivno = false;
+  zakazanoBlagdanskoSlavljenje.pokrenuto = false;
+
+  for (uint8_t i = 0; i < SUNCEVI_DOGADAJ_BROJ; ++i) {
+    aktivnoSuncevoZvonjenje[i] = false;
+    aktivnoSuncevoZvono[i] = 0;
+    krajSuncevogZvonjenjaMs[i] = 0;
+  }
+
+  if (sviSvetiMrtvackoAktivno || jeMrtvackoUTijeku()) {
+    zaustaviMrtvacko();
+    sviSvetiMrtvackoAktivno = false;
+  }
+}
 
 static uint32_t napraviDatumKljuc(const DateTime& vrijeme) {
   return static_cast<uint32_t>((vrijeme.year() - 2000) * 512L +
@@ -897,6 +915,8 @@ void inicijalizirajSuncevuAutomatiku() {
 }
 
 void upravljajSuncevomAutomatikom() {
+  static bool prethodniUPSModAktivan = false;
+
   obradiRucneTipkeSunceveAutomatike();
   osvjeziAktivnaSuncevaZvonjenja();
   osvjeziLampiceSunceveAutomatike();
@@ -908,6 +928,21 @@ void upravljajSuncevomAutomatikom() {
 
   osigurajDnevniRaspored(sada);
   osvjeziNocnuRasvjetu(sada);
+
+  if (jeUPSModAktivan()) {
+    if (!prethodniUPSModAktivan) {
+      posaljiPCLog(F("Sunce: UPS mod aktivan, preskacem zvonjenja i blagdanska slavljenja"));
+    }
+    ponistiSuncevaZvonjenjaISlavljenjaZbogUPSModa();
+    prethodniUPSModAktivan = true;
+    return;
+  }
+
+  if (prethodniUPSModAktivan) {
+    posaljiPCLog(F("Sunce: UPS mod zavrsen, zvonjenja i blagdanska slavljenja su ponovno dozvoljena"));
+    prethodniUPSModAktivan = false;
+  }
+
   upravljajMrtvackimZaSveSvete(sada);
 
   if (!raspored.valjano) {

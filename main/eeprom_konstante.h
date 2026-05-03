@@ -73,7 +73,10 @@ struct PostavkeSpremnik {
   uint8_t inercijaZvona1Sekunde;
   uint8_t inercijaZvona2Sekunde;
 
-  // Konfiguracija zvona i rasporeda cavala
+  // Konfiguracija zvona i rasporeda cavala.
+  // brojZvona, brojMjestaZaCavle i cavaoSlavljenje ostaju u spremniku
+  // radi kompatibilnosti EEPROM rasporeda, ali ih aktualni firmware
+  // toranjskog sata forsira na fiksnu topologiju 2 / 5 / 5.
   uint8_t brojZvona;
   uint8_t brojMjestaZaCavle;
   uint8_t cavliRadni[4];
@@ -87,6 +90,8 @@ struct PostavkeSpremnik {
   bool lcdPozadinskoOsvjetljenje;
   bool logiranjeOmoguceno;
   uint8_t blagdaniSlavljenjeMaska;
+  // Donja 3 bita ostaju maska blagdanskih razdoblja, a bit 7 nosi UPS mod
+  // kako bi nadzor mreze ostao kompatibilan sa starim EEPROM rasporedom.
   uint8_t blagdaniRazdobljaMaska;
   uint8_t sviSvetiOmoguceno;
   uint8_t sviSvetiPocetakSat;
@@ -106,6 +111,7 @@ struct PostavkeSpremnik {
 
 constexpr uint16_t POSTAVKE_POTPIS = 0x5453;
 // Revizija 22 dodaje ukljucivanje RS485 transporta kroz sustavske postavke.
+// Topologija 2 zvona / 5 cavala ostaje kompatibilna i ne trazi novu reviziju layouta.
 constexpr uint8_t POSTAVKE_VERZIJA = 22;
 
 constexpr int BAZA_POSTAVKE =

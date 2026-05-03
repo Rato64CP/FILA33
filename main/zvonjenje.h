@@ -22,6 +22,8 @@ void aktivirajZvonjenje(int zvono);
 void aktivirajZvonjenjeNaTrajanje(int zvono, unsigned long trajanjeMs);
 void deaktivirajZvonjenje(int zvono);
 void postaviGlobalnuBlokaduZvona(bool blokiraj);
+void postaviBlokaduZvonaTihiRezim(bool blokiraj);
+void postaviBlokaduZvonaUPS(bool blokiraj);
 
 // Provjera inercijske blokade
 bool jeLiInerciaAktivna();

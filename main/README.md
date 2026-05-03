@@ -37,6 +37,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `otkucavanje.*` - satno i polusatno otkucavanje
 - `slavljenje_mrtvacko.*` - slavljenje, mrtvacko i thumbwheel timer
 - `prekidac_tisine.*` - jedinstveni tihi rezim i lampica
+- `ups_nadzor.*` - nadzor mreznog napona i blokada mehanike dok toranjski sat radi samo s UPS-a
 - `menu_system.*`, `lcd_display.*`, `tipke.*` - lokalni korisnicki sloj
 - `postavke.*` - trajne postavke toranjskog sata
 - `unified_motion_state.*` - zajednicko stanje gibanja
@@ -55,7 +56,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 ## 🔄 Serijska komunikacija s ESP-om
 
 - Mega trenutno koristi `Serial3` za ugradeni `ESP8266` na Mega+WiFi R3 plocici
-- `Serial1` nije dio aktivnog mreznog puta; komunikacija prema ESP-u ostaje na `Serial3`
+- `Serial1` je aktivni `RS485` transportni sloj, dok komunikacija prema `ESP-u` ostaje na `Serial3`
 - aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
@@ -90,6 +91,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - LCD 16x2 preko I2C
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
+- ulaz za nadzor mreznog napona radi `UPS moda`
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - 4x5 matricna tipkovnica i servisni ulazi; sve promjene vrijednosti idu preko strelica
 - uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`

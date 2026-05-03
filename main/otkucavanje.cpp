@@ -17,6 +17,7 @@
 #include "postavke.h"
 #include "lcd_display.h"
 #include "pc_serial.h"
+#include "ups_nadzor.h"
 
 namespace {
 
@@ -66,7 +67,67 @@ OtkucavanjeStanje otkucavanje = {
     PAUZA_MEZI_UDARACA_DEFAULT};
 bool blokadaOtkucavanja = false;
 bool globalnaBlokadaOtkucavanja = false;
+bool blokadaOtkucavanjaTihiRezim = false;
+bool blokadaOtkucavanjaUPS = false;
 SigurnostCekicaStanje sigurnostCekica = {{false, false}, {0UL, 0UL}, {0UL, 0UL}};
+
+void ponistiAktivnoOtkucavanje(bool jeOtkazivanje,
+                               const __FlashStringHelper* razlog);
+
+bool jeGlobalnaBlokadaOtkucavanjaAktivna() {
+  return globalnaBlokadaOtkucavanja || blokadaOtkucavanjaTihiRezim || blokadaOtkucavanjaUPS;
+}
+
+bool trebaObraditiNoviTerminOtkucavanja(const DateTime& sada) {
+  static uint32_t zadnjiObradeniRtcTick = 0xFFFFFFFFUL;
+  static uint32_t zadnjiObradeniKljucMinute = 0xFFFFFFFFUL;
+
+  const uint32_t kljucMinute = static_cast<uint32_t>(sada.unixtime() / 60UL);
+  if (jeRtcSqwAktivan()) {
+    const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+    if (rtcTick == zadnjiObradeniRtcTick) {
+      return false;
+    }
+    zadnjiObradeniRtcTick = rtcTick;
+
+    // Dok je RTC SQW dostupan, otkucavanje treba krenuti tocno na
+    // granici nove minute, a ne proizvoljno kasnije u prvoj petlji.
+    if (sada.second() != 0) {
+      return false;
+    }
+  }
+
+  if (kljucMinute == zadnjiObradeniKljucMinute) {
+    return false;
+  }
+
+  zadnjiObradeniKljucMinute = kljucMinute;
+  return true;
+}
+
+void primijeniEfektivnuGlobalnuBlokaduOtkucavanja(bool prethodnoAktivna) {
+  const bool novaBlokada = jeGlobalnaBlokadaOtkucavanjaAktivna();
+  if (prethodnoAktivna == novaBlokada) {
+    return;
+  }
+
+  if (novaBlokada) {
+    posaljiPCLog(F("Globalna blokada otkucavanja: UKLJUCENA"));
+
+    if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
+      ponistiAktivnoOtkucavanje(true, F("globalna blokada otkucavanja"));
+    }
+    if (jeSlavljenjeUTijeku()) {
+      zaustaviSlavljenje();
+    }
+    if (jeMrtvackoUTijeku()) {
+      zaustaviMrtvacko();
+    }
+    deaktivirajObaCekicaZaPosebniNacin();
+  } else {
+    posaljiPCLog(F("Globalna blokada otkucavanja: ISKLJUCENA"));
+  }
+}
 
 void kopirajFlashTekst(const __FlashStringHelper* tekst, char* odrediste, size_t velicina) {
   if (odrediste == nullptr || velicina == 0) {
@@ -246,7 +307,11 @@ void primijeniSigurnosniLimitCekica(unsigned long sadaMs) {
 }  // namespace
 
 bool jeOperacijaCekicaDozvoljena() {
-  if (blokadaOtkucavanja || globalnaBlokadaOtkucavanja) {
+  if (blokadaOtkucavanja || jeGlobalnaBlokadaOtkucavanjaAktivna()) {
+    return false;
+  }
+
+  if (jeUPSModAktivan()) {
     return false;
   }
 
@@ -385,78 +450,75 @@ void upravljajOtkucavanjem() {
   }
 
   if (otkucavanje.vrsta == OTKUCAVANJE_NONE) {
-    static int zadnjaMinuta = -1;
-    if (sada.minute() != zadnjaMinuta) {
-      zadnjaMinuta = sada.minute();
+    if (trebaObraditiNoviTerminOtkucavanja(sada) &&
+        !jeSlavljenjeUTijeku() &&
+        !jeMrtvackoUTijeku()) {
+      const bool batAktivan =
+          jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute()) ||
+          jeJutarnjeZvonjenjeOtvoriloOtkucavanje(sada);
+      const bool otkucavanjeDozvoljenoUSatu = jeDozvoljenoOtkucavanjeUSatu(sada.hour());
 
-      if (!jeSlavljenjeUTijeku() && !jeMrtvackoUTijeku()) {
-        const bool batAktivan =
-            jeBATPeriodAktivanZaSatneOtkucaje(sada.hour(), sada.minute()) ||
-            jeJutarnjeZvonjenjeOtvoriloOtkucavanje(sada);
-        const bool otkucavanjeDozvoljenoUSatu = jeDozvoljenoOtkucavanjeUSatu(sada.hour());
-
-        if (modOtkucavanja == MOD_OTKUCAJ_ISKLJUCEN) {
-          // Otkucavanje je namjerno iskljuceno u postavkama toranjskog sata.
-        } else if (modOtkucavanja == MOD_OTKUCAJ_KVARTALNI) {
-          if (sada.minute() == 0 || sada.minute() == 15 || sada.minute() == 30 ||
-              sada.minute() == 45) {
-            if (!otkucavanjeDozvoljenoUSatu) {
-              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan raspona rada"));
-            } else if (tihiRezimAktivan) {
-              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: tihi rezim"));
-            } else if (!batAktivan) {
-              posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan BAT raspona"));
-            } else if (sada.minute() == 0) {
-              pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC1,
-                                       4,
-                                       PIN_CEKIC_MUSKI,
-                                       dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
-                                       SATNO_OTKUCAJ_PAUZA_MS,
-                                       F("opcija 2, puni sat"));
-            } else if (sada.minute() == 15) {
-              pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC2,
-                                       1,
-                                       PIN_CEKIC_ZENSKI,
-                                       dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
-                                       SATNO_OTKUCAJ_PAUZA_MS,
-                                       F("opcija 2, HH:15"));
-            } else if (sada.minute() == 30) {
-              pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC1,
-                                       2,
-                                       PIN_CEKIC_MUSKI,
-                                       dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
-                                       SATNO_OTKUCAJ_PAUZA_MS,
-                                       F("opcija 2, HH:30"));
-            } else {
-              pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC2,
-                                       3,
-                                       PIN_CEKIC_ZENSKI,
-                                       dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
-                                       SATNO_OTKUCAJ_PAUZA_MS,
-                                       F("opcija 2, HH:45"));
-            }
-          }
-        } else if (sada.minute() == 0) {
-          int broj = sada.hour() % 12;
-          if (broj == 0) {
-            broj = 12;
-          }
-
-          if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
-            otkucajSate(broj);
+      if (modOtkucavanja == MOD_OTKUCAJ_ISKLJUCEN) {
+        // Otkucavanje je namjerno iskljuceno u postavkama toranjskog sata.
+      } else if (modOtkucavanja == MOD_OTKUCAJ_KVARTALNI) {
+        if (sada.minute() == 0 || sada.minute() == 15 || sada.minute() == 30 ||
+            sada.minute() == 45) {
+          if (!otkucavanjeDozvoljenoUSatu) {
+            posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan raspona rada"));
           } else if (tihiRezimAktivan) {
-            posaljiPCLog(F("Satno otkucavanje preskoceno: tihi rezim"));
+            posaljiPCLog(F("Kvartalno otkucavanje preskoceno: tihi rezim"));
           } else if (!batAktivan) {
-            posaljiPCLog(F("Satno otkucavanje preskoceno: izvan BAT raspona"));
+            posaljiPCLog(F("Kvartalno otkucavanje preskoceno: izvan BAT raspona"));
+          } else if (sada.minute() == 0) {
+            pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC1,
+                                     4,
+                                     PIN_CEKIC_MUSKI,
+                                     dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
+                                     SATNO_OTKUCAJ_PAUZA_MS,
+                                     F("opcija 2, puni sat"));
+          } else if (sada.minute() == 15) {
+            pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC2,
+                                     1,
+                                     PIN_CEKIC_ZENSKI,
+                                     dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
+                                     SATNO_OTKUCAJ_PAUZA_MS,
+                                     F("opcija 2, HH:15"));
+          } else if (sada.minute() == 30) {
+            pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC1,
+                                     2,
+                                     PIN_CEKIC_MUSKI,
+                                     dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
+                                     SATNO_OTKUCAJ_PAUZA_MS,
+                                     F("opcija 2, HH:30"));
+          } else {
+            pokreniSekvencuOtkucavanja(OTKUCAVANJE_CEKIC2,
+                                     3,
+                                     PIN_CEKIC_ZENSKI,
+                                     dohvatiTrajanjeImpulsaCekicaZaPosebneNacineMs(),
+                                     SATNO_OTKUCAJ_PAUZA_MS,
+                                     F("opcija 2, HH:45"));
           }
-        } else if (sada.minute() == 30) {
-          if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
-            otkucajPolasata();
-          } else if (tihiRezimAktivan) {
-            posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi rezim"));
-          } else if (!batAktivan) {
-            posaljiPCLog(F("Polusatno otkucavanje preskoceno: izvan BAT raspona"));
-          }
+        }
+      } else if (sada.minute() == 0) {
+        int broj = sada.hour() % 12;
+        if (broj == 0) {
+          broj = 12;
+        }
+
+        if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
+          otkucajSate(broj);
+        } else if (tihiRezimAktivan) {
+          posaljiPCLog(F("Satno otkucavanje preskoceno: tihi rezim"));
+        } else if (!batAktivan) {
+          posaljiPCLog(F("Satno otkucavanje preskoceno: izvan BAT raspona"));
+        }
+      } else if (sada.minute() == 30) {
+        if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
+          otkucajPolasata();
+        } else if (tihiRezimAktivan) {
+          posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi rezim"));
+        } else if (!batAktivan) {
+          posaljiPCLog(F("Polusatno otkucavanje preskoceno: izvan BAT raspona"));
         }
       }
     }
@@ -531,24 +593,29 @@ void postaviGlobalnuBlokaduOtkucavanja(bool blokiraj) {
     return;
   }
 
+  const bool prethodnoAktivna = jeGlobalnaBlokadaOtkucavanjaAktivna();
   globalnaBlokadaOtkucavanja = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduOtkucavanja(prethodnoAktivna);
+}
 
-  if (globalnaBlokadaOtkucavanja) {
-    posaljiPCLog(F("Globalna blokada otkucavanja: UKLJUCENA"));
-
-    if (otkucavanje.vrsta != OTKUCAVANJE_NONE) {
-      ponistiAktivnoOtkucavanje(true, F("globalna blokada otkucavanja"));
-    }
-    if (jeSlavljenjeUTijeku()) {
-      zaustaviSlavljenje();
-    }
-    if (jeMrtvackoUTijeku()) {
-      zaustaviMrtvacko();
-    }
-    deaktivirajObaCekicaZaPosebniNacin();
-  } else {
-    posaljiPCLog(F("Globalna blokada otkucavanja: ISKLJUCENA"));
+void postaviBlokaduOtkucavanjaTihiRezim(bool blokiraj) {
+  if (blokadaOtkucavanjaTihiRezim == blokiraj) {
+    return;
   }
+
+  const bool prethodnoAktivna = jeGlobalnaBlokadaOtkucavanjaAktivna();
+  blokadaOtkucavanjaTihiRezim = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduOtkucavanja(prethodnoAktivna);
+}
+
+void postaviBlokaduOtkucavanjaUPS(bool blokiraj) {
+  if (blokadaOtkucavanjaUPS == blokiraj) {
+    return;
+  }
+
+  const bool prethodnoAktivna = jeGlobalnaBlokadaOtkucavanjaAktivna();
+  blokadaOtkucavanjaUPS = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduOtkucavanja(prethodnoAktivna);
 }
 
 bool jeOtkucavanjeUTijeku() {

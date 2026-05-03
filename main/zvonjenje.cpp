@@ -53,6 +53,8 @@ static struct {
 
 static bool dozvoliPaljenjeZvonaIzRucneSklopke = false;
 static bool globalnaBlokadaZvona = false;
+static bool blokadaZvonaTihiRezim = false;
+static bool blokadaZvonaUPS = false;
 
 // ==================== RELAY CONTROL ====================
 
@@ -62,6 +64,10 @@ static bool jeValjanIndeksZvona(int indeks) {
 
 static bool jeZvonoOmogucenoPoPostavkama(int zvono) {
   return zvono >= 1 && zvono <= dohvatiBrojZvona();
+}
+
+static bool jeGlobalnaBlokadaZvonaAktivna() {
+  return globalnaBlokadaZvona || blokadaZvonaTihiRezim || blokadaZvonaUPS;
 }
 
 static unsigned long dohvatiTrajanjeInercijeZvonaMs(int indeks) {
@@ -188,7 +194,7 @@ void ukljuciZvono(int zvono) {
     return;
   }
 
-  if (globalnaBlokadaZvona) {
+  if (jeGlobalnaBlokadaZvonaAktivna()) {
     return;
   }
 
@@ -298,14 +304,13 @@ void deaktivirajZvonjenje(int zvono) {
   iskljuciZvono(zvono);
 }
 
-void postaviGlobalnuBlokaduZvona(bool blokiraj) {
-  if (globalnaBlokadaZvona == blokiraj) {
+static void primijeniEfektivnuGlobalnuBlokaduZvona(bool prethodnoAktivna) {
+  const bool novaBlokada = jeGlobalnaBlokadaZvonaAktivna();
+  if (prethodnoAktivna == novaBlokada) {
     return;
   }
 
-  globalnaBlokadaZvona = blokiraj;
-
-  if (globalnaBlokadaZvona) {
+  if (novaBlokada) {
     for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
       if (!zvona.aktivan[i]) {
         continue;
@@ -323,6 +328,36 @@ void postaviGlobalnuBlokaduZvona(bool blokiraj) {
   }
 }
 
+void postaviGlobalnuBlokaduZvona(bool blokiraj) {
+  if (globalnaBlokadaZvona == blokiraj) {
+    return;
+  }
+
+  const bool prethodnoAktivna = jeGlobalnaBlokadaZvonaAktivna();
+  globalnaBlokadaZvona = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduZvona(prethodnoAktivna);
+}
+
+void postaviBlokaduZvonaTihiRezim(bool blokiraj) {
+  if (blokadaZvonaTihiRezim == blokiraj) {
+    return;
+  }
+
+  const bool prethodnoAktivna = jeGlobalnaBlokadaZvonaAktivna();
+  blokadaZvonaTihiRezim = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduZvona(prethodnoAktivna);
+}
+
+void postaviBlokaduZvonaUPS(bool blokiraj) {
+  if (blokadaZvonaUPS == blokiraj) {
+    return;
+  }
+
+  const bool prethodnoAktivna = jeGlobalnaBlokadaZvonaAktivna();
+  blokadaZvonaUPS = blokiraj;
+  primijeniEfektivnuGlobalnuBlokaduZvona(prethodnoAktivna);
+}
+
 // ==================== INITIALIZATION ====================
 
 void inicijalizirajZvona() {
@@ -335,12 +370,6 @@ void inicijalizirajZvona() {
     zvona.start_ms[i] = 0;
     zvona.duration_ms[i] = 0;
   }
-
-  pinMode(PIN_ULAZA_PLOCE_1, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_2, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_3, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_4, INPUT_PULLUP);
-  pinMode(PIN_ULAZA_PLOCE_5, INPUT_PULLUP);
 
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     pinMode(PINOVI_RUCNIH_SKLOPKI[i], INPUT_PULLUP);
@@ -370,10 +399,10 @@ void upravljajZvonom() {
       if (novoStanje == SWITCH_PRESSED) {
         if (jeZvonoOmogucenoPoPostavkama(i + 1)) {
           manualnoUpravljanje.override_aktivan[i] = true;
-          if (!globalnaBlokadaZvona) {
+          if (!jeGlobalnaBlokadaZvonaAktivna()) {
             ukljuciZvonoIzRucneSklopke(i + 1);
           } else {
-            snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d ON (blokirano globalnom tisinom)"), i + 1);
+            snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d ON (blokirano globalnom blokadom)"), i + 1);
           }
         } else {
           manualnoUpravljanje.override_aktivan[i] = false;
@@ -387,7 +416,7 @@ void upravljajZvonom() {
     }
   }
 
-  if (globalnaBlokadaZvona) {
+  if (jeGlobalnaBlokadaZvonaAktivna()) {
     for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
       if (zvona.aktivan[i]) {
         deaktivirajBell_Relej(i);

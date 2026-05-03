@@ -1,5 +1,5 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
-// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (RTC/NTP/MAN) + oznaka dana za cavle (R/N)
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (---/NTP/MAN) + oznaka dana za cavle (R/N)
 // + zvjezdica aktivnosti i WiFi oznaka na zadnjim mjestima.
 // Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery),
 // a po potrebi i kratki WiFi sazetak iz mreznog mosta.
@@ -22,6 +22,7 @@
 #include "unified_motion_state.h"
 #include "watchdog.h"
 #include "rs485_bridge.h"
+#include "ups_nadzor.h"
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -101,6 +102,7 @@ static const char LCD_PORUKA_RS485_2[] PROGMEM = "PREKINUTA       ";
 static const char LCD_PORUKA_SAFE_MODE_1[] PROGMEM = "SUSTAV ZAKLJUCAN";
 static const char LCD_PORUKA_SAFE_MODE_2[] PROGMEM = "PREVISE RESETA  ";
 static const char LCD_PORUKA_SAFE_MODE_3[] PROGMEM = "DRZI ENT 5 SEK ";
+static const char LCD_PORUKA_UPS_NEMA_MREZE[] PROGMEM = "NEMA STRUJE!    ";
 static const int LCD_BROJ_MINUTA_CIKLUS = 720;
 static const int LCD_MAKS_CEKANJE_KAZALJKI_MIN = 60;
 static const int LCD_PRAG_DUGE_KOREKCIJE_MIN = 2;
@@ -286,6 +288,10 @@ static void build_line1() {
   } else {
     strncpy(source_str, dohvatiOznakuIzvoraVremena(), sizeof(source_str) - 1);
     source_str[sizeof(source_str) - 1] = '\0';
+    if (strncmp(source_str, "RTC", sizeof(source_str)) == 0) {
+      strncpy(source_str, "---", sizeof(source_str) - 1);
+      source_str[sizeof(source_str) - 1] = '\0';
+    }
   }
 
   const char oznaka_dana = dohvatiOznakuDanaZaCavle(now);
@@ -388,6 +394,18 @@ static void build_line2() {
         poruka,
         sizeof(poruka),
         prikaziDruguRs485Poruku ? LCD_PORUKA_RS485_2 : LCD_PORUKA_RS485_1);
+    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    return;
+  }
+
+  if (jeUPSModAktivan()) {
+    char poruka[17];
+    if (current_activity != ACTIVITY_ERROR) {
+      ocistiAktivnostDrugogRetka();
+    }
+    otkucavanje_poruka_aktivna = false;
+    hod_sata_prikaz_aktivan = false;
+    FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_UPS_NEMA_MREZE);
     pripremiDrugiRedakSaWiFiOznakom(poruka);
     return;
   }

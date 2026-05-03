@@ -12,12 +12,14 @@
 #include "debouncing.h"
 #include "prekidac_tisine.h"
 #include "watchdog.h"
+#include "ups_nadzor.h"
 
 namespace {
 constexpr int BROJ_POZICIJA = 64;
 constexpr int POZICIJA_NOCI = 63;
 constexpr int MINUTNI_BLOK = 15;
 constexpr uint8_t DEBOUNCE_ULAZA_PLOCE_MS = 30;
+constexpr uint8_t SEKUNDA_CITANJA_CAVALA = 25;
 
 constexpr uint8_t FAZA_STABILNO = 0;
 constexpr uint8_t FAZA_PRVI_RELEJ = 1;
@@ -217,12 +219,12 @@ bool izracunajTerminCitanjaCavala(const EepromLayout::UnifiedMotionState& stanje
   }
 
   // Citanje cavala namjerno kasni jednu minutu u odnosu na nominalni termin
-  // pozicije ploce, kako bi npr. slot 04:59 okidao u 05:00:30.
+  // pozicije ploce, kako bi npr. slot 04:59 okidao u 05:00:25.
   minutaTerminaUDanu = (satTermina * 60 + minutaTermina + 1) % 1440;
   const long sadaMsUDanu =
       static_cast<long>((now.hour() * 3600L + now.minute() * 60L + now.second()) * 1000L);
   const long terminMsUDanu =
-      static_cast<long>((minutaTerminaUDanu * 60L + 30L) * 1000L);
+      static_cast<long>((minutaTerminaUDanu * 60L + SEKUNDA_CITANJA_CAVALA) * 1000L);
   protekloOdTerminaMs = sadaMsUDanu - terminMsUDanu;
   return true;
 }
@@ -566,6 +568,7 @@ void inicijalizirajPlocu() {
 
 void upravljajPlocom() {
   static bool prethodniTihiRezimAktivan = false;
+  static bool prethodniUPSModAktivan = false;
 
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
@@ -583,6 +586,7 @@ void upravljajPlocom() {
 
   const DateTime now = dohvatiTrenutnoVrijeme();
   const bool tihiRezimAktivan = jePrekidacTisineAktivan();
+  const bool upsModAktivan = jeUPSModAktivan();
   const bool jeNedjelja = (now.dayOfTheWeek() == 0);
   const uint8_t brojMjestaZaCavle = dohvatiBrojMjestaZaCavle();
   bool ulaziPloce[BROJ_ULAZA_PLOCE];
@@ -600,8 +604,20 @@ void upravljajPlocom() {
   }
   prethodniTihiRezimAktivan = tihiRezimAktivan;
 
-  azurirajAutomatskaZvonjenja(
-      millis(), ulaziPloce, jeNedjelja, brojMjestaZaCavle, cavaoSlavljenjaAktivan);
+  if (upsModAktivan) {
+    if (!prethodniUPSModAktivan) {
+      posaljiPCLog(F("Ploca: UPS mod aktivan, cavao-zvonjenja i posebni nacini su blokirani"));
+    }
+    zaustaviAutomatikuPloceZbogUskrsneTisine();
+  } else if (prethodniUPSModAktivan) {
+    posaljiPCLog(F("Ploca: UPS mod zavrsen, cavao-zvonjenja su ponovno dozvoljena"));
+  }
+  prethodniUPSModAktivan = upsModAktivan;
+
+  if (!upsModAktivan) {
+    azurirajAutomatskaZvonjenja(
+        millis(), ulaziPloce, jeNedjelja, brojMjestaZaCavle, cavaoSlavljenjaAktivan);
+  }
 
   EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
 
@@ -636,6 +652,7 @@ void upravljajPlocom() {
   long protekloOdTerminaMs = 0;
 
   if (!tihiRezimAktivan &&
+      !upsModAktivan &&
       jePlocaKonfigurirana() &&
       jePlocaSpremnaZaCitanjeCavala(stanje, now) &&
       izracunajTerminCitanjaCavala(stanje, now, minutaTerminaUDanu, protekloOdTerminaMs) &&

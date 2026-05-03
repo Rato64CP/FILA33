@@ -12,6 +12,7 @@
 #include "pc_serial.h"
 #include "debouncing.h"
 #include "mrtvacko_thumbwheel.h"
+#include "ups_nadzor.h"
 
 namespace {
 
@@ -79,6 +80,10 @@ MrtvackoStanje mrtvacko = {
     false, 0UL, false, 0UL, MOD_MRTVACKO_KLASICNO, MRTVACKO_FAZA_OBA_CEKICA, false, 0UL, 0, false};
 bool slavljenjeNaCekanju = false;
 bool mrtvackoNaCekanju = false;
+
+bool jeBlokadaUPSModaAktivna() {
+  return jeUPSModAktivan();
+}
 
 void osvjeziLampicePosebnihNacina(unsigned long sadaMs) {
   const bool treptajUkljucen = ((sadaMs / TREPTANJE_LAMPICE_CEKANJA_MS) % 2UL) == 0UL;
@@ -361,7 +366,10 @@ void provjeriPrekidacSlavljenja() {
 
   if (novoStanje == SWITCH_PRESSED) {
     if (!slavljenje.aktivno) {
-      if (jeOperacijaCekicaDozvoljena() && !mrtvacko.aktivno) {
+      if (jeBlokadaUPSModaAktivna()) {
+        slavljenjeNaCekanju = false;
+        posaljiPCLog(F("Prekidac slavljenja: blokirano dok toranjski sat radi samo s UPS-a"));
+      } else if (jeOperacijaCekicaDozvoljena() && !mrtvacko.aktivno) {
         slavljenjeNaCekanju = false;
         zapocniSlavljenje();
         posaljiPCLog(F("Prekidac slavljenja: ukljuceno"));
@@ -394,7 +402,10 @@ void provjeriDugmeMrtvackog() {
       mrtvackoNaCekanju = false;
       posaljiPCLog(F("Dugme: mrtvacko skinuto s cekanja"));
     } else {
-      if (jeOperacijaCekicaDozvoljena() && !slavljenje.aktivno) {
+      if (jeBlokadaUPSModaAktivna()) {
+        mrtvackoNaCekanju = false;
+        posaljiPCLog(F("Dugme: mrtvacko blokirano dok toranjski sat radi samo s UPS-a"));
+      } else if (jeOperacijaCekicaDozvoljena() && !slavljenje.aktivno) {
         mrtvackoNaCekanju = false;
         zapocniMrtvacko();
         posaljiPCLog(F("Dugme: mrtvacko pokrenuto"));
@@ -407,6 +418,12 @@ void provjeriDugmeMrtvackog() {
 }
 
 void obradiCekanjePosebnihNacina() {
+  if (jeBlokadaUPSModaAktivna()) {
+    slavljenjeNaCekanju = false;
+    mrtvackoNaCekanju = false;
+    return;
+  }
+
   if (slavljenjeNaCekanju &&
       !slavljenje.aktivno &&
       !mrtvacko.aktivno &&
@@ -430,6 +447,12 @@ void obradiCekanjePosebnihNacina() {
 bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokirano) {
   const unsigned long sadaMs = millis();
   const uint8_t modMrtvackog = dohvatiModMrtvackog();
+
+  if (jeBlokadaUPSModaAktivna()) {
+    mrtvackoNaCekanju = false;
+    posaljiPCLog(F("Mrtvacko: blokirano dok toranjski sat radi samo s UPS-a"));
+    return false;
+  }
 
   if (!jeOperacijaCekicaDozvoljena()) {
     if (postaviCekanjeAkoBlokirano) {
@@ -530,6 +553,12 @@ void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs) {
 void zapocniSlavljenje() {
   const unsigned long sadaMs = millis();
   const uint8_t modSlavljenja = dohvatiModSlavljenja();
+
+  if (jeBlokadaUPSModaAktivna()) {
+    slavljenjeNaCekanju = false;
+    posaljiPCLog(F("Slavljenje: blokirano dok toranjski sat radi samo s UPS-a"));
+    return;
+  }
 
   if (!jeOperacijaCekicaDozvoljena()) {
     slavljenjeNaCekanju = true;

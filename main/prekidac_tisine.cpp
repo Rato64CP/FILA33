@@ -8,6 +8,7 @@
 #include "pc_serial.h"
 #include "podesavanja_piny.h"
 #include "time_glob.h"
+#include "ups_nadzor.h"
 #include "zvonjenje.h"
 
 namespace {
@@ -16,6 +17,10 @@ bool tihiRezimAktivan = false;
 bool rucniPrekidacTisineAktivan = false;
 bool rucnoPrisilnoIskljucenjeTijekomUskrsa = false;
 bool uskrsnaTisinaAktivna = false;
+
+void primijeniLampicuTihogRezima() {
+  digitalWrite(PIN_LAMPICA_TIHI_REZIM, (tihiRezimAktivan || jeUPSModAktivan()) ? HIGH : LOW);
+}
 
 bool procitajFizickoStanjePrekidacaTisine() {
   return digitalRead(PIN_PREKIDAC_TISINE) == LOW;
@@ -30,9 +35,9 @@ void primijeniJedinstveniTihiRezim(bool inicijalno) {
   }
 
   tihiRezimAktivan = noviTihiRezim;
-  digitalWrite(PIN_LAMPICA_TIHI_REZIM, tihiRezimAktivan ? HIGH : LOW);
-  postaviGlobalnuBlokaduZvona(tihiRezimAktivan);
-  postaviGlobalnuBlokaduOtkucavanja(tihiRezimAktivan);
+  primijeniLampicuTihogRezima();
+  postaviBlokaduZvonaTihiRezim(tihiRezimAktivan);
+  postaviBlokaduOtkucavanjaTihiRezim(tihiRezimAktivan);
 
   if (inicijalno) {
     posaljiPCLog(tihiRezimAktivan
@@ -88,4 +93,8 @@ void osvjeziPrekidacTisine() {
 
 bool jePrekidacTisineAktivan() {
   return tihiRezimAktivan;
+}
+
+void osvjeziSignalizacijuTihogRezima() {
+  primijeniLampicuTihogRezima();
 }

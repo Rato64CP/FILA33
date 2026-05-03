@@ -20,6 +20,7 @@ enum BlagdanskoRazdoblje {
 // Inicijalizacija postavki iz EEPROM-a
 void ucitajPostavke();
 
+// Topologija zvona i cavala trenutno je fiksna za toranjski sat.
 uint8_t dohvatiBrojZvona();
 uint8_t dohvatiBrojMjestaZaCavle();
 uint8_t dohvatiCavaoRadniZaZvono(uint8_t zvono);
@@ -69,6 +70,7 @@ const char* dohvatiWifiSsid();
 const char* dohvatiWifiLozinku();
 bool jeWiFiOmogucen();
 bool jeRS485Omogucen();
+bool jeUPSModOmogucen();
 bool koristiDhcpMreza();
 bool jeLCDPozadinskoOsvjetljenjeUkljuceno();
 bool jePCLogiranjeOmoguceno();
@@ -94,6 +96,7 @@ uint8_t dohvatiSviSvetiPocetakSat();
 uint8_t dohvatiSviSvetiZavrsetakSat();
 void postaviWiFiOmogucen(bool omogucen);
 void postaviRS485Omogucen(bool omogucen);
+void postaviUPSModOmogucen(bool omogucen);
 void postaviLCDPozadinskoOsvjetljenje(bool ukljuceno);
 void postaviPCLogiranjeOmoguceno(bool omoguceno);
 void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odgodaMin);

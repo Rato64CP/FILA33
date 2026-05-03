@@ -9,3 +9,6 @@ void osvjeziPrekidacTisine();
 
 // Vraca true kad je aktivan jedinstveni tihi rezim (zvona i cekici blokirani).
 bool jePrekidacTisineAktivan();
+
+// Osvjezava lampicu tihog rezima i za vanjske blokade poput UPS moda.
+void osvjeziSignalizacijuTihogRezima();

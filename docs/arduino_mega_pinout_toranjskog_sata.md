@@ -108,6 +108,17 @@ Aktivni firmware toranjskog sata trenutno koristi samo strelice, `Ent` i `Esc`, 
 | Rucna sklopka zvona 1 | `44` | `LOW = ON` |
 | Rucna sklopka zvona 2 | `45` | `LOW = ON` |
 
+## Nadzor mreze za UPS mod
+
+| Funkcija | Pin | Napomena |
+|---|---:|---|
+| Nadzor mreznog napona | `40` | `INPUT_PULLUP`, `LOW = mreza prisutna`, `HIGH = rad samo s UPS-a` |
+
+Napomena:
+- ulaz je predviden za optokapler s open-collector izlazom prema `GND`
+- dok je `UPS mod` ukljucen i pin prijavi nestanak mreze, firmware blokira zvona, cekice i kazaljke
+- okretna ploca ostaje aktivna kako bi toranjski sat i dalje pratio mehanicki raspored
+
 ## Signalne lampice
 
 | Funkcija | Pin | Napomena |
@@ -148,7 +159,7 @@ Napomena:
 | Port | Pinovi | Uloga |
 |---|---|---|
 | `Serial` | USB | PC log i dijagnostika (`115200`) |
-| `Serial1` | `RX1=19`, `TX1=18` | Priprema za vanjski `Raspberry Pi` most (`9600`) |
+| `Serial1` | `RX1=19`, `TX1=18` | Aktivni `RS485` transport toranjskog sata (`9600`) |
 | `Serial3` | `RX3=15`, `TX3=14` | Ugradeni `ESP8266` (`9600`) |
 
 Aktualna postavka firmwarea:
@@ -159,10 +170,11 @@ Aktualna postavka firmwarea:
 - `2` -> `RTC SQW`
 - `3`, `5`, `7-12`, `16` -> matrica tipki
 - `14-15` -> `Serial3` prema `ESP8266`
-- `18-19` -> `Serial1` za buduci `Raspberry Pi`
+- `18-19` -> `Serial1` za aktivni `RS485`
 - `20-21` -> `I2C`
 - `22-29` -> releji kazaljki, ploce, zvona i cekica
 - `30-34` -> ulazi ploce
+- `40` -> nadzor mreznog napona za `UPS mod`
 - `36-39`, `46` -> signalne lampice
 - `41-45` -> tipke i sklopke
 - `47` -> relej nocne rasvjete
