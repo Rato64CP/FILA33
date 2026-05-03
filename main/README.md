@@ -7,6 +7,8 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - upravljanje kazaljkama sata
 - upravljanje okretnom plocom
 - upravljanje zvonima i cekicima
+- odvojena inercija `INR1` i `INR2` za dva zvona
+- izbor rada s kocnicom zvona kroz `K:0/1`
 - termalna zastita slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - lokalne postavke preko LCD izbornika i tipki
@@ -17,6 +19,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - obrada RTC i NTP izvora vremena
 - degradirani nacin rada za `RTC` i `EEPROM` kad se kvar ponavlja
 - jedinstveni tihi rezim, BAT logika i lokalni overridei
+- `UPS mod` s odvojenim ulazom za nadzor mreznog napona
 
 ## 🧭 Podjela poslova Mega / ESP
 
@@ -61,6 +64,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
+- prihvaceni `NTP` zapis i start redovnog otkucavanja poravnavaju se na `RTC SQW` granicu sekunde kad je dostupna
 
 ## 💾 EEPROM i recovery
 
@@ -93,8 +97,9 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - kip-prekidac tihog moda i lampica tihog moda
 - ulaz za nadzor mreznog napona radi `UPS moda`
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
-- 4x5 matricna tipkovnica i servisni ulazi; sve promjene vrijednosti idu preko strelica
+- 6 direktnih tipki lokalnog izbornika (`GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`)
 - uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`
+- glavni LCD u `UPS modu` prikazuje `NEMA STRUJE!`, a ponedjeljak skracuje u `PON.` radi urednog prikaza datuma
 
 ## ✅ Smjernice za razvoj
 
@@ -103,3 +108,4 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - kvar ili restart ESP-a ne smije ugroziti osnovni rad sata
 - `I2C` pristup za `LCD`, `RTC` i `24C32` treba ostati na zajednickoj pripremi sabirnice s timeoutom
 - svaka promjena koja dira kazaljke, plocu, zvona ili recovery treba se provjeriti u odnosu na postojece module u `main/`
+- lokalni SRAM tuning zadnje revizije prebacio je vecinu fiksnih log stringova u flash i smanjio velike serijske buffere u `esp_serial.*`

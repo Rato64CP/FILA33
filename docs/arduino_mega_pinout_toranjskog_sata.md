@@ -75,28 +75,22 @@ Ovi pinovi su izlazi iz `Arduino Mega 2560` prema relejima, cekicima i signalnim
 | SDA | `20` | `DS3231 RTC` i vanjski EEPROM |
 | SCL | `21` | `DS3231 RTC` i vanjski EEPROM |
 
-## Matricna tipkovnica 4x5
+## Lokalne tipke izbornika
 
-Aktivni firmware toranjskog sata trenutno koristi samo strelice, `Ent` i `Esc`, dok brojcane tipke matrice nisu dio lokalnog menija.
-
-### Retci
+Sve tipke lokalnog izbornika rade kao `INPUT_PULLUP` i aktiviraju se spajanjem na `GND`.
 
 | Funkcija | Pin | Napomena |
 |---|---:|---|
-| Row 0 | `3` | Vod 0 matrice |
-| Row 1 | `12` | Vod 1 matrice |
-| Row 2 | `5` | Vod 2 matrice |
-| Row 3 | `16` | Vod 3 matrice |
+| GORE | `7` | Navigacija prema gore |
+| DOLJE | `8` | Navigacija prema dolje |
+| LIJEVO | `9` | Navigacija prema lijevo |
+| DESNO | `10` | Navigacija prema desno |
+| DA | `11` | Potvrda / `SELECT` |
+| NE | `12` | Povratak / `BACK` |
 
-### Stupci
-
-| Funkcija | Pin | Napomena |
-|---|---:|---|
-| Col 0 | `7` | Vod 4 matrice |
-| Col 1 | `8` | Vod 5 matrice |
-| Col 2 | `9` | Vod 6 matrice |
-| Col 3 | `10` | Vod 7 matrice |
-| Col 4 | `11` | Vod 8 matrice |
+Napomena:
+- stara matricna tipkovnica vise nije dio aktivnog firmware toka toranjskog sata
+- pinovi `3`, `5` i `16` ostaju slobodni za buduce prosirenje
 
 ## Posebne tipke i prekidaci
 
@@ -168,7 +162,8 @@ Aktualna postavka firmwarea:
 ## Kratki sazetak po rasponima pinova
 
 - `2` -> `RTC SQW`
-- `3`, `5`, `7-12`, `16` -> matrica tipki
+- `7-12` -> 6 direktnih tipki lokalnog izbornika
+- `3`, `5`, `16` -> slobodni
 - `14-15` -> `Serial3` prema `ESP8266`
 - `18-19` -> `Serial1` za aktivni `RS485`
 - `20-21` -> `I2C`

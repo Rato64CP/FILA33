@@ -90,8 +90,9 @@ struct PostavkeSpremnik {
   bool lcdPozadinskoOsvjetljenje;
   bool logiranjeOmoguceno;
   uint8_t blagdaniSlavljenjeMaska;
-  // Donja 3 bita ostaju maska blagdanskih razdoblja, a bit 7 nosi UPS mod
-  // kako bi nadzor mreze ostao kompatibilan sa starim EEPROM rasporedom.
+  // Donja 3 bita ostaju maska blagdanskih razdoblja, bit 6 nosi informaciju
+  // radi li toranjski sat bez kocnice zvona, a bit 7 nosi UPS mod kako bi
+  // obje zastavice ostale kompatibilne sa starim EEPROM rasporedom.
   uint8_t blagdaniRazdobljaMaska;
   uint8_t sviSvetiOmoguceno;
   uint8_t sviSvetiPocetakSat;

@@ -60,6 +60,15 @@ bool jeSekvencaNovija(uint8_t kandidat, uint8_t referenca) {
   return razlika != 0 && razlika < 128;
 }
 
+uint8_t sljedecaSekvenca(uint8_t trenutna) {
+  const uint8_t kandidat =
+      (trenutna == 0) ? RESERVED_SEKVENCA_POCETNA
+                      : static_cast<uint8_t>(trenutna + 1);
+  // Sekvenca 0 ostaje rezervirana za "jos nema valjanog zapisa" kako bi
+  // prvi pravi UnifiedMotionState zapis toranjskog sata uvijek krenuo od 1.
+  return (kandidat == 0) ? RESERVED_SEKVENCA_POCETNA : kandidat;
+}
+
 bool ucitajNajnovijeStanje(EepromLayout::UnifiedMotionState& stanje, int* slotNajnoviji = nullptr) {
   bool pronadeno = false;
   uint8_t najboljaSekvenca = 0;
@@ -102,7 +111,7 @@ bool zapisiDirektnoSlot(int slot, const EepromLayout::UnifiedMotionState& stanje
   const bool uspjeh = VanjskiEEPROM::zapisi(adresaSlota(slot), &stanje, sizeof(stanje));
   if (!uspjeh) {
     char log[64];
-    snprintf(log, sizeof(log), "UnifiedMotionState: EEPROM zapis nije uspio, slot=%d", slot);
+    snprintf_P(log, sizeof(log), PSTR("UnifiedMotionState: EEPROM zapis nije uspio, slot=%d"), slot);
     posaljiPCLog(log);
   }
   return uspjeh;
@@ -169,14 +178,14 @@ EepromLayout::UnifiedMotionState inicijalnoStanje() {
 void formatirajStanje(const EepromLayout::UnifiedMotionState& stanje,
                      char* odrediste,
                      size_t velicina) {
-  snprintf(odrediste,
-           velicina,
-           "STANJE: hand=%u active=%u relay=%u plate=%u phase=%u",
-           stanje.hand_position,
-           stanje.hand_active,
-           stanje.hand_relay,
-           stanje.plate_position,
-           stanje.plate_phase);
+  snprintf_P(odrediste,
+             velicina,
+             PSTR("STANJE: hand=%u active=%u relay=%u plate=%u phase=%u"),
+             stanje.hand_position,
+             stanje.hand_active,
+             stanje.hand_relay,
+             stanje.plate_position,
+             stanje.plate_phase);
 }
 }  // namespace
 
@@ -229,8 +238,7 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
   EepromLayout::UnifiedMotionState stanjeZaSpremanje = stanje;
   stanjeZaSpremanje.version = UNIFIED_VERZIJA;
   const uint8_t zadnjaSekvenca = cacheInicijaliziran ? cacheStanje.reserved : trenutno.reserved;
-  stanjeZaSpremanje.reserved =
-    (zadnjaSekvenca == 0) ? RESERVED_SEKVENCA_POCETNA : static_cast<uint8_t>(zadnjaSekvenca + 1);
+  stanjeZaSpremanje.reserved = sljedecaSekvenca(zadnjaSekvenca);
   stanjeZaSpremanje.checksum = izracunajChecksum(stanjeZaSpremanje);
 
   // UnifiedMotionState vec ima vlastitu sekvencu (`reserved`) i skeniranje

@@ -101,7 +101,7 @@ void loop() {
   if (jeSafeModeAktivan()) {
     primijeniSafeModeAkoTreba();
     if (provjeriOtkljucavanjeSafeMode() && otkljucajSafeMode()) {
-      prikaziPoruku("SUSTAV OTKLJUCAN", "NASTAVLJAM RAD");
+      prikaziPoruku(F("SUSTAV OTKLJUCAN"), F("NASTAVLJAM RAD"));
       osvjeziWatchdog();
       delay(1200);
       return;

@@ -1,5 +1,6 @@
 // postavke.cpp - Upravljanje postavkama toranjskog sata i EEPROM-om
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +28,7 @@ constexpr size_t BROJ_DOPUSTENIH_SUNCEVIH_ODGODA =
 constexpr uint8_t MASKA_SUNCEVIH_DOGADAJA = 0x07;
 constexpr uint8_t MASKA_BLAGDANSKOG_SLAVLJENJA = 0x07;
 constexpr uint8_t MASKA_BLAGDANSKIH_RAZDOBLJA = 0x07;
+constexpr uint8_t ZASTAVICA_RAD_BEZ_KOCNICE_ZVONA = 0x40;
 constexpr uint8_t ZASTAVICA_UPS_MODA = 0x80;
 constexpr uint8_t SVI_SVETI_ZADANI_POCETAK_SAT = 15;
 constexpr uint8_t SVI_SVETI_ZADANI_ZAVRSETAK_SAT = 8;
@@ -63,6 +65,7 @@ struct RadnePostavke {
   bool wifiOmogucen;
   bool rs485Omogucen;
   bool upsModOmogucen;
+  bool kocnicaZvonaOmogucena;
   bool imaKazaljke;
   uint8_t maskaSuncevihDogadaja;
   bool nocnaRasvjetaOmogucena;
@@ -259,14 +262,29 @@ static bool procitajUPSModIzMaskeRazdoblja(uint8_t maska) {
   return (maska & ZASTAVICA_UPS_MODA) != 0;
 }
 
-static uint8_t kodirajMaskuRazdobljaSUpsModom(uint8_t maskaRazdoblja, bool upsModOmogucen) {
+static bool procitajKocnicuZvonaIzMaskeRazdoblja(uint8_t maska) {
+  return (maska & ZASTAVICA_RAD_BEZ_KOCNICE_ZVONA) == 0;
+}
+
+static uint8_t kodirajMaskuRazdobljaSZastavicama(uint8_t maskaRazdoblja,
+                                                 bool upsModOmogucen,
+                                                 bool kocnicaZvonaOmogucena) {
   const uint8_t osnovnaMaska = sanitizirajMaskuBlagdanskihRazdoblja(maskaRazdoblja);
-  return upsModOmogucen ? static_cast<uint8_t>(osnovnaMaska | ZASTAVICA_UPS_MODA)
-                        : osnovnaMaska;
+  uint8_t rezultat = osnovnaMaska;
+  if (!kocnicaZvonaOmogucena) {
+    rezultat = static_cast<uint8_t>(rezultat | ZASTAVICA_RAD_BEZ_KOCNICE_ZVONA);
+  }
+  if (upsModOmogucen) {
+    rezultat = static_cast<uint8_t>(rezultat | ZASTAVICA_UPS_MODA);
+  }
+  return rezultat;
 }
 
 static uint8_t sanitizirajPohranjenuMaskuBlagdanskihRazdoblja(uint8_t maska) {
-  return kodirajMaskuRazdobljaSUpsModom(maska, procitajUPSModIzMaskeRazdoblja(maska));
+  return kodirajMaskuRazdobljaSZastavicama(
+      maska,
+      procitajUPSModIzMaskeRazdoblja(maska),
+      procitajKocnicuZvonaIzMaskeRazdoblja(maska));
 }
 
 static uint8_t ograniceniSviSvetiPocetakSat(uint8_t sat) {
@@ -723,6 +741,8 @@ static void ucitajRadnePostavkeIzSpremnika(const EepromLayout::PostavkeSpremnik&
   postavke.blagdaniRazdobljaMaska =
       sanitizirajMaskuBlagdanskihRazdoblja(spremnik.blagdaniRazdobljaMaska);
   postavke.upsModOmogucen = procitajUPSModIzMaskeRazdoblja(spremnik.blagdaniRazdobljaMaska);
+  postavke.kocnicaZvonaOmogucena =
+      procitajKocnicuZvonaIzMaskeRazdoblja(spremnik.blagdaniRazdobljaMaska);
   postavke.sviSvetiOmoguceno = spremnik.sviSvetiOmoguceno;
   postavke.sviSvetiPocetakSat = ograniceniSviSvetiPocetakSat(spremnik.sviSvetiPocetakSat);
   postavke.sviSvetiZavrsetakSat = ograniceniSviSvetiZavrsetakSat(spremnik.sviSvetiZavrsetakSat);
@@ -761,7 +781,10 @@ static void upisiRadnePostavkeUSpremnik(EepromLayout::PostavkeSpremnik& spremnik
   spremnik.blagdaniSlavljenjeMaska =
       sanitizirajMaskuBlagdanskogSlavljenja(postavke.blagdaniSlavljenjeMaska);
   spremnik.blagdaniRazdobljaMaska =
-      kodirajMaskuRazdobljaSUpsModom(postavke.blagdaniRazdobljaMaska, postavke.upsModOmogucen);
+      kodirajMaskuRazdobljaSZastavicama(
+          postavke.blagdaniRazdobljaMaska,
+          postavke.upsModOmogucen,
+          postavke.kocnicaZvonaOmogucena);
   spremnik.sviSvetiOmoguceno = postavke.sviSvetiOmoguceno;
   spremnik.sviSvetiPocetakSat = ograniceniSviSvetiPocetakSat(postavke.sviSvetiPocetakSat);
   spremnik.sviSvetiZavrsetakSat =
@@ -861,12 +884,12 @@ static void spremiSpremnikPostavki(EepromLayout::PostavkeSpremnik& spremnik) {
     posaljiPCLog(F("Postavke: ERROR - spremanje ili provjera EEPROM zapisa nije uspjela"));
   } else {
     char log[96];
-    snprintf(log,
-             sizeof(log),
-             "Postavke: EEPROM potvrden OTK=%u S=%u M=%u",
-             static_cast<unsigned>(provjera.modOtkucavanja),
-             static_cast<unsigned>(provjera.modSlavljenja),
-             static_cast<unsigned>(provjera.modMrtvackog));
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("Postavke: EEPROM potvrden OTK=%u S=%u M=%u"),
+               static_cast<unsigned>(provjera.modOtkucavanja),
+               static_cast<unsigned>(provjera.modSlavljenja),
+               static_cast<unsigned>(provjera.modMrtvackog));
     posaljiPCLog(log);
   }
 
@@ -1153,14 +1176,14 @@ void postaviKompaktnePostavkeOtkucavanja(int satOd,
   spremiSpremnikPostavki(spremnik);
 
   char log[112];
-  snprintf(log,
-           sizeof(log),
-           "Postavke otkucavanja: BAT %d-%d, OTK=%u, S=%u, M=%u",
-           postavke.tihiSatiDo,
-           postavke.tihiSatiOd,
-           static_cast<unsigned>(postavke.modOtkucavanja),
-           static_cast<unsigned>(postavke.modSlavljenja),
-           static_cast<unsigned>(postavke.modMrtvackog));
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Postavke otkucavanja: BAT %d-%d, OTK=%u, S=%u, M=%u"),
+             postavke.tihiSatiDo,
+             postavke.tihiSatiOd,
+             static_cast<unsigned>(postavke.modOtkucavanja),
+             static_cast<unsigned>(postavke.modSlavljenja),
+             static_cast<unsigned>(postavke.modMrtvackog));
   posaljiPCLog(log);
 }
 
@@ -1186,10 +1209,10 @@ void postaviTrajanjeImpulsaCekica(unsigned int trajanjeMs) {
   spremiSpremnikPostavki(spremnik);
 
   char log[64];
-  snprintf(log,
-           sizeof(log),
-           "Postavke: trajanje impulsa cekica postavljeno na %u ms",
-           static_cast<unsigned>(postavke.trajanjeImpulsaCekicaMs));
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Postavke: trajanje impulsa cekica postavljeno na %u ms"),
+             static_cast<unsigned>(postavke.trajanjeImpulsaCekicaMs));
   posaljiPCLog(log);
 }
 
@@ -1248,11 +1271,11 @@ void postaviInercijeZvona(uint8_t inercijaZvona1Sekunde,
   spremiSpremnikPostavki(spremnik);
 
   char log[96];
-  snprintf(log,
-           sizeof(log),
-           "Postavke: inercija zvona Z1=%u s, Z2=%u s",
-           static_cast<unsigned>(postavke.inercijaZvona1Sekunde),
-           static_cast<unsigned>(postavke.inercijaZvona2Sekunde));
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Postavke: inercija zvona Z1=%u s, Z2=%u s"),
+             static_cast<unsigned>(postavke.inercijaZvona1Sekunde),
+             static_cast<unsigned>(postavke.inercijaZvona2Sekunde));
   posaljiPCLog(log);
 }
 
@@ -1287,6 +1310,10 @@ bool jeRS485Omogucen() {
 
 bool jeUPSModOmogucen() {
   return postavke.upsModOmogucen;
+}
+
+bool jeKocnicaZvonaOmogucena() {
+  return postavke.kocnicaZvonaOmogucena;
 }
 
 bool koristiDhcpMreza() {
@@ -1446,6 +1473,23 @@ void postaviUPSModOmogucen(bool omogucen) {
                    : F("Postavke: UPS mod iskljucen"));
 }
 
+void postaviKocnicuZvonaOmoguceno(bool omoguceno) {
+  if (postavke.kocnicaZvonaOmogucena == omoguceno) {
+    return;
+  }
+
+  postavke.kocnicaZvonaOmogucena = omoguceno;
+
+  EepromLayout::PostavkeSpremnik spremnik = napraviZadanePostavke();
+  ucitajSpremnikIliZadano(spremnik);
+  upisiRadnePostavkeUSpremnik(spremnik);
+  spremiSpremnikPostavki(spremnik);
+
+  posaljiPCLog(omoguceno
+                   ? F("Postavke: kocnica zvona ukljucena")
+                   : F("Postavke: kocnica zvona iskljucena"));
+}
+
 void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odgodaMin) {
   if (!jeValjanSuncevDogadaj(dogadaj)) {
     return;
@@ -1490,13 +1534,13 @@ void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odg
   }
 
   char log[96];
-  snprintf(log,
-           sizeof(log),
-           "Suncevi dogadaj %s: %s, zvono=%u, odgoda=%d min",
-           naziv,
-           jeSuncevDogadajOmogucen(dogadaj) ? "ON" : "OFF",
-           dohvatiZvonoZaSuncevDogadaj(dogadaj),
-           dohvatiOdgoduSuncevogDogadajaMin(dogadaj));
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Suncevi dogadaj %s: %s, zvono=%u, odgoda=%d min"),
+             naziv,
+             jeSuncevDogadajOmogucen(dogadaj) ? "ON" : "OFF",
+             dohvatiZvonoZaSuncevDogadaj(dogadaj),
+             dohvatiOdgoduSuncevogDogadajaMin(dogadaj));
   posaljiPCLog(log);
 }
 
@@ -1628,10 +1672,10 @@ void postaviKonfiguracijuPloce(bool aktivna, int pocetakMinuta, int krajMinuta) 
   spremiSpremnikPostavki(spremnik);
 
   char log[96];
-  snprintf(
+  snprintf_P(
       log,
       sizeof(log),
-      "Postavke ploce: %s %02d:%02d-%02d:%02d",
+      PSTR("Postavke ploce: %s %02d:%02d-%02d:%02d"),
       aktivna ? "ON" : "OFF",
       pocetakMinuta / 60,
       pocetakMinuta % 60,
@@ -1668,10 +1712,10 @@ void postaviPostavkeCavala(uint8_t trajanjeRadniMin,
   spremiSpremnikPostavki(spremnik);
 
   char log[80];
-  snprintf(
+  snprintf_P(
       log,
       sizeof(log),
-      "Postavke stapica: TR=%u TN=%u TS=%u S=+%u",
+      PSTR("Postavke stapica: TR=%u TN=%u TS=%u S=+%u"),
       postavke.trajanjeZvonjenjaRadniMin,
       postavke.trajanjeZvonjenjaNedjeljaMin,
       postavke.trajanjeSlavljenjaMin,
@@ -1711,10 +1755,10 @@ void postaviWiFiPodatkeZaSetup(const char* ssid, const char* lozinka) {
   spremiSpremnikPostavki(spremnik);
 
   char log[96];
-  snprintf(log,
-           sizeof(log),
-           "Setup WiFi: spremljen SSID=%s i aktiviran DHCP za novu mrezu",
-           spremnik.wifiSsid);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Setup WiFi: spremljen SSID=%s i aktiviran DHCP za novu mrezu"),
+             spremnik.wifiSsid);
   posaljiPCLog(log);
 }
 
@@ -1760,10 +1804,10 @@ void postaviSinkronizacijskePostavke(const char* ntpServer) {
   spremiSpremnikPostavki(spremnik);
 
   char log[96];
-  snprintf(
+  snprintf_P(
       log,
       sizeof(log),
-      "Postavke: sinkronizacija NTP=%s (%s)",
+      PSTR("Postavke: sinkronizacija NTP=%s (%s)"),
       dohvatiNtpServerBezZastavice(spremnik.ntpServer),
       procitajNtpOmogucenostIzTeksta(spremnik.ntpServer) ? "ON" : "OFF");
   posaljiPCLog(log);

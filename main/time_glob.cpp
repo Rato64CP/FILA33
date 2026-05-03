@@ -54,6 +54,7 @@ static bool rtcBaterijaOk = false;
 static bool rtcSqwAktivan = false;
 static bool rtcSqwGreskaPrijavljena = false;
 static unsigned long rtcSqwZadnjiTickMs = 0;
+static bool rtcDostupanNakonInicijalizacije = false;
 static bool dstAktivan = false;
 static bool dstStatusUcitan = false;
 static bool vrijemePotvrdjenoZaAutomatiku = false;
@@ -108,6 +109,7 @@ static void azurirajOznakuIzvora() {
 static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool imaEksplicitanDST,
                                   bool dstAktivanIzvori);
+static bool osvjeziTrenutnoVrijemeIzRtc();
 static void evidentirajRtcUspjeh();
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
 
@@ -128,6 +130,34 @@ static uint32_t apsolutnaRazlikaSekundi(const DateTime& a, const DateTime& b) {
   const uint32_t unixA = a.unixtime();
   const uint32_t unixB = b.unixtime();
   return (unixA >= unixB) ? (unixA - unixB) : (unixB - unixA);
+}
+
+static bool pokusajUpisatiVrijemeURtc(const DateTime& novoVrijeme,
+                                      const __FlashStringHelper* porukaNeuspjeha) {
+  // RTC se inicijalizira samo jednom pri bootu toranjskog sata.
+  // Kod kasnijeg upisa ne zovemo ponovno rtc.begin(), nego upis
+  // odmah provjeravamo citanjem natrag iz RTC-a.
+  if (!rtcDostupanNakonInicijalizacije) {
+    evidentirajRtcNeuspjeh(porukaNeuspjeha);
+    signalizirajError_RTC();
+    return false;
+  }
+
+  rtc.adjust(novoVrijeme);
+
+  const DateTime potvrdaRtcVrijemena = rtc.now();
+  if (!jeVrijemeURasponuPouzdanosti(potvrdaRtcVrijemena) ||
+      apsolutnaRazlikaSekundi(potvrdaRtcVrijemena, novoVrijeme) > 1UL) {
+    evidentirajRtcNeuspjeh(porukaNeuspjeha);
+    signalizirajError_RTC();
+    return false;
+  }
+
+  rtcBaterijaOk = true;
+  rtcDegradiraniNacinAktivan = false;
+  rtcNeuspjesiZaredom = 0;
+  rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
+  return true;
 }
 
 static void kopirajFlashTekst(const __FlashStringHelper* tekst, char* odrediste, size_t velicina) {
@@ -407,17 +437,9 @@ static bool trebaJesenskiPomak(const DateTime& vrijeme) {
 
 static void primijeniDSTPomak(int pomakSekundi, bool noviDSTAktivan, const __FlashStringHelper* opis) {
   DateTime novoVrijeme(trenutnoVrijeme.unixtime() + pomakSekundi);
-  if (rtc.begin()) {
-    rtc.adjust(novoVrijeme);
-    rtcBaterijaOk = true;
-    rtcDegradiraniNacinAktivan = false;
-    rtcNeuspjesiZaredom = 0;
-    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
-  } else {
-    evidentirajRtcNeuspjeh(
-        F("RTC: neuspjela DST korekcija, ostajem u degradiranom nacinu rada"));
-    signalizirajError_RTC();
-  }
+  pokusajUpisatiVrijemeURtc(
+      novoVrijeme,
+      F("RTC: neuspjela DST korekcija, ostajem u degradiranom nacinu rada"));
 
   trenutnoVrijeme = novoVrijeme;
   dstAktivan = noviDSTAktivan;
@@ -582,6 +604,7 @@ DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
 void inicijalizirajRTC() {
   pripremiI2CSabirnicuSigurno();
   if (!rtc.begin()) {
+    rtcDostupanNakonInicijalizacije = false;
     rtcDegradiraniNacinAktivan = true;
     rtcNeuspjesiZaredom = RTC_DEGRADED_PRAG_NEUSPJEHA;
     rtcUspjesiZaredom = 0;
@@ -592,6 +615,7 @@ void inicijalizirajRTC() {
         F("Vrijeme: nije potvrdeno, automatika toranjskog sata ostaje blokirana"));
     signalizirajError_RTC();
   } else {
+    rtcDostupanNakonInicijalizacije = true;
     rtcDegradiraniNacinAktivan = false;
     rtcNeuspjesiZaredom = 0;
     rtcUspjesiZaredom = 0;
@@ -713,17 +737,9 @@ static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
 
   otkaziZakazanuNtpSinkronizaciju();
 
-  if (rtc.begin()) {
-    rtc.adjust(ntpVrijeme);
-    rtcBaterijaOk = true;
-    rtcDegradiraniNacinAktivan = false;
-    rtcNeuspjesiZaredom = 0;
-    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
-  } else {
-    evidentirajRtcNeuspjeh(
-        F("RTC: neuspjela NTP primjena na RTC, ostajem u degradiranom nacinu rada"));
-    signalizirajError_RTC();
-  }
+  pokusajUpisatiVrijemeURtc(
+      ntpVrijeme,
+      F("RTC: neuspjela NTP primjena na RTC, ostajem u degradiranom nacinu rada"));
 
   trenutnoVrijeme = ntpVrijeme;
   dstAktivan = odrediDSTStatusSinkronizacije(
@@ -794,17 +810,9 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
     return;
   }
 
-  if (rtc.begin()) {
-    rtc.adjust(rucnoVrijeme);
-    rtcBaterijaOk = true;
-    rtcDegradiraniNacinAktivan = false;
-    rtcNeuspjesiZaredom = 0;
-    rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
-  } else {
-    evidentirajRtcNeuspjeh(
-        F("RTC: neuspjelo rucno postavljanje vremena na RTC, ostajem u degradiranom nacinu rada"));
-    signalizirajError_RTC();
-  }
+  pokusajUpisatiVrijemeURtc(
+      rucnoVrijeme,
+      F("RTC: neuspjelo rucno postavljanje vremena na RTC, ostajem u degradiranom nacinu rada"));
 
   trenutnoVrijeme = rucnoVrijeme;
   dstAktivan = izracunajDSTIzKalendara(rucnoVrijeme);

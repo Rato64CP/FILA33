@@ -169,10 +169,7 @@ void primijeniTrajanjeMrtvackogIzThumbwheela(unsigned long sadaMs, bool priPokre
 }
 
 int dohvatiPinSlavljenjaZaKorak(uint8_t mod, int korak) {
-  if (mod == 2) {
-    return (korak == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
-  }
-
+  (void)mod;
   return (korak == 0) ? PIN_CEKIC_MUSKI : PIN_CEKIC_ZENSKI;
 }
 

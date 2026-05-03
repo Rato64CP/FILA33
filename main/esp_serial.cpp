@@ -1,5 +1,6 @@
 // esp_serial.cpp - Serijska veza prema mreznom mostu toranjskog sata
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +22,10 @@
 static HardwareSerial& espSerijskiPort = ESP_SERIJSKI_PORT;
 
 static const unsigned long ESP_BRZINA = 9600;
-static const uint8_t ESP_ULAZNI_BUFFER_MAX = 96;
+// Najduza ocekivana linija prema Megi je `SETUPWIFI:` + SSID + `|` + lozinka,
+// sto uz danasnje granice stane unutar 75 znakova. Ostavljen je mali servisni
+// luft kako bi UART veza mreznog mosta ostala robusna bez nepotrebnog trosenja SRAM-a.
+static const uint8_t ESP_ULAZNI_BUFFER_MAX = 80;
 static const unsigned long WIFI_POCETNA_ODGODA_NAKON_NAPAJANJA_MS = 120000UL;
 static const unsigned long WIFI_STATUS_DRUGI_UPIT_ODGODA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_RECOVERY_INTERVAL_MS = 300000UL;
@@ -125,6 +129,19 @@ static bool jeValjanaIPv4AdresaZaLCD(const char* tekst) {
   return brojSegmenata == 4;
 }
 
+static void potvrdiWiFiPovezanostAkoTreba(const __FlashStringHelper* razlog) {
+  if (wifiPovezanNaESP) {
+    return;
+  }
+
+  wifiPovezanNaESP = true;
+  postaviWiFiStatus(true);
+  prioritetniNtpZahtjevNaCekanju = true;
+  zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
+  zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
+  posaljiPCLog(razlog);
+}
+
 void posaljiESPKomandu(const char* komanda);
 static void zatraziWiFiStatusESP();
 static bool spremiSetupWiFiPostavkeIzESPa(const char* payload);
@@ -142,7 +159,7 @@ static void posaljiStatusESPU() {
              sada.minute(),
              sada.second());
 
-  char statusLinija[256];
+  char statusLinija[128];
   snprintf_P(statusLinija,
              sizeof(statusLinija),
              PSTR("STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d"),
@@ -189,14 +206,12 @@ static void trimBuffer() {
   }
 }
 
-static void logirajLinijuESP(const char* prefiks, const char* sadrzaj) {
-  char log[320];
-  snprintf(log, sizeof(log), "%s%s", prefiks, sadrzaj);
+static void logirajLinijuESP(const __FlashStringHelper* prefiks, const char* sadrzaj) {
+  char log[128];
+  strncpy_P(log, reinterpret_cast<PGM_P>(prefiks), sizeof(log) - 1);
+  log[sizeof(log) - 1] = '\0';
+  strncat(log, sadrzaj, sizeof(log) - strlen(log) - 1);
   posaljiPCLog(log);
-}
-
-static bool jeStatusnaLogLinijaESP(const char* linija) {
-  return strncmp(linija, "NTPLOG:", 7) == 0;
 }
 
 static bool jePrepoznataESPLinija(const char* linija) {
@@ -232,7 +247,7 @@ static void obradiNTPLogLinijuESP(const char* linija) {
   }
 
   ntpCekanjePrijavljeno = false;
-  logirajLinijuESP("Mrezni most NTP: ", poruka);
+  logirajLinijuESP(F("Mrezni most NTP: "), poruka);
 }
 
 static void obradiWiFiLogLinijuESP(const char* linija) {
@@ -241,7 +256,7 @@ static void obradiWiFiLogLinijuESP(const char* linija) {
     ++poruka;
   }
 
-  logirajLinijuESP("Mrezni most WiFi: ", poruka);
+  logirajLinijuESP(F("Mrezni most WiFi: "), poruka);
 }
 
 static void posaljiKonfiguracijuESPuNakonZahtjeva() {
@@ -297,8 +312,11 @@ static bool spremiSetupWiFiPostavkeIzESPa(const char* payload) {
   posaljiWiFiStatusESP();
   zatraziWiFiStatusESP();
 
-  char log[96];
-  snprintf(log, sizeof(log), "Setup WiFi: spremljen novi SSID=%s preko mreznog mosta", ssid);
+  char log[88];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Setup WiFi: spremljen novi SSID=%s preko mreznog mosta"),
+             ssid);
   posaljiPCLog(log);
   return true;
 }
@@ -370,8 +388,11 @@ void posaljiNTPPostavkeESP() {
   espSerijskiPort.print(F("NTPCFG:"));
   espSerijskiPort.println(dohvatiNTPServer());
 
-  char log[96];
-  snprintf(log, sizeof(log), "Poslan NTP server mreznom mostu: %s", dohvatiNTPServer());
+  char log[80];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Poslan NTP server mreznom mostu: %s"),
+             dohvatiNTPServer());
   posaljiPCLog(log);
 }
 
@@ -584,13 +605,6 @@ static bool parsirajNTPPayload(const char* payload,
   return true;
 }
 
-static bool jeStrogiNTPPayload(const char* payload) {
-  DateTime ignorirano;
-  bool imaEksplicitanDST = false;
-  bool dstAktivanIzvori = false;
-  return parsirajNTPPayload(payload, ignorirano, imaEksplicitanDST, dstAktivanIzvori);
-}
-
 static void obradiESPRedak() {
   trimBuffer();
 
@@ -599,8 +613,8 @@ static void obradiESPRedak() {
     return;
   }
 
-  if (!jePrepoznataESPLinija(ulazniBuffer) && !jeStatusnaLogLinijaESP(ulazniBuffer)) {
-    logirajLinijuESP("Mrezni most linija: ", ulazniBuffer);
+  if (!jePrepoznataESPLinija(ulazniBuffer)) {
+    logirajLinijuESP(F("Mrezni most linija: "), ulazniBuffer);
   }
 
   if (strcmp(ulazniBuffer, "WIFI:CONNECTED") == 0) {
@@ -630,24 +644,17 @@ static void obradiESPRedak() {
 
   if (strncmp(ulazniBuffer, "WIFI:LOCAL_IP:", 14) == 0) {
     const char* ipAdresa = ulazniBuffer + 14;
-    if (!wifiPovezanNaESP) {
-      wifiPovezanNaESP = true;
-      postaviWiFiStatus(true);
-      prioritetniNtpZahtjevNaCekanju = true;
-      zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
-      zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
-      posaljiPCLog(F("Mrezni most status mreze: spojeno (potvrda preko lokalne IP)"));
-    }
+    potvrdiWiFiPovezanostAkoTreba(F("Mrezni most status mreze: spojeno (potvrda preko lokalne IP)"));
 
     if (jeValjanaIPv4AdresaZaLCD(ipAdresa)) {
       strncpy(zadnjaLokalnaWiFiIP, ipAdresa, sizeof(zadnjaLokalnaWiFiIP) - 1);
       zadnjaLokalnaWiFiIP[sizeof(zadnjaLokalnaWiFiIP) - 1] = '\0';
 
-      char log[64];
-      snprintf(log, sizeof(log), "Mrezni most lokalna IP: %s", ipAdresa);
+      char log[48];
+      snprintf_P(log, sizeof(log), PSTR("Mrezni most lokalna IP: %s"), ipAdresa);
       posaljiPCLog(log);
     } else {
-      logirajLinijuESP("Mrezni most: neispravna lokalna IP: ", ipAdresa);
+      logirajLinijuESP(F("Mrezni most: neispravna lokalna IP: "), ipAdresa);
     }
     resetirajUlazniBuffer();
     return;
@@ -658,8 +665,11 @@ static void obradiESPRedak() {
     if (payload[0] != '\0') {
       prikaziWiFiDijagnostiku(payload);
 
-      char log[80];
-      snprintf(log, sizeof(log), "Mrezni most WiFi LCD sazetak: %s", payload);
+      char log[48];
+      snprintf_P(log,
+                 sizeof(log),
+                 PSTR("Mrezni most WiFi LCD sazetak: %s"),
+                 payload);
       posaljiPCLog(log);
     }
     resetirajUlazniBuffer();
@@ -672,11 +682,14 @@ static void obradiESPRedak() {
       strncpy(zadnjaWiFiMACAdresa, macAdresa, sizeof(zadnjaWiFiMACAdresa) - 1);
       zadnjaWiFiMACAdresa[sizeof(zadnjaWiFiMACAdresa) - 1] = '\0';
 
-      char log[64];
-      snprintf(log, sizeof(log), "Mrezni most MAC adresa: %s", zadnjaWiFiMACAdresa);
+      char log[48];
+      snprintf_P(log,
+                 sizeof(log),
+                 PSTR("Mrezni most MAC adresa: %s"),
+                 zadnjaWiFiMACAdresa);
       posaljiPCLog(log);
     } else {
-      logirajLinijuESP("Mrezni most: neispravna MAC adresa: ", macAdresa);
+      logirajLinijuESP(F("Mrezni most: neispravna MAC adresa: "), macAdresa);
     }
     resetirajUlazniBuffer();
     return;
@@ -731,36 +744,27 @@ static void obradiESPRedak() {
 
   if (strncmp(ulazniBuffer, "NTP:", 4) == 0) {
     const char* iso = ulazniBuffer + 4;
-    if (!jeStrogiNTPPayload(iso)) {
+    DateTime ntpVrijeme;
+    bool imaEksplicitanDST = false;
+    bool dstAktivanIzvori = false;
+    if (!parsirajNTPPayload(iso, ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori)) {
       espSerijskiPort.println(F("ERR:NTP"));
-      logirajLinijuESP("Neispravan NTP format: ", iso);
+      logirajLinijuESP(F("Neispravan NTP format: "), iso);
       resetirajUlazniBuffer();
       return;
     }
 
-    DateTime ntpVrijeme;
-    bool imaEksplicitanDST = false;
-    bool dstAktivanIzvori = false;
-    if (parsirajNTPPayload(iso, ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori)) {
-      if (!wifiPovezanNaESP) {
-        wifiPovezanNaESP = true;
-        postaviWiFiStatus(true);
-        prioritetniNtpZahtjevNaCekanju = true;
-        zadnjiAutomatskiNtpZahtjevMinutniKljuc = 0;
-        zadnjiAutomatskiNtpZahtjevSatniKljuc = 0;
-        posaljiPCLog(F("Mrezni most status mreze: spojeno (potvrda preko NTP sinkronizacije)"));
-      }
+    potvrdiWiFiPovezanostAkoTreba(F("Mrezni most status mreze: spojeno (potvrda preko NTP sinkronizacije)"));
 
-      if (jeNTPOmogucen()) {
-        prioritetniNtpZahtjevNaCekanju = false;
-        azurirajVrijemeIzNTP(ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori);
-      }
-      espSerijskiPort.println(F("ACK:NTP"));
-      if (jeNTPOmogucen()) {
-        logirajLinijuESP("Primljen NTP iz ESP-a: ", iso);
-      } else {
-        logirajLinijuESP("Preskocen NTP iz ESP-a jer je NTP iskljucen: ", iso);
-      }
+    if (jeNTPOmogucen()) {
+      prioritetniNtpZahtjevNaCekanju = false;
+      azurirajVrijemeIzNTP(ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori);
+    }
+    espSerijskiPort.println(F("ACK:NTP"));
+    if (jeNTPOmogucen()) {
+      logirajLinijuESP(F("Primljen NTP iz ESP-a: "), iso);
+    } else {
+      logirajLinijuESP(F("Preskocen NTP iz ESP-a jer je NTP iskljucen: "), iso);
     }
 
     resetirajUlazniBuffer();
@@ -777,8 +781,7 @@ static void obradiESPRedak() {
     else if (strcmp(komanda, "ZVONO2_ON") == 0)       ukljuciZvono(2);
     else if (strcmp(komanda, "ZVONO2_OFF") == 0)      iskljuciZvono(2);
     else if (strcmp(komanda, "GASI_SVE") == 0) {
-      iskljuciZvono(1);
-      iskljuciZvono(2);
+      iskljuciObaZvonaSinkronizirano();
       zaustaviSlavljenje();
       zaustaviMrtvacko();
     }
@@ -828,13 +831,13 @@ static void obradiESPRedak() {
 
     if (!prepoznataKomanda) {
       espSerijskiPort.println(F("ERR:CMD"));
-      logirajLinijuESP("Nepoznata CMD naredba: ", komanda);
+      logirajLinijuESP(F("Nepoznata CMD naredba: "), komanda);
     } else if (uspjeh) {
       espSerijskiPort.println(F("ACK:CMD_OK"));
-      logirajLinijuESP("Izvrsena CMD naredba: ", komanda);
+      logirajLinijuESP(F("Izvrsena CMD naredba: "), komanda);
     } else {
       espSerijskiPort.println(F("ERR:CMD_BUSY"));
-      logirajLinijuESP("CMD naredba odbijena jer je toranjski sat zauzet: ", komanda);
+      logirajLinijuESP(F("CMD naredba odbijena jer je toranjski sat zauzet: "), komanda);
     }
 
     resetirajUlazniBuffer();
@@ -847,7 +850,7 @@ static void obradiESPRedak() {
     return;
   }
 
-    logirajLinijuESP("Mrezni most log: ", ulazniBuffer);
+    logirajLinijuESP(F("Mrezni most log: "), ulazniBuffer);
   resetirajUlazniBuffer();
 }
 

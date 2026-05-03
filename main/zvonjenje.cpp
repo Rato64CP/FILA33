@@ -15,6 +15,7 @@
 static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
 static const unsigned long INTERVAL_TREPTANJA_LAMPICE_INERCIJE_MS = 500UL;
+static const unsigned long DODATNI_RAD_BELL2_BEZ_KOCNICE_MS = 30000UL;
 
 static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
   PIN_ZVONO_1,
@@ -186,6 +187,17 @@ static void ukljuciZvonoIzRucneSklopke(int zvono) {
   dozvoliPaljenjeZvonaIzRucneSklopke = false;
 }
 
+static void zakaziProduzeniRadZvona(int zvono, unsigned long dodatnoTrajanjeMs) {
+  const int indeks = zvono - 1;
+  if (!jeValjanIndeksZvona(indeks) || !zvona.aktivan[indeks] || dodatnoTrajanjeMs == 0UL) {
+    return;
+  }
+
+  zvona.start_ms[indeks] = millis();
+  zvona.duration_ms[indeks] = dodatnoTrajanjeMs;
+  osvjeziLampicuZvona(indeks, zvona.start_ms[indeks]);
+}
+
 // ==================== PUBLIC API ====================
 
 void ukljuciZvono(int zvono) {
@@ -198,6 +210,9 @@ void ukljuciZvono(int zvono) {
     return;
   }
 
+  // Fizicke sklopke zvona moraju ostati upotrebljive i kad RTC/NTP jos nije
+  // potvrdio vrijeme. Time lokalni zvonar i dalje moze rucno ukljuciti ili
+  // iskljuciti zvono, dok automatski i daljinski izvori cekaju potvrdu vremena.
   if (!jeVrijemePotvrdjenoZaAutomatiku() && !dozvoliPaljenjeZvonaIzRucneSklopke) {
     posaljiPCLog(F("Zvona: automatsko ili daljinsko paljenje blokirano dok vrijeme nije potvrdeno"));
     return;
@@ -302,6 +317,19 @@ void aktivirajZvonjenjeNaTrajanje(int zvono, unsigned long trajanjeMs) {
 
 void deaktivirajZvonjenje(int zvono) {
   iskljuciZvono(zvono);
+}
+
+void iskljuciObaZvonaSinkronizirano() {
+  const bool obaZvonaAktivna = jeZvonoAktivno(1) && jeZvonoAktivno(2);
+  if (!jeKocnicaZvonaOmogucena() && obaZvonaAktivna) {
+    iskljuciZvono(1);
+    zakaziProduzeniRadZvona(2, DODATNI_RAD_BELL2_BEZ_KOCNICE_MS);
+    posaljiPCLog(F("Zvona: bez kocnice ostavljam ZVONO2 jos 30 s nakon zajednickog gasenja"));
+    return;
+  }
+
+  iskljuciZvono(1);
+  iskljuciZvono(2);
 }
 
 static void primijeniEfektivnuGlobalnuBlokaduZvona(bool prethodnoAktivna) {

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <RTClib.h>
 #include <stdio.h>
 #include "okretna_ploca.h"
@@ -18,8 +19,9 @@ namespace {
 constexpr int BROJ_POZICIJA = 64;
 constexpr int POZICIJA_NOCI = 63;
 constexpr int MINUTNI_BLOK = 15;
-constexpr uint8_t DEBOUNCE_ULAZA_PLOCE_MS = 30;
+constexpr uint8_t DEBOUNCE_ULAZA_PLOCE_MS = 75;
 constexpr uint8_t SEKUNDA_CITANJA_CAVALA = 25;
+constexpr unsigned long RAZLIKA_GASENJA_ZVONA_BEZ_KOCNICE_MS = 30000UL;
 
 constexpr uint8_t FAZA_STABILNO = 0;
 constexpr uint8_t FAZA_PRVI_RELEJ = 1;
@@ -254,22 +256,22 @@ bool jeCavaoAktivan(const bool ulazi[BROJ_ULAZA_PLOCE],
 
 void logirajStanjaCavala(const bool ulazi[BROJ_ULAZA_PLOCE], bool jeNedjelja, uint8_t brojMjestaZaCavle) {
   char log[96];
-  int duljina = snprintf(log, sizeof(log), "Cavli ploce:");
+  int duljina = snprintf_P(log, sizeof(log), PSTR("Cavli ploce:"));
   for (uint8_t i = 0; i < brojMjestaZaCavle && i < BROJ_ULAZA_PLOCE; ++i) {
     if (duljina < 0 || duljina >= static_cast<int>(sizeof(log))) {
       break;
     }
-    duljina += snprintf(log + duljina,
-                        sizeof(log) - static_cast<size_t>(duljina),
-                        " %u=%s",
-                        i + 1,
-                        ulazi[i] ? "ON" : "OFF");
+    duljina += snprintf_P(log + duljina,
+                          sizeof(log) - static_cast<size_t>(duljina),
+                          PSTR(" %u=%s"),
+                          i + 1,
+                          ulazi[i] ? "ON" : "OFF");
   }
   if (duljina >= 0 && duljina < static_cast<int>(sizeof(log))) {
-    snprintf(log + duljina,
-             sizeof(log) - static_cast<size_t>(duljina),
-             "%s",
-             jeNedjelja ? " | nedjelja" : " | pon-sub");
+    snprintf_P(log + duljina,
+               sizeof(log) - static_cast<size_t>(duljina),
+               PSTR("%s"),
+               jeNedjelja ? " | nedjelja" : " | pon-sub");
   }
   posaljiPCLog(log);
 }
@@ -307,11 +309,11 @@ void otkaziZakazanoZvonoZbogIzvadenogCavla(int indeks, uint8_t cavao) {
   autoZvonoKraj[indeks] = 0;
 
   char log[64];
-  snprintf(log,
-           sizeof(log),
-           "Cavli: cavao %u izvaden, zakazano ZVONO%u otkazano",
-           cavao,
-           indeks + 1);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Cavli: cavao %u izvaden, zakazano ZVONO%u otkazano"),
+             cavao,
+             indeks + 1);
   posaljiPCLog(log);
 }
 
@@ -327,11 +329,11 @@ void zaustaviAktivnoZvonoZbogIzvadenogCavla(int indeks, uint8_t cavao) {
   autoZvonoKraj[indeks] = 0;
 
   char log[64];
-  snprintf(log,
-           sizeof(log),
-           "Cavli: cavao %u izvaden, ZVONO%u zaustavljeno",
-           cavao,
-           indeks + 1);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Cavli: cavao %u izvaden, ZVONO%u zaustavljeno"),
+             cavao,
+             indeks + 1);
   posaljiPCLog(log);
 }
 
@@ -475,20 +477,38 @@ void obradiUlazePloce(const DateTime& now,
   const unsigned long odgodaSlavljenjaMs =
       static_cast<unsigned long>(dohvatiOdgoduSlavljenjaSekunde()) * 1000UL;
   const bool slavljenjeAktivno = jeCavaoAktivan(ulazi, brojMjestaZaCavle, cavaoSlavljenja);
+  bool aktivnaZvonaNaCavlima[BROJ_ZVONA_MAX] = {false, false};
+
+  for (uint8_t zvono = 1; zvono <= brojZvona && zvono <= BROJ_ZVONA_MAX; ++zvono) {
+    const uint8_t cavao = jeNedjelja ? dohvatiCavaoNedjeljaZaZvono(zvono)
+                                     : dohvatiCavaoRadniZaZvono(zvono);
+    aktivnaZvonaNaCavlima[zvono - 1] = jeCavaoAktivan(ulazi, brojMjestaZaCavle, cavao);
+  }
+
+  const bool obaZvonaNaPlociAktivna =
+      aktivnaZvonaNaCavlima[0] && aktivnaZvonaNaCavlima[1] && !jeKocnicaZvonaOmogucena();
 
   bool imaZvono = false;
   for (uint8_t zvono = 1; zvono <= brojZvona && zvono <= BROJ_ZVONA_MAX; ++zvono) {
     const uint8_t cavao = jeNedjelja ? dohvatiCavaoNedjeljaZaZvono(zvono)
                                      : dohvatiCavaoRadniZaZvono(zvono);
-    if (!jeCavaoAktivan(ulazi, brojMjestaZaCavle, cavao)) {
+    if (!aktivnaZvonaNaCavlima[zvono - 1]) {
       continue;
     }
 
-    if (protekloOdTerminaMs >= trajanjeZvona) {
+    unsigned long trajanjeZvonaZaOvoZvono = trajanjeZvona;
+    if (obaZvonaNaPlociAktivna && zvono == 1) {
+      trajanjeZvonaZaOvoZvono =
+          (trajanjeZvona > RAZLIKA_GASENJA_ZVONA_BEZ_KOCNICE_MS)
+              ? (trajanjeZvona - RAZLIKA_GASENJA_ZVONA_BEZ_KOCNICE_MS)
+              : 0UL;
+    }
+
+    if (trajanjeZvonaZaOvoZvono == 0UL || protekloOdTerminaMs >= trajanjeZvonaZaOvoZvono) {
       continue;
     }
 
-    const unsigned long preostaloTrajanjeZvona = trajanjeZvona - protekloOdTerminaMs;
+    const unsigned long preostaloTrajanjeZvona = trajanjeZvonaZaOvoZvono - protekloOdTerminaMs;
 
     pokreniAutomatskoZvonjenje(zvono - 1,
                                sadaMs,
@@ -497,7 +517,8 @@ void obradiUlazePloce(const DateTime& now,
     if (autoZvonoAktivno[zvono - 1] || autoZvonoZakazano[zvono - 1]) {
       imaZvono = true;
       char bellLog[48];
-      snprintf(bellLog, sizeof(bellLog), "Cavli: aktiviran ZVONO%u preko cavla %u", zvono, cavao);
+      snprintf_P(
+          bellLog, sizeof(bellLog), PSTR("Cavli: aktiviran ZVONO%u preko cavla %u"), zvono, cavao);
       posaljiPCLog(bellLog);
     }
   }

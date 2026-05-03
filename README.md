@@ -8,6 +8,8 @@
 - upravlja kazaljkama sata uz korekciju i sinkronizaciju
 - upravlja okretnom plocom kroz dvofazne korake i citanje cavala
 - vodi zvona, cekice, slavljenje i mrtvacko
+- podrzava odvojenu inerciju `INR1` i `INR2` za dva razlicita zvona
+- podrzava opciju `K:0/1` za rad s kocnicom zvona ili bez nje
 - uvodi termalnu zastitu slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - podrzava blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - cuva postavke i kriticno stanje u `24C32 EEPROM-u`
@@ -16,6 +18,7 @@
 - prati zdravlje `RTC` i `EEPROM` podsustava i prelazi u ograniceni rad kad kvar postane ponovljiv
 - pamti latched kvar `EEPROM-a` do rucne potvrde operatera
 - podrzava jedinstveni tihi rezim za uskrsnu tisinu i rucni kip-prekidac
+- podrzava `UPS mod` koji bez mreze ostavlja logiku toranjskog sata zivom, ali blokira izlaze prema kazaljkama, zvonima i cekicima
 
 ## 🧭 Arhitektura
 
@@ -52,6 +55,7 @@
 - `main/otkucavanje.*` - cekici, satno i polusatno otkucavanje
 - `main/slavljenje_mrtvacko.*` - posebni nacini rada cekica i thumbwheel timer mrtvackog
 - `main/prekidac_tisine.*` - jedinstveni tihi rezim i lampica tihog moda
+- `main/ups_nadzor.*` - nadzor mreznog napona i `UPS mod`
 - `main/menu_system.*`, `main/tipke.*`, `main/lcd_display.*` - lokalni LCD izbornik i unos
 - `main/postavke.*` - citanje, validacija i spremanje postavki
 - `main/unified_motion_state.*` - zajednicko stanje kazaljki i ploce
@@ -93,6 +97,7 @@
 - jedinstveni tihi rezim moze se aktivirati uskrsnom tisinom ili rucnim kip-prekidacem
 - lampica tihog moda svijetli samo kad je stvarno aktivan konacni tihi rezim
 - tihi rezim blokira zvona, cekice, slavljenje i mrtvacko, ali ne zaustavlja kazaljke ni okretnu plocu
+- `UPS mod` pali lampicu tihog moda i na LCD-u prikazuje `NEMA STRUJE!` dok mehanika toranjskog sata radi samo s pomocnog napajanja
 - BAT / tihi sati iz postavki blokiraju samo otkucavanje
 - sunceva automatika i cavli ploce rade i tijekom BAT raspona
 - jutarnje suncevo zvono moze ranije otvoriti otkucavanje prije kraja BAT raspona
@@ -110,6 +115,7 @@
 - kvar `EEPROM-a`: aktivira se latched fault i periodicni EEPROM zapisi i health-checkovi se zaustavljaju do potvrde
 - lampica zvona tijekom inercije treperi kako bi operater znao da cekice jos ne treba dirati
 - lampica slavljenja treperi dok traje termalna pauza, iako slavljenje ostaje aktivno
+- ako je `UPS mod` aktivan i nestane mreze, glavni LCD umjesto datuma prikazuje `NEMA STRUJE!`
 
 ## 🔧 Hardver
 
@@ -122,8 +128,9 @@
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
 - relejni izlazi za kazaljke, plocu, zvona i cekice
-- 4x5 matricna tipkovnica za lokalni izbornik i servisne funkcije; sve promjene vrijednosti idu preko strelica
+- 6 direktnih tipki za lokalni izbornik i servisne funkcije (`GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`)
 - lokalni servisni sloj koristi `ENT / SELECT` i za otkljucavanje `safe mode-a` te potvrdu latched kvarova
+- lokalni meni `Sustav` sada uredjuje `UPS mod`, `K:0/1`, `INR1` i `INR2`
 
 ## 📚 Dodatni README
 

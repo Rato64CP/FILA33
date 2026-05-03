@@ -68,7 +68,7 @@ bool istaOcitavanja(const BCDOcitavanje& lhs, const BCDOcitavanje& rhs) {
 }
 
 void prijaviStabilnoOcitavanje(const BCDOcitavanje& ocitanje) {
-  char log[80];
+  char log[72];
   snprintf_P(log, sizeof(log),
              PSTR("Mrtvacko thumbwheel: stabilno ocitanje %u%u za timer mrtvackog zvona"),
              ocitanje.desetice,
@@ -77,7 +77,7 @@ void prijaviStabilnoOcitavanje(const BCDOcitavanje& ocitanje) {
 }
 
 void prijaviNevaljanoOcitavanje(const BCDOcitavanje& ocitanje) {
-  char log[112];
+  char log[108];
   snprintf_P(log, sizeof(log),
              PSTR("Mrtvacko thumbwheel: nevaljana BCD kombinacija D=%u J=%u - zadrzavam zadnji stabilni timer mrtvackog zvona"),
              ocitanje.desetice,

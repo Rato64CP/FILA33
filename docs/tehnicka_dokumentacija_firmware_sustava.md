@@ -139,6 +139,8 @@ Cavli se ne citaju tijekom pomaka ploce. Citanje je dozvoljeno samo kad:
 - ploca je u `FAZA_STABILNO`
 - ploca je na ciljnoj poziciji za aktualni termin
 
+Za ulaze cavala koristi se sporiji i robusniji debounce od `75 ms`, jer se mehanicki polozaj cavla mijenja rijetko, ali se zeli veca otpornost na smetnje i podrhtavanje kontakta.
+
 Referentni trenutak citanja je pomaknut na **minutu nakon logickog termina**, u sekundi `:25`.
 
 Primjer sa zadanim pocetkom:
@@ -146,6 +148,12 @@ Primjer sa zadanim pocetkom:
 - slot `05:14` cita se u `05:15:25`
 - slot `05:29` cita se u `05:30:25`
 - slot `05:44` cita se u `05:45:25`
+
+Peti cavao nije dodatno zvono, nego poseban okidac za `SLAVLJENJE`. Kad je aktivan:
+- ne pali releje izravno
+- zakazuje automatski start slavljenja
+- ceka kraj aktivnih zvona, inercije i eventualnog otkucavanja prije stvarnog starta
+- moze otkazati jos nezapoceto automatsko slavljenje ako se cavao ukloni prije starta
 
 ### Sinkronizacija ploce nakon nestanka napajanja
 Kod boota sustav ucitava zadnje poznato stanje iz EEPROM-a. Nakon toga u runtime-u:
@@ -166,6 +174,8 @@ Time se izbjegava agresivno premotavanje ploce.
 Za redovno otkucavanje sekvenca koristi:
 - impuls cekica iz postavki, ogranicen sigurnosnim limitom
 - definirane pauze izmedu udaraca
+
+Start pune i polovine ure sada se, kad je `RTC SQW` dostupan, poravnava na stvarnu granicu sekunde. Ako `SQW` privremeno nije dostupan, ostaje fallback na dosadasnje minutno okidanje kako toranjski sat ne bi izgubio funkciju.
 
 ### Posebni nacini rada cekica
 - `slavljenje 1`, `mrtvacko 1` i redovno otkucavanje i dalje koriste zajednicki impuls iz postavki
@@ -215,6 +225,21 @@ Postoje fizicke sklopke za `ZVONO 1` i `ZVONO 2`. Kada je rucni override aktivan
 ### Inercija
 Nakon ukljucivanja ili iskljucivanja zvona aktivira se inercija. Vrijednost se zasebno postavlja za `Zvono 1` i `Zvono 2` kroz meni `Sustav`, a u tom periodu se blokiraju udari cekica kako se ne bi preklapala mehanicka gibanja.
 
+### Kocnica zvona `K:0/1`
+Meni `Sustav` sada ima i stavku `K:0/1`:
+- `K=1` znaci da se koristi kocnica i ponasanje ostaje jednako kao u starijim verzijama firmwarea
+- `K=0` znaci da se radi bez kocnice i tada firmware svjesno razdvaja gasenje dvaju zvona
+
+Kad `K=0` i oba zvona pokrece okretna ploca:
+- `Zvono 1` gasi se `30 s` prije `Zvona 2`
+- `Zvono 2` zadrzava puni raspored trajanja za taj termin
+
+Kad `K=0` i vanjski API posalje zajednicku naredbu `GASI_SVE` dok oba zvona rade:
+- `Zvono 1` gasi se odmah
+- `Zvono 2` smije ostati jos `30 s`
+
+Pojedinacne naredbe `ZVONO1_OFF` i `ZVONO2_OFF` i dalje ostaju neposredne.
+
 ### Tihi rezim i zvona
 Kad je aktivan tihi rezim:
 - automatska zvonjenja ne rade
@@ -250,6 +275,14 @@ Firmware sam vodi `CET/CEST` status, sprema ga u EEPROM i automatski primjenjuje
 - [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp): fizicko skeniranje tipki i pretvorba u `KeyEvent`
 - [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp): stanje UI-a, ekrani, navigacija i poziv poslovnih funkcija
 - [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp): trajna pohrana, validacija, fallback na default i zapis u EEPROM
+
+Lokalne tipke vise ne koriste matricnu tipkovnicu. Aktivni firmware toranjskog sata sada koristi 6 direktnih `INPUT_PULLUP` ulaza:
+- `GORE`
+- `DOLJE`
+- `LIJEVO`
+- `DESNO`
+- `DA`
+- `NE`
 
 ### Kako se postavke mijenjaju i spremaju
 1. korisnik promijeni vrijednost kroz meni
@@ -301,6 +334,7 @@ Meni `Sustav` trenutno uredjuje:
 - `Logiranje`
 - `RS485`
 - `UPS mod`
+- `K` - koristenje kocnice zvona
 - `Impuls cekica`
 - `INR1` - vrijeme smirivanja za `Zvono 1`
 - `INR2` - vrijeme smirivanja za `Zvono 2`
@@ -314,6 +348,14 @@ Meni `Sustav` trenutno uredjuje:
 
 Kad se mreza vrati, blokade se skidaju i kazaljke nastavljaju redovno automatsko poravnanje prema stvarnom vremenu.
 
+### LCD detalji glavnog prikaza
+Glavni LCD prikaz je takoder uskladen s novijim ponasanjem firmwarea:
+- oznaka izvora vremena prikazuje `---` umjesto starog `RTC`
+- tijekom `UPS moda` bez mreze donji red umjesto datuma prikazuje `NEMA STRUJE!`
+- nazivi dana prikazuju se velikim slovima
+- ponedjeljak se skracuje na `PON.` kako bi datum uredno stao u `16x2`
+- cetvrtak koristi prilagodeni LCD znak za `Č`, a isti znak koristi se i u poruci `MRTVAČKO`
+
 ### EEPROM verzioniranje i validacija
 Postavke imaju trostruku zastitu:
 - potpis
@@ -321,6 +363,10 @@ Postavke imaju trostruku zastitu:
 - checksum cijele strukture
 
 Ako validacija ne prode, sustav se vraca na zadane vrijednosti i ponovno ih snima.
+
+Nove zastavice `UPS mod` i `K:0/1` ne uvode novi EEPROM layout, nego koriste slobodne bitove u postojecem polju postavki. Time stari sustavi zadrzavaju kompatibilan boot i zadano ponasanje:
+- stari zapis bez nove zastavice i dalje znaci `K=1`
+- `UPS mod` ostaje eksplicitno opt-in postavka
 
 ---
 
@@ -402,3 +448,4 @@ Time se izbjegava nepotrebna mikrokorekcija usred aktivnog mehanickog ciklusa i 
 - [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp) ocekuje da su pocetak i kraj prozora rada poravnani na `15`-minutne blokove
 - kod promjena layouta obavezno zajedno provjeriti [main/eeprom_konstante.h](C:/Users/Rato/Documents/GitHub/FILA33/main/eeprom_konstante.h), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp) i [main/power_recovery.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp)
 - rucni override zvona ima prioritet nad automatikom; pri dijagnostici zasto zvono ne staje prvo provjeriti stanje fizickih sklopki i tihi rezim
+- zadnji SRAM tuning prebacio je vecinu fiksnih log stringova na `snprintf_P(..., PSTR(...))`, smanjio velike buffere u `main/esp_serial.cpp` i spustio globalni SRAM otisak na oko `41%` uz oko `4815 B` slobodne rezerve za lokalne buffere i stack

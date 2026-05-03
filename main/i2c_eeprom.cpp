@@ -10,7 +10,6 @@ constexpr uint8_t EEPROM_ADRESA = 0x57;           // Tipicna adresa 24C32 na RTC
 constexpr size_t VELICINA_STRANICE = 32;          // 24C32 zapisuje po 32 bajta
 constexpr size_t MAX_I2C_PODATAKA_PO_PAKETU = 30; // AVR Wire buffer: 32 bajta - 2 bajta adrese
 constexpr size_t UKUPNI_KAPACITET = 4096;         // 32 kbit = 4096 bajtova
-constexpr unsigned long CEKANJE_ZAPISA_MS = 5UL;  // Tipicno vrijeme internog upisa nakon page write
 constexpr uint8_t BROJ_POKUSAJA_I2C = 3;
 constexpr unsigned long CEKANJE_IZMEDU_POKUSAJA_MS = 2UL;
 constexpr unsigned long TIMEOUT_ACK_POLLING_ZAPISA_MS = 25UL;
@@ -158,7 +157,6 @@ bool zapisiBlokUzPokusaje(int adresa, const uint8_t* izvor, size_t duljina) {
       continue;
     }
 
-    kratkoCekajUzWatchdog(CEKANJE_ZAPISA_MS);
     if (!cekajDovrsetakInternogZapisa()) {
       oznaciI2CGresku();
       kratkoCekajUzWatchdog(CEKANJE_IZMEDU_POKUSAJA_MS);

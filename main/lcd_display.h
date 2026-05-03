@@ -9,6 +9,8 @@ extern LiquidCrystal_I2C lcd;
 void inicijalizirajLCD();
 void prikaziSat();
 void prikaziPoruku(const char* redak1, const char* redak2 = "");
+void prikaziPoruku(const __FlashStringHelper* redak1,
+                   const __FlashStringHelper* redak2 = nullptr);
 void prikaziZakljucaniSustav();
 void prisiliOsvjezavanjeGlavnogPrikazaLCD();
 void postaviWiFiStatus(bool aktivan);

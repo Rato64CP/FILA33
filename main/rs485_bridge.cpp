@@ -1,5 +1,6 @@
 // rs485_bridge.cpp - Robusni RS485 master za toranjski sat
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,7 +154,7 @@ static bool posaljiRs485Okvir(const char* okvir) {
   prebaciRS485UPrijem();
 
   char log[96];
-  snprintf(log, sizeof(log), "RS485 TX: %s", okvir);
+  snprintf_P(log, sizeof(log), PSTR("RS485 TX: %s"), okvir);
   posaljiPCLog(log);
   return true;
 }
@@ -174,12 +175,12 @@ static bool pripremiPendingKomandu(const char* sadrzaj, bool heartbeat) {
 
   char osnovniPayload[RS485_OKVIR_MAX];
   const int osnovniPayloadDuljina =
-      snprintf(osnovniPayload,
-               sizeof(osnovniPayload),
-               "ID:%02u|CMD:%s|SEQ:%u",
-               static_cast<unsigned>(RS485_CILJNI_ID),
-               sadrzaj,
-               static_cast<unsigned>(rs485SljedeciSeq));
+      snprintf_P(osnovniPayload,
+                 sizeof(osnovniPayload),
+                 PSTR("ID:%02u|CMD:%s|SEQ:%u"),
+                 static_cast<unsigned>(RS485_CILJNI_ID),
+                 sadrzaj,
+                 static_cast<unsigned>(rs485SljedeciSeq));
   if (osnovniPayloadDuljina <= 0 ||
       static_cast<size_t>(osnovniPayloadDuljina) >= sizeof(osnovniPayload)) {
     posaljiPCLog(F("RS485: naredba je preduga za konfigurirani okvir"));
@@ -188,11 +189,11 @@ static bool pripremiPendingKomandu(const char* sadrzaj, bool heartbeat) {
 
   const uint16_t checksum = izracunajRs485Checksum(osnovniPayload);
   const int okvirDuljina =
-      snprintf(pendingKomanda.okvir,
-               sizeof(pendingKomanda.okvir),
-               "<%s|CRC:%u>",
-               osnovniPayload,
-               static_cast<unsigned>(checksum));
+      snprintf_P(pendingKomanda.okvir,
+                 sizeof(pendingKomanda.okvir),
+                 PSTR("<%s|CRC:%u>"),
+                 osnovniPayload,
+                 static_cast<unsigned>(checksum));
   if (okvirDuljina <= 0 ||
       static_cast<size_t>(okvirDuljina) >= sizeof(pendingKomanda.okvir)) {
     posaljiPCLog(F("RS485: okvir je predug za slanje"));
@@ -337,12 +338,12 @@ static void obradiRs485Poruku(const Rs485PrimljenaPoruka& poruka) {
   }
 
   char log[96];
-  snprintf(log,
-           sizeof(log),
-           "RS485 RX valjano: vrsta=%u seq=%u sadrzaj=%s",
-           static_cast<unsigned>(poruka.vrsta),
-           static_cast<unsigned>(poruka.seq),
-           poruka.sadrzaj);
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("RS485 RX valjano: vrsta=%u seq=%u sadrzaj=%s"),
+             static_cast<unsigned>(poruka.vrsta),
+             static_cast<unsigned>(poruka.seq),
+             poruka.sadrzaj);
   posaljiPCLog(log);
 
   if (poruka.vrsta == RS485_PORUKA_NAK) {
@@ -396,7 +397,7 @@ static void obradiRS485Redak() {
   Rs485PrimljenaPoruka poruka{};
   if (!parsirajRs485Poruku(rs485UlazniBuffer, poruka)) {
     char log[96];
-    snprintf(log, sizeof(log), "RS485 RX nevaljano: %s", rs485UlazniBuffer);
+    snprintf_P(log, sizeof(log), PSTR("RS485 RX nevaljano: %s"), rs485UlazniBuffer);
     posaljiPCLog(log);
     resetirajRS485UlazniBuffer();
     return;
@@ -418,12 +419,12 @@ static void obradiIstekPendingKomande() {
 
   if (pendingKomanda.brojPokusaja < RS485_MAKS_PONAVLJANJA) {
     char log[96];
-    snprintf(log,
-             sizeof(log),
-             "RS485: nema odgovora za %s, ponavljam pokusaj %u/%u",
-             pendingKomanda.sadrzaj,
-             static_cast<unsigned>(pendingKomanda.brojPokusaja + 1),
-             static_cast<unsigned>(RS485_MAKS_PONAVLJANJA));
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("RS485: nema odgovora za %s, ponavljam pokusaj %u/%u"),
+               pendingKomanda.sadrzaj,
+               static_cast<unsigned>(pendingKomanda.brojPokusaja + 1),
+               static_cast<unsigned>(RS485_MAKS_PONAVLJANJA));
     posaljiPCLog(log);
     ponovnoPosaljiPendingKomandu();
     return;
@@ -433,11 +434,11 @@ static void obradiIstekPendingKomande() {
     ++rs485NeuspjeliHeartbeatovi;
 
     char log[96];
-    snprintf(log,
-             sizeof(log),
-             "RS485: heartbeat nije potvrden (%u/%u)",
-             static_cast<unsigned>(rs485NeuspjeliHeartbeatovi),
-             static_cast<unsigned>(RS485_MAKS_UZASTOPNIH_NEUSPJELIH_HEARTBEATOVA));
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("RS485: heartbeat nije potvrden (%u/%u)"),
+               static_cast<unsigned>(rs485NeuspjeliHeartbeatovi),
+               static_cast<unsigned>(RS485_MAKS_UZASTOPNIH_NEUSPJELIH_HEARTBEATOVA));
     posaljiPCLog(log);
 
     if (rs485NeuspjeliHeartbeatovi >= RS485_MAKS_UZASTOPNIH_NEUSPJELIH_HEARTBEATOVA) {

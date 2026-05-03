@@ -46,21 +46,16 @@
 #define PIN_SDA                       20  // I2C SDA - serial data
 #define PIN_SCL                       21  // I2C SCL - serial clock
 
-// ==================== MATRICNA TIPKOVNICA 4x5 ====================
-// Lokalni LCD izbornik toranjskog sata koristi matricu od 20 tipki s 9 vodova.
-// Preporuceno mapiranje logickih naredbi definira main/tipke.cpp:
-// strelice = navigacija, Ent = SELECT, ESC = BACK.
-// Brojcane tipke matrice vise nisu dio aktivnog firmware toka toranjskog sata.
+// ==================== LOKALNE TIPKE IZBORNIKA ====================
+// Lokalni LCD izbornik toranjskog sata koristi 6 direktnih tipki.
+// Sve tipke rade kao INPUT_PULLUP i aktiviraju se spajanjem na GND.
 
-#define PIN_KEYPAD_ROW_0              3   // Vod 0 matrice
-#define PIN_KEYPAD_ROW_1              12  // Vod 1 matrice - testni premjestaj
-#define PIN_KEYPAD_ROW_2              5   // Vod 2 matrice
-#define PIN_KEYPAD_ROW_3              16  // Vod 3 matrice - testni premjestaj
-#define PIN_KEYPAD_COL_0              7   // Vod 4 matrice
-#define PIN_KEYPAD_COL_1              8   // Vod 5 matrice
-#define PIN_KEYPAD_COL_2              9   // Vod 6 matrice
-#define PIN_KEYPAD_COL_3              10  // Vod 7 matrice
-#define PIN_KEYPAD_COL_4              11  // Vod 8 matrice
+#define PIN_TIPKA_GORE                7   // Navigacija gore (LOW=pritisnuto)
+#define PIN_TIPKA_DOLJE               8   // Navigacija dolje (LOW=pritisnuto)
+#define PIN_TIPKA_LIJEVO              9   // Navigacija lijevo (LOW=pritisnuto)
+#define PIN_TIPKA_DESNO               10  // Navigacija desno (LOW=pritisnuto)
+#define PIN_TIPKA_DA                  11  // Potvrda / SELECT (LOW=pritisnuto)
+#define PIN_TIPKA_NE                  12  // Povratak / BACK (LOW=pritisnuto)
 
 // ==================== SUNCEVA AUTOMATIKA - LOKALNE TIPKE I LAMPICE ====================
 // Dvije fizicke tipke ukljucuju/iskljucuju jutarnju i vecernju automatiku,

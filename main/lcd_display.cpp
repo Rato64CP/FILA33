@@ -67,13 +67,24 @@ static unsigned long last_blink_toggle = 0;
 static const unsigned long BLINK_INTERVAL_MS = 200;
 static const uint8_t LCD_NOCNI_REZIM_OD_SAT = 0;
 static const uint8_t LCD_NOCNI_REZIM_DO_SAT = 5;
-static const char LCD_DAN_NED[] PROGMEM = "NED";
-static const char LCD_DAN_PON[] PROGMEM = "PON";
-static const char LCD_DAN_UTO[] PROGMEM = "UTO";
-static const char LCD_DAN_SRI[] PROGMEM = "SRI";
-static const char LCD_DAN_CET[] PROGMEM = "CET";
-static const char LCD_DAN_PET[] PROGMEM = "PET";
-static const char LCD_DAN_SUB[] PROGMEM = "SUB";
+static const uint8_t LCD_ZNAK_VELIKO_C_KVACICA = 1;
+static const uint8_t LCD_GLYPH_VELIKO_C_KVACICA[8] = {
+  B01010,
+  B00100,
+  B01110,
+  B10000,
+  B10000,
+  B10000,
+  B01110,
+  B00000
+};
+static const char LCD_DAN_NED[] PROGMEM = "NEDJELJA";
+static const char LCD_DAN_PON[] PROGMEM = "PON.";
+static const char LCD_DAN_UTO[] PROGMEM = "UTORAK";
+static const char LCD_DAN_SRI[] PROGMEM = "SRIJEDA";
+static const char LCD_DAN_CET[] PROGMEM = "\x01ETVRTAK";
+static const char LCD_DAN_PET[] PROGMEM = "PETAK";
+static const char LCD_DAN_SUB[] PROGMEM = "SUBOTA";
 static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
   LCD_DAN_NED,
   LCD_DAN_PON,
@@ -90,7 +101,7 @@ static const char LCD_PORUKA_OTKUCAJ[] PROGMEM = "Otkucavanje...  ";
 static const char LCD_PORUKA_ERR_RTC[] PROGMEM = "ERR:RTC baterija";
 static const char LCD_PORUKA_ERR_EEPROM[] PROGMEM = "ERROR: EEPROM   ";
 static const char LCD_PORUKA_SLAVLJENJE[] PROGMEM = "SLAVLJENJE      ";
-static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVACKO ZVONO  ";
+static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVA\x01KO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 static const char LCD_PORUKA_RTC_DEGRADED_1[] PROGMEM = "RTC OGRANICEN RAD";
 static const char LCD_PORUKA_RTC_DEGRADED_2[] PROGMEM = "CEKAM OPORAVAK  ";
@@ -203,7 +214,7 @@ static bool trebaPrikazatiDugiHodSata(int& memoriraneMinute) {
 static void formatirajHodSata(int memoriraneMinute, char* odrediste, size_t velicina) {
   const int sat12 = ((memoriraneMinute / 60) % 12 == 0) ? 12 : ((memoriraneMinute / 60) % 12);
   const int minuta = memoriraneMinute % 60;
-  snprintf(odrediste, velicina, "Hod sata: %02d:%02d", sat12, minuta);
+  snprintf_P(odrediste, velicina, PSTR("Hod sata: %02d:%02d"), sat12, minuta);
 }
 
 static bool jeSustavAktivanNaLCD() {
@@ -246,6 +257,10 @@ void inicijalizirajLCD() {
 
   lcd.backlight();
   delay(50);
+
+  // Za toranjski sat koristimo samo jedan korisnicki znak kako bi CETVRTAK
+  // na LCD-u mogao imati pravo veliko slovo C s kvacicom.
+  lcd.createChar(LCD_ZNAK_VELIKO_C_KVACICA, const_cast<uint8_t*>(LCD_GLYPH_VELIKO_C_KVACICA));
 
   lcd.clear();
   delay(50);
@@ -297,13 +312,13 @@ static void build_line1() {
   const char oznaka_dana = dohvatiOznakuDanaZaCavle(now);
   const char oznaka_aktivnosti = jeSustavAktivanNaLCD() ? '*' : ' ';
 
-  snprintf(line1_buffer, sizeof(line1_buffer),
-           "%02d:%02d:%02d %s %c%c%c",
-           now.hour(), now.minute(), now.second(),
-           source_str,
-           oznaka_dana,
-           oznaka_aktivnosti,
-           wifi_status);
+  snprintf_P(line1_buffer, sizeof(line1_buffer),
+             PSTR("%02d:%02d:%02d %s %c%c%c"),
+             now.hour(), now.minute(), now.second(),
+             source_str,
+             oznaka_dana,
+             oznaka_aktivnosti,
+             wifi_status);
   line1_buffer[16] = '\0';
 }
 
@@ -312,16 +327,24 @@ static void build_date_string() {
   uint8_t day_of_week = now.dayOfTheWeek();
   if (day_of_week > 6) day_of_week = 0;
 
-  char day_name[4];
-  char datum_poruka[16];
+  char day_name[13];
+  char datum_poruka[17];
   FlashTekst::kopirajLiteral(day_name, sizeof(day_name), dohvatiNazivDanaIzFlash(day_of_week));
 
-  snprintf(datum_poruka, sizeof(datum_poruka),
-           "%s %02d.%02d.%04d",
-           day_name,
-           now.day(),
-           now.month(),
-           now.year());
+  if (day_of_week == 1) {
+    snprintf_P(datum_poruka, sizeof(datum_poruka),
+               PSTR("%s %02d.%02d.%04d"),
+               day_name,
+               now.day(),
+               now.month(),
+               now.year());
+  } else {
+    snprintf_P(datum_poruka, sizeof(datum_poruka),
+               PSTR("%s %02d.%02d."),
+               day_name,
+               now.day(),
+               now.month());
+  }
   pripremiDrugiRedakSaWiFiOznakom(datum_poruka);
 
   last_date_minute = now.minute();
@@ -677,6 +700,28 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
   if (redak2) {
     upisiDrugiRedakNaLCDSaWiFiOznakom(redak2);
   }
+}
+
+void prikaziPoruku(const __FlashStringHelper* redak1,
+                   const __FlashStringHelper* redak2) {
+  char redak1Buffer[17] = "";
+  char redak2Buffer[17] = "";
+
+  if (redak1 != nullptr) {
+    FlashTekst::kopirajLiteral(
+        redak1Buffer,
+        sizeof(redak1Buffer),
+        reinterpret_cast<PGM_P>(redak1));
+  }
+  if (redak2 != nullptr) {
+    FlashTekst::kopirajLiteral(
+        redak2Buffer,
+        sizeof(redak2Buffer),
+        reinterpret_cast<PGM_P>(redak2));
+  }
+
+  prikaziPoruku(redak1 != nullptr ? redak1Buffer : nullptr,
+                redak2 != nullptr ? redak2Buffer : "");
 }
 
 void prikaziZakljucaniSustav() {
