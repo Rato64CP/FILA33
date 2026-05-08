@@ -11,6 +11,7 @@ void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs);
 void zapocniSlavljenje();
 void zaustaviSlavljenje();
 bool jeSlavljenjeUTijeku();
+void preklopiSlavljenjeDaljinskimUpravljacem();
 
 // Mrtvacko koristi cekice izvan redovnog satnog otkucavanja.
 void zapocniMrtvacko();

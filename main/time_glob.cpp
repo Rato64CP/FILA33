@@ -69,6 +69,7 @@ static bool sumnjivaSinkronizacijaNaCekanju = false;
 static uint8_t sumnjiviIzvorSinkronizacije = IZ_RTC;
 static DateTime sumnjivoVrijemeSinkronizacije((uint32_t)0);
 static unsigned long sumnjivaSinkronizacijaMs = 0;
+static uint32_t zadnjiRtcTickSaSvjezimVremenom = 0;
 
 volatile uint32_t rtcSekundniBrojac = 0;
 
@@ -106,10 +107,12 @@ static void azurirajOznakuIzvora() {
   oznakaizvora[sizeof(oznakaizvora) - 1] = '\0';
 }
 
-static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
+static bool primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool imaEksplicitanDST,
                                   bool dstAktivanIzvori);
 static bool osvjeziTrenutnoVrijemeIzRtc();
+static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs);
+static void oznaciPovratakNaRTC();
 static void evidentirajRtcUspjeh();
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
 
@@ -437,9 +440,11 @@ static bool trebaJesenskiPomak(const DateTime& vrijeme) {
 
 static void primijeniDSTPomak(int pomakSekundi, bool noviDSTAktivan, const __FlashStringHelper* opis) {
   DateTime novoVrijeme(trenutnoVrijeme.unixtime() + pomakSekundi);
-  pokusajUpisatiVrijemeURtc(
-      novoVrijeme,
-      F("RTC: neuspjela DST korekcija, ostajem u degradiranom nacinu rada"));
+  if (!pokusajUpisatiVrijemeURtc(
+          novoVrijeme,
+          F("RTC: neuspjela DST korekcija, ostajem u degradiranom nacinu rada"))) {
+    return;
+  }
 
   trenutnoVrijeme = novoVrijeme;
   dstAktivan = noviDSTAktivan;
@@ -516,6 +521,33 @@ static void ucitajZadnjuSinkronizaciju() {
   azurirajOznakuIzvora();
 }
 
+static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs) {
+  if (!ntpSinkronizacijaZakazana || zakazaniNtpMs == 0) {
+    return false;
+  }
+
+  const unsigned long protekloMs = sadaMs - zakazaniNtpMs;
+  if (protekloMs < 1000UL) {
+    return false;
+  }
+
+  uint32_t protekliRtcTickovi = protekloMs / 1000UL;
+  if (protekliRtcTickovi == 0) {
+    protekliRtcTickovi = 1;
+  }
+
+  const DateTime vrijemeZaPrimjenu(
+      zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
+  if (!primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
+                             zakazanoNtpImaEksplicitanDST,
+                             zakazanoNtpDstAktivan)) {
+    return false;
+  }
+
+  posaljiPCLog(F("NTP: sinkronizacija primijenjena preko fallbacka bez RTC SQW impulsa"));
+  return true;
+}
+
 static bool osvjeziTrenutnoVrijemeIzRtc() {
   const DateTime rtcVrijeme = rtc.now();
   if (!jeVrijemeURasponuPouzdanosti(rtcVrijeme)) {
@@ -581,7 +613,7 @@ static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog) {
   posaljiPCLog(razlog);
 }
 
-DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
+static DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
   const int a = godina % 19;
   const int b = godina / 100;
   const int c = godina % 100;
@@ -674,28 +706,41 @@ DateTime dohvatiTrenutnoVrijeme() {
     bool ntpPrimijenjenNaOvomTicku = false;
     if (ntpSinkronizacijaZakazana) {
       uint32_t protekliRtcTickovi = 1;
-      if (zakazaniNtpRtcTick != 0 && lokalniRtcTick >= zakazaniNtpRtcTick) {
+      bool ntpSpremanZaPrimjenu = false;
+      // NTP sinkronizacija mora cekati stvarno sljedeci RTC SQW tik.
+      // Ako bismo prihvatili i isti rtcTick na kojem je sinkronizacija zakazana,
+      // toranjski sat bi u rubnom slucaju mogao zavrsiti jednu sekundu unaprijed.
+      if (zakazaniNtpRtcTick != 0 && lokalniRtcTick > zakazaniNtpRtcTick) {
         protekliRtcTickovi = lokalniRtcTick - zakazaniNtpRtcTick;
         if (protekliRtcTickovi == 0) {
           protekliRtcTickovi = 1;
         }
-      } else if (zakazaniNtpMs != 0) {
+        ntpSpremanZaPrimjenu = true;
+      } else if (zakazaniNtpRtcTick == 0 &&
+                 zakazaniNtpMs != 0 &&
+                 (sadaMs - zakazaniNtpMs) >= 1000UL) {
         protekliRtcTickovi = (sadaMs - zakazaniNtpMs) / 1000UL;
         if (protekliRtcTickovi == 0) {
           protekliRtcTickovi = 1;
         }
+        ntpSpremanZaPrimjenu = true;
       }
 
-      const DateTime vrijemeZaPrimjenu(
-          zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
-      primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
-                            zakazanoNtpImaEksplicitanDST,
-                            zakazanoNtpDstAktivan);
-      ntpPrimijenjenNaOvomTicku = true;
-      posaljiPCLog(F("NTP: sinkronizacija primijenjena na RTC SQW granici sekunde"));
+      if (ntpSpremanZaPrimjenu) {
+        const DateTime vrijemeZaPrimjenu(
+            zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
+        if (primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
+                                  zakazanoNtpImaEksplicitanDST,
+                                  zakazanoNtpDstAktivan)) {
+          ntpPrimijenjenNaOvomTicku = true;
+          posaljiPCLog(F("NTP: sinkronizacija primijenjena na RTC SQW granici sekunde"));
+        }
+      }
     }
-    if (!ntpPrimijenjenNaOvomTicku) {
-      osvjeziTrenutnoVrijemeIzRtc();
+    if (ntpPrimijenjenNaOvomTicku) {
+      zadnjiRtcTickSaSvjezimVremenom = lokalniRtcTick;
+    } else if (osvjeziTrenutnoVrijemeIzRtc()) {
+      zadnjiRtcTickSaSvjezimVremenom = lokalniRtcTick;
     }
   } else if ((sadaMs - rtcSqwZadnjiTickMs) > 2500UL) {
     rtcSqwAktivan = false;
@@ -705,7 +750,9 @@ DateTime dohvatiTrenutnoVrijeme() {
     }
     if ((sadaMs - zadnjiFallbackPollMs) >= 1000UL || zadnjiFallbackPollMs == 0) {
       zadnjiFallbackPollMs = sadaMs;
-      osvjeziTrenutnoVrijemeIzRtc();
+      if (!pokusajPrimijenitiZakazaniNtpBezSqw(sadaMs)) {
+        osvjeziTrenutnoVrijemeIzRtc();
+      }
     }
   }
 
@@ -726,20 +773,26 @@ uint32_t dohvatiRtcSekundniBrojac() {
   return lokalniRtcTick;
 }
 
-static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
+bool jeVrijemeSvjezeZaRtcTick(uint32_t rtcTick) {
+  return rtcTick != 0 && zadnjiRtcTickSaSvjezimVremenom == rtcTick;
+}
+
+static bool primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool imaEksplicitanDST,
                                   bool dstAktivanIzvori) {
   if (!jeVrijemeURasponuPouzdanosti(ntpVrijeme)) {
     posaljiPCLog(F("NTP: odbijena interna primjena nevaljanog vremena"));
     otkaziZakazanuNtpSinkronizaciju();
-    return;
+    return false;
   }
 
   otkaziZakazanuNtpSinkronizaciju();
 
-  pokusajUpisatiVrijemeURtc(
-      ntpVrijeme,
-      F("RTC: neuspjela NTP primjena na RTC, ostajem u degradiranom nacinu rada"));
+  if (!pokusajUpisatiVrijemeURtc(
+          ntpVrijeme,
+          F("RTC: neuspjela NTP primjena na RTC, ostajem u degradiranom nacinu rada"))) {
+    return false;
+  }
 
   trenutnoVrijeme = ntpVrijeme;
   dstAktivan = odrediDSTStatusSinkronizacije(
@@ -762,6 +815,7 @@ static void primijeniVrijemeIzNTP(DateTime ntpVrijeme,
   formatirajDatumIVrijeme(ntpVrijeme, vrijemeTekst, sizeof(vrijemeTekst));
   snprintf_P(log, sizeof(log), PSTR("Vrijeme azurirano iz NTP: %s"), vrijemeTekst);
   posaljiPCLog(log);
+  return true;
 }
 
 void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
@@ -810,9 +864,11 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
     return;
   }
 
-  pokusajUpisatiVrijemeURtc(
-      rucnoVrijeme,
-      F("RTC: neuspjelo rucno postavljanje vremena na RTC, ostajem u degradiranom nacinu rada"));
+  if (!pokusajUpisatiVrijemeURtc(
+          rucnoVrijeme,
+          F("RTC: neuspjelo rucno postavljanje vremena na RTC, ostajem u degradiranom nacinu rada"))) {
+    return;
+  }
 
   trenutnoVrijeme = rucnoVrijeme;
   dstAktivan = izracunajDSTIzKalendara(rucnoVrijeme);
@@ -839,10 +895,6 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme) {
 
 const char* dohvatiOznakuIzvoraVremena() {
   return oznakaizvora;
-}
-
-bool jeZadnjaSvjezaSinkronizacijaIzNTP() {
-  return zadnjiPotvrdeniIzvor == IZ_NTP && !jeSinkronizacijaZastarjela();
 }
 
 bool jeRtcSqwAktivan() {
@@ -874,7 +926,7 @@ int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme) {
   return izracunajDSTIzKalendara(vrijeme) ? 120 : 60;
 }
 
-void oznaciPovratakNaRTC() {
+static void oznaciPovratakNaRTC() {
   // Ako je sat radio iz potvrdenog NTP izvora, vrati prikaz i rad na RTC.
   if (trenutniIzvor != IZ_RTC) {
     trenutniIzvor = IZ_RTC;

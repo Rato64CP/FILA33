@@ -14,6 +14,7 @@
 #include "lcd_display.h"
 #include "flash_text_utils.h"
 #include "i2c_bus.h"
+#include "pc_serial.h"
 #include "time_glob.h"
 #include "otkucavanje.h"
 #include "postavke.h"
@@ -26,6 +27,7 @@
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
+static const uint8_t LCD_I2C_ADRESA = 0x27;
 static char line1_buffer[17];
 static char zadnje_ispisani_redak1[17];
 static unsigned long last_line1_refresh = 0;
@@ -47,6 +49,14 @@ static bool wifi_ip_prikaz_aktivan = false;
 static unsigned long wifi_ip_prikaz_pocetak_ms = 0;
 static char wifi_ip_poruka[17];
 static const unsigned long WIFI_IP_PRIKAZ_TRAJANJE_MS = 5000UL;
+static bool lcd_i2c_greska_aktivna = false;
+static bool lcd_i2c_greska_prijavljena = false;
+static unsigned long lcd_zadnja_i2c_provjera_ms = 0;
+static bool lcd_zadnja_i2c_dostupnost = true;
+static const unsigned long LCD_I2C_PROVJERA_INTERVAL_MS = 250UL;
+static uint8_t lcd_reinit_pokusaji_preostali = 0;
+static unsigned long lcd_zadnji_reinit_ms = 0;
+static const unsigned long LCD_REINIT_PONOVI_INTERVAL_MS = 1000UL;
 
 static enum {
   ACTIVITY_NONE = 0,
@@ -82,7 +92,9 @@ static const char LCD_DAN_NED[] PROGMEM = "NEDJELJA";
 static const char LCD_DAN_PON[] PROGMEM = "PON.";
 static const char LCD_DAN_UTO[] PROGMEM = "UTORAK";
 static const char LCD_DAN_SRI[] PROGMEM = "SRIJEDA";
-static const char LCD_DAN_CET[] PROGMEM = "\x01ETVRTAK";
+// Za veliko slovo C s kvacicom moramo prekinuti string literal nakon \x01,
+// inace bi C/C++ progutao i slovo E kao dio hex escape sekvence.
+static const char LCD_DAN_CET[] PROGMEM = "\x01" "ETVRTAK";
 static const char LCD_DAN_PET[] PROGMEM = "PETAK";
 static const char LCD_DAN_SUB[] PROGMEM = "SUBOTA";
 static const char* const LCD_NAZIVI_DANA[] PROGMEM = {
@@ -123,6 +135,108 @@ static const unsigned long LCD_LATCHED_FAULT_INTERVAL_MS = 1500UL;
 static const unsigned long LCD_RTC_DEGRADED_INTERVAL_MS = 1500UL;
 static const unsigned long LCD_RS485_PREKID_INTERVAL_MS = 1500UL;
 
+static void resetirajCachePrikazaLCD() {
+  zadnje_ispisani_redak1[0] = '\0';
+  zadnje_ispisani_redak2[0] = '\0';
+  last_line1_refresh = 0;
+  last_line1_rtc_tick = 0xFFFFFFFFUL;
+  last_line2_refresh = 0;
+  last_date_minute = -1;
+}
+
+static bool jeWireTimeoutAktivanZaLCD() {
+#if defined(WIRE_HAS_TIMEOUT)
+  return Wire.getWireTimeoutFlag();
+#else
+  return false;
+#endif
+}
+
+static void ocistiWireTimeoutZaLCD() {
+#if defined(WIRE_HAS_TIMEOUT)
+  Wire.clearWireTimeoutFlag();
+#endif
+}
+
+static void oznaciLCDI2CGresku() {
+  lcd_i2c_greska_aktivna = true;
+  lcd_reinit_pokusaji_preostali = 3;
+  if (!lcd_i2c_greska_prijavljena) {
+    posaljiPCLog(F("LCD: I2C veza nije dostupna, cekam oporavak zaslona"));
+    lcd_i2c_greska_prijavljena = true;
+  }
+}
+
+static bool provjeriDostupnostLCDNaI2C(bool prisiliProvjeru = false) {
+  const unsigned long sadaMs = millis();
+  if (!prisiliProvjeru && lcd_zadnja_i2c_provjera_ms != 0 &&
+      (sadaMs - lcd_zadnja_i2c_provjera_ms) < LCD_I2C_PROVJERA_INTERVAL_MS) {
+    return lcd_zadnja_i2c_dostupnost;
+  }
+
+  lcd_zadnja_i2c_provjera_ms = sadaMs;
+  pripremiI2CSabirnicuSigurno();
+  Wire.beginTransmission(LCD_I2C_ADRESA);
+  lcd_zadnja_i2c_dostupnost = (Wire.endTransmission() == 0);
+  if (!lcd_zadnja_i2c_dostupnost || jeWireTimeoutAktivanZaLCD()) {
+    ocistiWireTimeoutZaLCD();
+    lcd_zadnja_i2c_dostupnost = false;
+  }
+  return lcd_zadnja_i2c_dostupnost;
+}
+
+static void primijeniPozadinskoStanjeNaLCDNakonOporavka() {
+  if (!lcd_pozadinsko_stanje_poznato || lcd_pozadinsko_stanje_ukljuceno) {
+    lcd.backlight();
+  } else {
+    lcd.noBacklight();
+  }
+}
+
+static bool osigurajLCDSpremanZaRad() {
+  if (!provjeriDostupnostLCDNaI2C()) {
+    oznaciLCDI2CGresku();
+    return false;
+  }
+
+  const unsigned long sadaMs = millis();
+  const bool trebaPonovniReinit = lcd_reinit_pokusaji_preostali > 0 &&
+                                  (lcd_zadnji_reinit_ms == 0 ||
+                                   (sadaMs - lcd_zadnji_reinit_ms) >=
+                                       LCD_REINIT_PONOVI_INTERVAL_MS);
+
+  if (!lcd_i2c_greska_aktivna && !trebaPonovniReinit) {
+    return true;
+  }
+
+  pripremiI2CSabirnicuSigurno();
+  delay(10);
+  lcd.init();
+  delay(10);
+  primijeniPozadinskoStanjeNaLCDNakonOporavka();
+  delay(10);
+  lcd.createChar(LCD_ZNAK_VELIKO_C_KVACICA, const_cast<uint8_t*>(LCD_GLYPH_VELIKO_C_KVACICA));
+  lcd.clear();
+  delay(10);
+  lcd.display();
+
+  if (jeWireTimeoutAktivanZaLCD()) {
+    ocistiWireTimeoutZaLCD();
+    oznaciLCDI2CGresku();
+    return false;
+  }
+
+  resetirajCachePrikazaLCD();
+  lcd_i2c_greska_aktivna = false;
+  lcd_i2c_greska_prijavljena = false;
+  lcd_zadnji_reinit_ms = sadaMs;
+  if (lcd_reinit_pokusaji_preostali > 0) {
+    --lcd_reinit_pokusaji_preostali;
+  }
+  posaljiPCLog(F("LCD: I2C veza oporavljena, zaslon ponovno inicijaliziran"));
+  return true;
+}
+
 static void pripremiRedakZaLCD(const char* tekst, char* odrediste) {
   memset(odrediste, ' ', 16);
 
@@ -139,12 +253,21 @@ static void upisiRedakNaLCD(uint8_t redak, const char* tekst, char* zadnjiRedak)
   char pripremljeniRedak[17];
   pripremiRedakZaLCD(tekst, pripremljeniRedak);
 
+  if (!osigurajLCDSpremanZaRad()) {
+    return;
+  }
+
   if (strcmp(pripremljeniRedak, zadnjiRedak) == 0) {
     return;
   }
 
   lcd.setCursor(0, redak);
   lcd.print(pripremljeniRedak);
+  if (jeWireTimeoutAktivanZaLCD()) {
+    ocistiWireTimeoutZaLCD();
+    oznaciLCDI2CGresku();
+    return;
+  }
   strncpy(zadnjiRedak, pripremljeniRedak, 17);
 }
 
@@ -269,11 +392,9 @@ void inicijalizirajLCD() {
 
   memset(line1_buffer, ' ', sizeof(line1_buffer) - 1);
   line1_buffer[16] = '\0';
-  zadnje_ispisani_redak1[0] = '\0';
 
   memset(line2_buffer, ' ', sizeof(line2_buffer) - 1);
   line2_buffer[16] = '\0';
-  zadnje_ispisani_redak2[0] = '\0';
 
   memset(activity_message, ' ', sizeof(activity_message) - 1);
   activity_message[16] = '\0';
@@ -287,11 +408,17 @@ void inicijalizirajLCD() {
   delay(2000);
   lcd.clear();
 
-  last_line1_refresh = 0;
-  last_line2_refresh = 0;
+  resetirajCachePrikazaLCD();
   last_blink_toggle = 0;
   current_activity = ACTIVITY_NONE;
   otkucavanje_poruka_aktivna = false;
+  lcd_i2c_greska_aktivna = false;
+  lcd_i2c_greska_prijavljena = false;
+  lcd_zadnja_i2c_provjera_ms = 0;
+  lcd_zadnja_i2c_dostupnost = true;
+  lcd_reinit_pokusaji_preostali = 0;
+  lcd_zadnji_reinit_ms = 0;
+  ocistiWireTimeoutZaLCD();
 }
 
 static void build_line1() {
@@ -725,9 +852,9 @@ void prikaziPoruku(const __FlashStringHelper* redak1,
 }
 
 void prikaziZakljucaniSustav() {
-  lcd.backlight();
   lcd_pozadinsko_stanje_poznato = true;
   lcd_pozadinsko_stanje_ukljuceno = true;
+  primijeniLCDPozadinskoOsvjetljenje(true);
 
   static bool porukaVidljiva = true;
   static unsigned long zadnjeTreptanjeMs = 0;
@@ -801,9 +928,18 @@ void primijeniLCDPozadinskoOsvjetljenje(bool ukljuci) {
   lcd_pozadinsko_stanje_ukljuceno = stvarnoUkljuci;
   lcd_pozadinsko_stanje_poznato = true;
 
+  if (!osigurajLCDSpremanZaRad()) {
+    return;
+  }
+
   if (stvarnoUkljuci) {
     lcd.backlight();
   } else {
     lcd.noBacklight();
+  }
+
+  if (jeWireTimeoutAktivanZaLCD()) {
+    ocistiWireTimeoutZaLCD();
+    oznaciLCDI2CGresku();
   }
 }

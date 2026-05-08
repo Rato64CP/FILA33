@@ -16,6 +16,7 @@ static const uint8_t BROJ_ZVONA_MAX = 2;
 static const uint8_t BROJ_RUCNIH_SKLOPKI_ZVONA = 2;
 static const unsigned long INTERVAL_TREPTANJA_LAMPICE_INERCIJE_MS = 500UL;
 static const unsigned long DODATNI_RAD_BELL2_BEZ_KOCNICE_MS = 30000UL;
+static const unsigned long MAKS_TRAJANJE_RUCNE_SKLOPKE_ZVONA_MS = 30UL * 60UL * 1000UL;
 
 static const uint8_t PINOVI_ZVONA[BROJ_ZVONA_MAX] = {
   PIN_ZVONO_1,
@@ -50,7 +51,9 @@ static struct {
 // Rucno upravljanje fizickim sklopkama ima prioritet nad automatikom.
 static struct {
   bool override_aktivan[BROJ_RUCNIH_SKLOPKI_ZVONA];
-} manualnoUpravljanje = {{false, false}};
+  bool prisilno_iskljucen[BROJ_RUCNIH_SKLOPKI_ZVONA];
+  unsigned long vrijeme_ukljucenja_ms[BROJ_RUCNIH_SKLOPKI_ZVONA];
+} manualnoUpravljanje = {};
 
 static bool dozvoliPaljenjeZvonaIzRucneSklopke = false;
 static bool globalnaBlokadaZvona = false;
@@ -196,6 +199,32 @@ static void zakaziProduzeniRadZvona(int zvono, unsigned long dodatnoTrajanjeMs) 
   zvona.start_ms[indeks] = millis();
   zvona.duration_ms[indeks] = dodatnoTrajanjeMs;
   osvjeziLampicuZvona(indeks, zvona.start_ms[indeks]);
+}
+
+static void obradiSigurnosniTimeoutRucnihSklopkiZvona(unsigned long sadaMs) {
+  for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; ++i) {
+    if (!manualnoUpravljanje.override_aktivan[i] ||
+        manualnoUpravljanje.prisilno_iskljucen[i] ||
+        manualnoUpravljanje.vrijeme_ukljucenja_ms[i] == 0UL) {
+      continue;
+    }
+
+    if ((sadaMs - manualnoUpravljanje.vrijeme_ukljucenja_ms[i]) <
+        MAKS_TRAJANJE_RUCNE_SKLOPKE_ZVONA_MS) {
+      continue;
+    }
+
+    manualnoUpravljanje.override_aktivan[i] = false;
+    manualnoUpravljanje.prisilno_iskljucen[i] = true;
+    iskljuciZvono(i + 1);
+
+    char log[96];
+    snprintf_P(log,
+               sizeof(log),
+               PSTR("Rucno ZVONO%d: sigurnosno gasenje nakon 30 min, cekam fizicki povrat prekidaca na OFF"),
+               i + 1);
+    posaljiPCLog(log);
+  }
 }
 
 // ==================== PUBLIC API ====================
@@ -402,6 +431,8 @@ void inicijalizirajZvona() {
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     pinMode(PINOVI_RUCNIH_SKLOPKI[i], INPUT_PULLUP);
     manualnoUpravljanje.override_aktivan[i] = false;
+    manualnoUpravljanje.prisilno_iskljucen[i] = false;
+    manualnoUpravljanje.vrijeme_ukljucenja_ms[i] = 0UL;
   }
 
   for (uint8_t i = 0; i < BROJ_ZVONA_MAX; ++i) {
@@ -418,6 +449,8 @@ void upravljajZvonom() {
   unsigned long sadaMs = millis();
   SwitchState novoStanje = SWITCH_RELEASED;
 
+  obradiSigurnosniTimeoutRucnihSklopkiZvona(sadaMs);
+
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
     if (obradiDebouncedInput(PINOVI_RUCNIH_SKLOPKI[i], 30, &novoStanje)) {
       char log[80];
@@ -427,6 +460,8 @@ void upravljajZvonom() {
       if (novoStanje == SWITCH_PRESSED) {
         if (jeZvonoOmogucenoPoPostavkama(i + 1)) {
           manualnoUpravljanje.override_aktivan[i] = true;
+          manualnoUpravljanje.prisilno_iskljucen[i] = false;
+          manualnoUpravljanje.vrijeme_ukljucenja_ms[i] = sadaMs;
           if (!jeGlobalnaBlokadaZvonaAktivna()) {
             ukljuciZvonoIzRucneSklopke(i + 1);
           } else {
@@ -434,10 +469,14 @@ void upravljajZvonom() {
           }
         } else {
           manualnoUpravljanje.override_aktivan[i] = false;
+          manualnoUpravljanje.prisilno_iskljucen[i] = false;
+          manualnoUpravljanje.vrijeme_ukljucenja_ms[i] = 0UL;
           snprintf_P(log, sizeof(log), PSTR("Rucno ZVONO%d ON (preskoceno)"), i + 1);
         }
       } else {
         manualnoUpravljanje.override_aktivan[i] = false;
+        manualnoUpravljanje.prisilno_iskljucen[i] = false;
+        manualnoUpravljanje.vrijeme_ukljucenja_ms[i] = 0UL;
         iskljuciZvono(i + 1);
       }
       posaljiPCLog(log);
@@ -460,7 +499,9 @@ void upravljajZvonom() {
 
   // Ako je rucni override aktivan, ima prioritet nad web/API automatikom.
   for (uint8_t i = 0; i < BROJ_RUCNIH_SKLOPKI_ZVONA; i++) {
-    if (manualnoUpravljanje.override_aktivan[i] && !zvona.aktivan[i]) {
+    if (manualnoUpravljanje.override_aktivan[i] &&
+        !manualnoUpravljanje.prisilno_iskljucen[i] &&
+        !zvona.aktivan[i]) {
       ukljuciZvonoIzRucneSklopke(i + 1);
     }
   }

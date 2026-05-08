@@ -211,7 +211,7 @@ static uint8_t ogranicenoTrajanjeCavla(uint8_t trajanjeMin) {
 }
 
 static unsigned int ogranicenoTrajanjeImpulsaCekicaMs(unsigned int trajanjeMs) {
-  return constrain(trajanjeMs, 50U, 150U);
+  return constrain(trajanjeMs, 10U, 300U);
 }
 
 static uint8_t ogranicenaInercijaZvonaSekunde(uint8_t sekunde) {
@@ -579,7 +579,7 @@ static bool sanitizirajRadnaPolja(EepromLayout::PostavkeSpremnik& spremnik) {
       }
     }
   }
-  if (spremnik.trajanjeImpulsaCekicaMs < 50 || spremnik.trajanjeImpulsaCekicaMs > 150) {
+  if (spremnik.trajanjeImpulsaCekicaMs < 10 || spremnik.trajanjeImpulsaCekicaMs > 300) {
     spremnik.trajanjeImpulsaCekicaMs = 150;
     trebaSpremiti = true;
   }

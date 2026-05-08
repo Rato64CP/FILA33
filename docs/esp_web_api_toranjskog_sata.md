@@ -14,31 +14,48 @@ Povezani moduli toranjskog sata:
 
 - `Basic Auth` koristi korisničko ime `admin`
 - lozinku `ESP` učitava iz vlastitog EEPROM-a ili pada na zadanu firmware vrijednost
-- rute `/api/...` i `/status` traže autentikaciju
+- dashboard `/` i rute `/api/...` traže autentikaciju
 - `/setup` ne traži `Basic Auth` dok je aktivna privremena setup mreža toranjskog sata
 
 ## 🧭 Glavne web rute
 
 | Ruta | Metoda | Auth | Svrha |
 |---|---|---|---|
-| `/` | `GET` | da, osim kad je aktivan setup AP | Glavni dashboard za ručne servisne naredbe nad `zvonima`, `slavljenjem`, `mrtvačkim` i `sunčevom automatikom` |
-| `/status` | `GET` | da | Vraća JSON status `WiFi` veze i lokalne IP adrese `ESP-a` |
+| `/` | `GET` | da, osim kad je aktivan setup AP | Svedeni dashboard za `MUŠKO`, `ŽENSKO`, `SLAVI`, `BRECA` i sunčevu automatiku |
 | `/setup` | `GET` | ne | Prikazuje setup stranicu za novu `WiFi` mrežu toranjskog sata dok je aktivan setup AP |
 | `/setup` | `POST` | ne | Sprema novi `SSID` i lozinku te ih šalje Megi radi sinkronizacije mrežnih postavki |
+| `/api/status` | `GET` | da | Vraća JSON status `ESP` veze i glavnih stanja koja dashboard koristi za boju tipki |
 
 ## 📡 JSON status ruta
 
-### `GET /status`
+### `GET /api/status`
 
 Vraća JSON tijelo oblika:
 
 ```json
-{"wifi_ip":"192.168.1.50","wifi_connected":true}
+{
+  "wifi_ip":"192.168.1.50",
+  "wifi_connected":true,
+  "mega_status_known":true,
+  "bell1_active":false,
+  "bell2_active":true,
+  "slavljenje_active":false,
+  "mrtvacko_active":false
+}
 ```
 
 Polja:
 - `wifi_ip`: lokalna IP adresa `ESP` modula
 - `wifi_connected`: je li `ESP` trenutno spojen na mrežu i spreman za `NTP` tok toranjskog sata
+- `mega_status_known`: je li `ESP` uspio dohvatiti svježi `STATUS:` odgovor s `Mege`
+- `bell1_active`: stanje tipke `MUŠKO`
+- `bell2_active`: stanje tipke `ŽENSKO`
+- `slavljenje_active`: stanje tipke `SLAVI`
+- `mrtvacko_active`: stanje tipke `BRECA`
+
+Dodatno:
+- `GET /api/status?force=1` prisiljava `ESP` da odmah pošalje `STATUS?` prema `Megi`
+- dashboard koristi `force=1` nakon klika kako bi korisnik odmah dobio stvarnu povratnu informaciju
 
 ## 📶 Setup WiFi API
 
@@ -46,6 +63,7 @@ Polja:
 
 - radi samo dok je aktivan setup AP `ZVONKO_setup`
 - ako setup AP nije aktivan, vraća `404`
+- dok je setup AP aktivan, i root ruta `/` prikazuje istu setup stranicu
 
 ### `POST /setup`
 
@@ -105,4 +123,4 @@ Za `/api/...` rute `ESP` koristi ove HTTP statuse:
 - API ne potvrđuje latched fault niti `RTC` upozorenja; to ostaje lokalna funkcija tipki i LCD-a toranjskog sata
 - `ESP` ne upravlja izravno relejima `kazaljki`, `okretne ploče`, `zvona` ili `čekića`, nego samo šalje servisni zahtjev Megi
 - `NTP` sinkronizacija vremena toranjskog sata ne ide kroz `/api/...` rute nego kroz serijski protokol `NTPCFG:` i `NTPREQ:SYNC`
-
+- nakon ručnog unosa vremena na Megi `ESP` ne šalje NTP odmah, nego tek u prvom sljedećem sigurnom prozoru koji `Mega` odabere

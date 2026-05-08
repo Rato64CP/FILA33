@@ -34,6 +34,7 @@ const unsigned long MRTVACKO_MOD2_TRAJANJE_IMPULSA_MS = 300UL;
 const unsigned long MRTVACKO_MOD2_PAUZA_NAKON_CEKIC1_MS = 700UL;
 const unsigned long MRTVACKO_MOD2_PAUZA_NAKON_CEKIC2_MS = 3700UL;
 const unsigned long TREPTANJE_LAMPICE_CEKANJA_MS = 500UL;
+const unsigned long MAKS_TRAJANJE_RUCNOG_SLAVLJENJA_MS = 30UL * 60UL * 1000UL;
 
 enum ModMrtvackog {
   MOD_MRTVACKO_KLASICNO = 1,
@@ -80,6 +81,9 @@ MrtvackoStanje mrtvacko = {
     false, 0UL, false, 0UL, MOD_MRTVACKO_KLASICNO, MRTVACKO_FAZA_OBA_CEKICA, false, 0UL, 0, false};
 bool slavljenjeNaCekanju = false;
 bool mrtvackoNaCekanju = false;
+bool prekidacSlavljenjaAktivan = false;
+bool prekidacSlavljenjaPrisilnoIskljucen = false;
+unsigned long prekidacSlavljenjaVrijemeAktivacijeMs = 0UL;
 
 bool jeBlokadaUPSModaAktivna() {
   return jeUPSModAktivan();
@@ -362,6 +366,9 @@ void provjeriPrekidacSlavljenja() {
   }
 
   if (novoStanje == SWITCH_PRESSED) {
+    prekidacSlavljenjaAktivan = true;
+    prekidacSlavljenjaPrisilnoIskljucen = false;
+    prekidacSlavljenjaVrijemeAktivacijeMs = millis();
     if (!slavljenje.aktivno) {
       if (jeBlokadaUPSModaAktivna()) {
         slavljenjeNaCekanju = false;
@@ -376,6 +383,9 @@ void provjeriPrekidacSlavljenja() {
       }
     }
   } else {
+    prekidacSlavljenjaAktivan = false;
+    prekidacSlavljenjaPrisilnoIskljucen = false;
+    prekidacSlavljenjaVrijemeAktivacijeMs = 0UL;
     slavljenjeNaCekanju = false;
     if (slavljenje.aktivno) {
       zaustaviSlavljenje();
@@ -424,6 +434,7 @@ void obradiCekanjePosebnihNacina() {
   if (slavljenjeNaCekanju &&
       !slavljenje.aktivno &&
       !mrtvacko.aktivno &&
+      !prekidacSlavljenjaPrisilnoIskljucen &&
       digitalRead(PIN_KEY_CELEBRATION) == LOW &&
       jeOperacijaCekicaDozvoljena()) {
     slavljenjeNaCekanju = false;
@@ -439,6 +450,25 @@ void obradiCekanjePosebnihNacina() {
     zapocniMrtvacko();
     posaljiPCLog(F("Mrtvacko: automatski pokrecem nakon zavrsetka inercije/blokade"));
   }
+}
+
+void obradiSigurnosniTimeoutRucnogSlavljenja(unsigned long sadaMs) {
+  if (!prekidacSlavljenjaAktivan ||
+      prekidacSlavljenjaPrisilnoIskljucen ||
+      prekidacSlavljenjaVrijemeAktivacijeMs == 0UL) {
+    return;
+  }
+
+  if ((sadaMs - prekidacSlavljenjaVrijemeAktivacijeMs) < MAKS_TRAJANJE_RUCNOG_SLAVLJENJA_MS) {
+    return;
+  }
+
+  prekidacSlavljenjaAktivan = false;
+  prekidacSlavljenjaPrisilnoIskljucen = true;
+  slavljenjeNaCekanju = false;
+  zaustaviSlavljenje();
+  posaljiPCLog(
+      F("Prekidac slavljenja: sigurnosno gasenje nakon 30 min, cekam fizicki povrat prekidaca na OFF"));
 }
 
 bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokirano) {
@@ -535,11 +565,15 @@ void inicijalizirajSlavljenjeIMrtvacko() {
   mrtvacko.ignorirajThumbwheel = false;
   slavljenjeNaCekanju = false;
   mrtvackoNaCekanju = false;
+  prekidacSlavljenjaAktivan = false;
+  prekidacSlavljenjaPrisilnoIskljucen = false;
+  prekidacSlavljenjaVrijemeAktivacijeMs = 0UL;
 }
 
 void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs) {
   uskladiStanjeNakonSigurnosnogLimita(sadaMs);
   provjeriPrekidacSlavljenja();
+  obradiSigurnosniTimeoutRucnogSlavljenja(sadaMs);
   provjeriDugmeMrtvackog();
   obradiCekanjePosebnihNacina();
   azurirajSlavljenje(sadaMs);
@@ -643,4 +677,27 @@ void zaustaviMrtvacko() {
 
 bool jeMrtvackoUTijeku() {
   return mrtvacko.aktivno;
+}
+
+void preklopiSlavljenjeDaljinskimUpravljacem() {
+  if (slavljenje.aktivno) {
+    zaustaviSlavljenje();
+    posaljiPCLog(F("433 MHz tipka C: slavljenje zaustavljeno"));
+    return;
+  }
+
+  if (slavljenjeNaCekanju) {
+    slavljenjeNaCekanju = false;
+    posaljiPCLog(F("433 MHz tipka C: slavljenje skinuto s cekanja"));
+    return;
+  }
+
+  zapocniSlavljenje();
+  if (slavljenje.aktivno) {
+    posaljiPCLog(F("433 MHz tipka C: slavljenje pokrenuto"));
+  } else if (slavljenjeNaCekanju) {
+    posaljiPCLog(F("433 MHz tipka C: slavljenje ostaje na cekanju"));
+  } else {
+    posaljiPCLog(F("433 MHz tipka C: zahtjev odbijen sigurnosnim pravilima"));
+  }
 }

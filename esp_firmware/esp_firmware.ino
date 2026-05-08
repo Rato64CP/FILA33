@@ -11,11 +11,8 @@ using ToranjWebServer = WebServer;
 #endif
 
 #include <WiFiUdp.h>
-#include <NTPClient.h>
 #include <EEPROM.h>
 #include <pgmspace.h>
-#include <time.h>
-
 // Konfiguracija WiFi mreze za toranjski sat.
 // Mega moze ove vrijednosti prepisati preko serijske veze naredbom WIFI:...
 char wifiSsid[33] = "SVETI PETAR";
@@ -45,11 +42,18 @@ static const unsigned long WIFI_SETUP_TRAJANJE_MS = 300000UL;
 static const unsigned long WIFI_SETUP_GASENJE_NAKON_SPREMANJA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_LED_BLINK_MS = 400UL;
 
-// Parametri NTP klijenta za sinkronizaciju toranjskog sata.
+// Parametri UDP NTP sloja za sinkronizaciju toranjskog sata.
 char ntpPosluzitelj[40] = "pool.ntp.org";
-static const long NTP_OFFSET_SEKUNDI = 0;
-static const unsigned long NTP_INTERVAL_MS = 60000;
+static const unsigned long NTP_INTERVAL_MS = 60000UL;
+static const unsigned long NTP_TIMEOUT_MS = 5000UL;
+static const unsigned long NTP_PONOVNI_POKUSAJ_BEZ_VREMENA_MS = 10000UL;
 static const unsigned long NTP_MAKSIMALNA_STAROST_ODGOVORA_MS = 3UL * NTP_INTERVAL_MS;
+static const uint16_t NTP_LOKALNI_PORT = 2390U;
+static const uint16_t NTP_UDP_PORT = 123U;
+static const size_t NTP_VELICINA_PAKETA = 48U;
+static const uint32_t NTP_UNIX_EPOCH_OFFSET = 2208988800UL;
+static const uint32_t NTP_REFERENTNI_MIN_UNIX = 1700000000UL;
+static const uint32_t NTP_REFERENTNI_MAX_UNIX = 4102444799UL;
 static const unsigned long WIFI_WATCHDOG_NTP_ZASTOJ_MS = 7200000UL;
 static const size_t SERIJSKI_BUFFER_MAX = 1280;
 static const size_t SERIJSKI_BUDZET_BAJTOVA_PO_POZIVU = 192;
@@ -61,7 +65,6 @@ static const unsigned long CMD_CEKANJE_NA_MEGU_MS = 1500UL;
 static const unsigned long WEB_AUTH_NEUSPJEH_ODGODA_MS = 750UL;
 
 WiFiUDP ntpUDP;
-NTPClient ntpKlijent(ntpUDP, ntpPosluzitelj, NTP_OFFSET_SEKUNDI, NTP_INTERVAL_MS);
 
 ToranjWebServer webPosluzitelj(80);
 
@@ -82,9 +85,22 @@ enum CmdOdgovorMegai {
 
 // Statusne zastavice za faze rada.
 bool ntpIkadPostavljen = false;
+bool ntpUdpPokrenut = false;
+bool ntpZahtjevUTijeku = false;
 unsigned long ntpZadnjiUspjehMs = 0;
+unsigned long ntpZadnjiPokusajMs = 0;
+unsigned long ntpZahtjevPoslanMs = 0;
+unsigned long ntpBazniMillis = 0;
+uint64_t ntpBazniUtcMs = 0;
 unsigned long wifiSpojenOdMs = 0;
 bool wifiSpojenOdPoznat = false;
+bool megaStatusPoznat = false;
+bool megaZvono1Aktivno = false;
+bool megaZvono2Aktivno = false;
+bool megaSlavljenjeAktivno = false;
+bool megaMrtvackoAktivno = false;
+unsigned long megaStatusZadnjeOsvjezavanjeMs = 0;
+unsigned long megaStatusSerijskiBroj = 0;
 
 // Upravljanje nenametljivim pokusajima WiFi spajanja.
 bool wifiPokusajUToku = false;
@@ -95,6 +111,8 @@ static const unsigned long WIFI_POKUSAJ_TIMEOUT_MS = 20000;
 static const unsigned long WIFI_ODGODA_NAKON_PRVOG_MS = 10000;
 static const unsigned long WIFI_ODGODA_NAKON_DRUGOG_MS = 30000;
 static const unsigned long WIFI_ODGODA_NAKON_TRECEG_MS = 60000;
+static const unsigned long STATUS_CEKANJE_NA_MEGU_MS = 350UL;
+static const unsigned long STATUS_MAKSIMALNA_STAROST_MS = 1500UL;
 wl_status_t zadnjiPrijavljeniWiFiStatus = WL_IDLE_STATUS;
 bool odgovorSetupWiFiPrimljen = false;
 bool setupWiFiNeuspjeh = false;
@@ -118,12 +136,37 @@ unsigned long dohvatiWiFiOdgoduNovogPokusaja();
 bool jePrijestupnaGodina(int godina);
 int danUTjednu(int godina, int mjesec, int dan);
 int zadnjaNedjeljaUMjesecu(int godina, int mjesec);
-bool jeLjetnoVrijemeEU(time_t utcEpoch);
-time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch);
+struct RastavljenoVrijeme {
+  uint16_t godina;
+  uint8_t mjesec;
+  uint8_t dan;
+  uint8_t sat;
+  uint8_t minuta;
+  uint8_t sekunda;
+};
+bool razloziUnixVrijemeUTC(uint32_t epochSekunde, RastavljenoVrijeme* izlaz);
+bool jeLjetnoVrijemeEU(uint32_t utcEpoch);
+uint32_t konvertirajUTCuLokalnoVrijeme(uint32_t utcEpoch);
+void formatirajIsoDatumIVrijeme(const RastavljenoVrijeme& vrijeme, char* izlaz, size_t velicinaIzlaza);
+bool osigurajNtpUdp();
+void ocistiZaostaleNtpUdpPakete();
+bool posaljiNtpUpit();
+bool obradiNtpOdgovor();
+void obradiNtpTimeout();
+bool trebaPokrenutiNtpOsvjezavanje(unsigned long sadaMs, bool prisilno);
+void postaviNtpBaznoVrijemeUtcMs(uint64_t utcMs);
+bool jeNtpVrijemePostavljeno();
+uint64_t dohvatiNtpUtcMs();
+uint32_t dohvatiNtpUnixVrijeme();
+uint32_t dohvatiReferentniUnixEpochZaNtp();
+int64_t apsolutnaRazlikaInt64(int64_t vrijednost);
+int64_t odrediUnixEpochIzNtpSekundi(uint32_t ntpSekunde, uint32_t referentniUnixEpoch);
 void obradiNTPSerijskuNaredbu(const char* payload);
 String ocistiJednolinijskiTekst(const String &ulaz, size_t maxDuljina);
 void primijeniWiFiOmogucenost(bool omogucen);
-void posaljiJsonStatus();
+bool obradiStatusMegai(const char* payload);
+bool osvjeziStatusMegai(bool prisilno);
+void posaljiJsonStatus(bool prisilno = false);
 void ucitajWebAutentikaciju();
 bool osigurajWebAutorizaciju();
 void posaljiApiKomanduMegai(const char* naredba, const char* odgovor);
@@ -136,9 +179,22 @@ void odrzavajSetupPristupnuTocku();
 void osvjeziWiFiStatusLedicu();
 void posaljiHtmlStranicuIzProgMema(PGM_P stranica);
 
+static void resetirajNtpUdpSloj() {
+  if (ntpUdpPokrenut) {
+    ntpUDP.stop();
+    ntpUdpPokrenut = false;
+  }
+}
+
 static void resetirajNtpStanje() {
+  resetirajNtpUdpSloj();
   ntpIkadPostavljen = false;
+  ntpZahtjevUTijeku = false;
   ntpZadnjiUspjehMs = 0;
+  ntpZadnjiPokusajMs = 0;
+  ntpZahtjevPoslanMs = 0;
+  ntpBazniMillis = 0;
+  ntpBazniUtcMs = 0;
 }
 
 static void oznaciWiFiKaoOdspojen() {
@@ -192,8 +248,7 @@ void setup() {
     prijaviPromjenuWiFiStatusa();
   }
 
-  Serial.println("FAZA: Pokretanje NTP klijenta");
-  ntpKlijent.begin();
+  Serial.println("FAZA: Priprema NTP UDP sloja");
 
   Serial.println("FAZA: Konfiguracija web posluzitelja");
   konfigurirajWebPosluzitelj();
@@ -204,8 +259,6 @@ void setup() {
 
 void loop() {
   obradiSerijskiUlaz();
-  webPosluzitelj.handleClient();
-  yield();
   odrzavajSetupTipku();
   odrzavajSetupPristupnuTocku();
   osvjeziWiFiStatusLedicu();
@@ -263,6 +316,7 @@ void prijaviPromjenuWiFiStatusa() {
     Serial.print("WIFI:MAC:");
     Serial.println(WiFi.macAddress());
   } else {
+    resetirajNtpStanje();
     Serial.println("WIFI:DISCONNECTED");
   }
 }
@@ -412,21 +466,42 @@ bool osvjeziNTPSat(bool prisilno) {
   static unsigned long zadnjiLog = 0;
   unsigned long sada = millis();
 
-  bool promjena = prisilno ? ntpKlijent.forceUpdate() : ntpKlijent.update();
+  if (WiFi.status() != WL_CONNECTED) {
+    ntpZahtjevUTijeku = false;
+    return jeNtpVrijemePostavljeno();
+  }
 
-  if (promjena && ntpKlijent.isTimeSet()) {
-    ntpZadnjiUspjehMs = sada;
-    if (!ntpIkadPostavljen) {
-      Serial.print("NTPLOG: Prvi put postavljeno vrijeme, epoch=");
-      Serial.println(ntpKlijent.getEpochTime());
-      ntpIkadPostavljen = true;
+  bool promjena = obradiNtpOdgovor();
+  obradiNtpTimeout();
+
+  sada = millis();
+  if (trebaPokrenutiNtpOsvjezavanje(sada, prisilno)) {
+    posaljiNtpUpit();
+  }
+
+  if (prisilno && ntpZahtjevUTijeku) {
+    const unsigned long pocetakCekanja = millis();
+    while (ntpZahtjevUTijeku &&
+           (millis() - pocetakCekanja) <= (NTP_TIMEOUT_MS + 250UL)) {
+      if (obradiNtpOdgovor()) {
+        promjena = true;
+        break;
+      }
+      obradiNtpTimeout();
+      yield();
+      delay(1);
     }
-  } else if (!ntpKlijent.isTimeSet() && (sada - zadnjiLog > 10000)) {
+    obradiNtpTimeout();
+    sada = millis();
+  }
+
+  if (!promjena && !jeNtpVrijemePostavljeno() &&
+      (sada - zadnjiLog > NTP_PONOVNI_POKUSAJ_BEZ_VREMENA_MS)) {
     Serial.println("NTPLOG: jos nije postavljeno vrijeme, cekam...");
     zadnjiLog = sada;
   }
 
-  return ntpKlijent.isTimeSet();
+  return jeNtpVrijemePostavljeno();
 }
 
 void odrzavajWiFiWatchdogZaNTP() {
@@ -456,17 +531,22 @@ void odrzavajWiFiWatchdogZaNTP() {
 }
 
 void posaljiNTPPremaMegai() {
-  time_t utcEpoch = ntpKlijent.getEpochTime();
-  time_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
+  if (!jeNtpVrijemePostavljeno()) {
+    Serial.println("NTPLOG: nema spremljenog NTP vremena za slanje Megi");
+    return;
+  }
+
+  uint32_t utcEpoch = dohvatiNtpUnixVrijeme();
+  uint32_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
   bool dstAktivan = jeLjetnoVrijemeEU(utcEpoch);
-  struct tm lokalniTm;
-  if (gmtime_r(&lokalniEpoch, &lokalniTm) == nullptr) {
+  RastavljenoVrijeme lokalnoVrijeme{};
+  if (!razloziUnixVrijemeUTC(lokalniEpoch, &lokalnoVrijeme)) {
     Serial.println("NTPLOG: konverzija lokalnog vremena nije uspjela, preskacem slanje");
     return;
   }
 
   char isoBuffer[25];
-  strftime(isoBuffer, sizeof(isoBuffer), "%Y-%m-%dT%H:%M:%S", &lokalniTm);
+  formatirajIsoDatumIVrijeme(lokalnoVrijeme, isoBuffer, sizeof(isoBuffer));
 
   Serial.print("SLANJE: NTP linija prema Megi: ");
   Serial.println(isoBuffer);
@@ -573,6 +653,74 @@ bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &od
   return false;
 }
 
+static bool procitajStatusZastavicu(const char* payload, const char* oznaka, bool* izlaz) {
+  if (payload == nullptr || oznaka == nullptr || izlaz == nullptr) {
+    return false;
+  }
+
+  const char* pronadeno = strstr(payload, oznaka);
+  if (pronadeno == nullptr) {
+    return false;
+  }
+
+  pronadeno += strlen(oznaka);
+  if (*pronadeno == '1') {
+    *izlaz = true;
+    return true;
+  }
+  if (*pronadeno == '0') {
+    *izlaz = false;
+    return true;
+  }
+  return false;
+}
+
+bool obradiStatusMegai(const char* payload) {
+  bool zvono1Aktivno = false;
+  bool zvono2Aktivno = false;
+  bool slavljenjeAktivno = false;
+  bool mrtvackoAktivno = false;
+
+  if (!procitajStatusZastavicu(payload, "b1=", &zvono1Aktivno) ||
+      !procitajStatusZastavicu(payload, "b2=", &zvono2Aktivno) ||
+      !procitajStatusZastavicu(payload, "sl=", &slavljenjeAktivno) ||
+      !procitajStatusZastavicu(payload, "mr=", &mrtvackoAktivno)) {
+    return false;
+  }
+
+  megaZvono1Aktivno = zvono1Aktivno;
+  megaZvono2Aktivno = zvono2Aktivno;
+  megaSlavljenjeAktivno = slavljenjeAktivno;
+  megaMrtvackoAktivno = mrtvackoAktivno;
+  megaStatusPoznat = true;
+  megaStatusZadnjeOsvjezavanjeMs = millis();
+  ++megaStatusSerijskiBroj;
+  return true;
+}
+
+bool osvjeziStatusMegai(bool prisilno) {
+  const unsigned long sadaMs = millis();
+  if (!prisilno && megaStatusPoznat &&
+      (sadaMs - megaStatusZadnjeOsvjezavanjeMs) <= STATUS_MAKSIMALNA_STAROST_MS) {
+    return true;
+  }
+
+  const unsigned long pocetniBroj = megaStatusSerijskiBroj;
+  Serial.println("STATUS?");
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < STATUS_CEKANJE_NA_MEGU_MS) {
+    obradiSerijskiUlaz();
+    if (megaStatusSerijskiBroj != pocetniBroj) {
+      return megaStatusPoznat;
+    }
+    delay(1);
+    yield();
+  }
+
+  return megaStatusPoznat;
+}
+
 void obradiSerijskiUlaz() {
   static char prijemniBuffer[SERIJSKI_BUFFER_MAX + 1] = {0};
   static size_t prijemnaDuljina = 0;
@@ -587,9 +735,7 @@ void obradiSerijskiUlaz() {
       char* linija = prijemniBuffer;
 
       if (linija[0] != '\0') {
-        if (strncmp(linija, "STATUS:", 7) == 0) {
-          // Status toranjskog sata se vise ne cachea na ESP-u.
-        } else if (strcmp(linija, "ACK:SETUPWIFI") == 0) {
+        if (strcmp(linija, "ACK:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = false;
         } else if (strcmp(linija, "ACK:CMD_OK") == 0) {
@@ -601,6 +747,8 @@ void obradiSerijskiUlaz() {
         } else if (strcmp(linija, "ERR:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = true;
+        } else if (strncmp(linija, "STATUS:", 7) == 0) {
+          obradiStatusMegai(linija + 7);
         } else if (strcmp(linija, "WIFISTATUS?") == 0) {
           prijaviPromjenuWiFiStatusa();
           if (wifiOmogucen && WiFi.status() == WL_CONNECTED) {
@@ -842,6 +990,54 @@ bool jePrijestupnaGodina(int godina) {
   return (godina % 400) == 0;
 }
 
+bool razloziUnixVrijemeUTC(uint32_t epochSekunde, RastavljenoVrijeme* izlaz) {
+  if (izlaz == nullptr) {
+    return false;
+  }
+
+  static const uint8_t daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+  uint32_t brojDana = epochSekunde / 86400UL;
+  uint32_t sekundeUDanu = epochSekunde % 86400UL;
+
+  izlaz->sat = static_cast<uint8_t>(sekundeUDanu / 3600UL);
+  sekundeUDanu %= 3600UL;
+  izlaz->minuta = static_cast<uint8_t>(sekundeUDanu / 60UL);
+  izlaz->sekunda = static_cast<uint8_t>(sekundeUDanu % 60UL);
+
+  uint16_t godina = 1970;
+  while (true) {
+    const uint16_t brojDanaUGodini = jePrijestupnaGodina(godina) ? 366U : 365U;
+    if (brojDana < brojDanaUGodini) {
+      break;
+    }
+    brojDana -= brojDanaUGodini;
+    ++godina;
+  }
+
+  uint8_t mjesec = 1;
+  while (mjesec <= 12) {
+    uint8_t brojDanaUMjesecu = daniUMjesecu[mjesec - 1];
+    if (mjesec == 2 && jePrijestupnaGodina(godina)) {
+      brojDanaUMjesecu = 29;
+    }
+    if (brojDana < brojDanaUMjesecu) {
+      break;
+    }
+    brojDana -= brojDanaUMjesecu;
+    ++mjesec;
+  }
+
+  if (mjesec > 12) {
+    return false;
+  }
+
+  izlaz->godina = godina;
+  izlaz->mjesec = mjesec;
+  izlaz->dan = static_cast<uint8_t>(brojDana + 1U);
+  return true;
+}
+
 int zadnjaNedjeljaUMjesecu(int godina, int mjesec) {
   static const int daniUMjesecu[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   int brojDana = daniUMjesecu[mjesec - 1];
@@ -862,16 +1058,247 @@ int danUTjednu(int godina, int mjesec, int dan) {
   return (g + g / 4 - g / 100 + g / 400 + t[mjesec - 1] + dan) % 7;
 }
 
-bool jeLjetnoVrijemeEU(time_t utcEpoch) {
-  struct tm utcTm;
-  if (gmtime_r(&utcEpoch, &utcTm) == nullptr) {
+bool osigurajNtpUdp() {
+  if (ntpUdpPokrenut) {
+    return true;
+  }
+
+  ntpUdpPokrenut = ntpUDP.begin(NTP_LOKALNI_PORT) == 1;
+  if (!ntpUdpPokrenut) {
+    Serial.println("NTPLOG: ne mogu pokrenuti UDP port za NTP");
+  }
+  return ntpUdpPokrenut;
+}
+
+void ocistiZaostaleNtpUdpPakete() {
+  // Prije novog mjerenja RTT-a odbacujemo stare UDP odgovore
+  // kako kasni paket ne bi bio pripisan novom NTP zahtjevu toranjskog sata.
+  uint8_t odlozeniPaketi = 0;
+  while (odlozeniPaketi < 4U) {
+    const int velicinaPaketa = ntpUDP.parsePacket();
+    if (velicinaPaketa <= 0) {
+      break;
+    }
+
+    uint8_t meduspremnik[64];
+    while (ntpUDP.available() > 0) {
+      ntpUDP.read(meduspremnik, sizeof(meduspremnik));
+    }
+
+    ++odlozeniPaketi;
+  }
+
+  if (odlozeniPaketi > 0U) {
+    Serial.print("NTPLOG: odbaceni zaostali UDP paketi prije novog upita, komada=");
+    Serial.println(odlozeniPaketi);
+  }
+}
+
+bool posaljiNtpUpit() {
+  if (!osigurajNtpUdp()) {
     return false;
   }
 
-  int godina = utcTm.tm_year + 1900;
-  int mjesec = utcTm.tm_mon + 1;
-  int dan = utcTm.tm_mday;
-  int sati = utcTm.tm_hour;
+  IPAddress adresaPosluzitelja;
+  if (!WiFi.hostByName(ntpPosluzitelj, adresaPosluzitelja)) {
+    Serial.print("NTPLOG: ne mogu razrijesiti NTP server ");
+    Serial.println(ntpPosluzitelj);
+    ntpZadnjiPokusajMs = millis();
+    return false;
+  }
+
+  ocistiZaostaleNtpUdpPakete();
+
+  uint8_t paket[NTP_VELICINA_PAKETA] = {0};
+  paket[0] = 0x23;
+  paket[1] = 0;
+  paket[2] = 6;
+  paket[3] = 0xEC;
+  paket[12] = 49;
+  paket[13] = 0x4E;
+  paket[14] = 49;
+  paket[15] = 52;
+
+  ntpUDP.beginPacket(adresaPosluzitelja, NTP_UDP_PORT);
+  ntpUDP.write(paket, sizeof(paket));
+  if (!ntpUDP.endPacket()) {
+    Serial.print("NTPLOG: ne mogu poslati UDP NTP upit na ");
+    Serial.println(ntpPosluzitelj);
+    ntpZadnjiPokusajMs = millis();
+    return false;
+  }
+
+  ntpZahtjevUTijeku = true;
+  ntpZahtjevPoslanMs = millis();
+  ntpZadnjiPokusajMs = ntpZahtjevPoslanMs;
+  return true;
+}
+
+bool obradiNtpOdgovor() {
+  if (!ntpUdpPokrenut) {
+    return false;
+  }
+
+  const int velicinaPaketa = ntpUDP.parsePacket();
+  if (velicinaPaketa <= 0) {
+    return false;
+  }
+
+  uint8_t paket[NTP_VELICINA_PAKETA] = {0};
+  const int procitano = ntpUDP.read(paket, sizeof(paket));
+
+  if (!ntpZahtjevUTijeku) {
+    Serial.println("NTPLOG: odbacen je UDP NTP odgovor bez aktivnog zahtjeva");
+    return false;
+  }
+
+  ntpZahtjevUTijeku = false;
+
+  if (procitano < static_cast<int>(NTP_VELICINA_PAKETA)) {
+    Serial.println("NTPLOG: primljen je prekratak UDP NTP odgovor");
+    return false;
+  }
+
+  const uint32_t ntpSekunde =
+      (static_cast<uint32_t>(paket[40]) << 24) |
+      (static_cast<uint32_t>(paket[41]) << 16) |
+      (static_cast<uint32_t>(paket[42]) << 8) |
+      static_cast<uint32_t>(paket[43]);
+  const uint32_t ntpRazlomak =
+      (static_cast<uint32_t>(paket[44]) << 24) |
+      (static_cast<uint32_t>(paket[45]) << 16) |
+      (static_cast<uint32_t>(paket[46]) << 8) |
+      static_cast<uint32_t>(paket[47]);
+  const uint8_t ntpMod = paket[0] & 0x07U;
+
+  if ((ntpMod != 4U && ntpMod != 5U) || paket[1] == 0U || ntpSekunde == 0UL) {
+    Serial.println("NTPLOG: primljen je nevaljan UDP NTP odgovor");
+    return false;
+  }
+
+  const int64_t unixEpoch =
+      odrediUnixEpochIzNtpSekundi(ntpSekunde, dohvatiReferentniUnixEpochZaNtp());
+  if (unixEpoch < static_cast<int64_t>(NTP_REFERENTNI_MIN_UNIX) ||
+      unixEpoch > static_cast<int64_t>(NTP_REFERENTNI_MAX_UNIX)) {
+    Serial.println("NTPLOG: primljen je NTP odgovor izvan poduprtog raspona godina");
+    return false;
+  }
+
+  const uint64_t razlomakMs =
+      (static_cast<uint64_t>(ntpRazlomak) * 1000ULL) >> 32;
+  const unsigned long roundTripMs = millis() - ntpZahtjevPoslanMs;
+  const uint64_t utcMs =
+      static_cast<uint64_t>(unixEpoch) * 1000ULL + razlomakMs +
+      static_cast<uint64_t>(roundTripMs / 2UL);
+
+  postaviNtpBaznoVrijemeUtcMs(utcMs);
+  ntpIkadPostavljen = true;
+  ntpZadnjiUspjehMs = millis();
+
+  Serial.print("NTPLOG: osvjezeno, epoch=");
+  Serial.println(dohvatiNtpUnixVrijeme());
+  return true;
+}
+
+void obradiNtpTimeout() {
+  if (!ntpZahtjevUTijeku) {
+    return;
+  }
+
+  if ((millis() - ntpZahtjevPoslanMs) < NTP_TIMEOUT_MS) {
+    return;
+  }
+
+  ntpZahtjevUTijeku = false;
+  Serial.println("NTPLOG: istekao je timeout za UDP NTP upit");
+}
+
+bool trebaPokrenutiNtpOsvjezavanje(unsigned long sadaMs, bool prisilno) {
+  if (ntpZahtjevUTijeku) {
+    return false;
+  }
+
+  if (prisilno) {
+    return true;
+  }
+
+  if (!jeNtpVrijemePostavljeno()) {
+    return ntpZadnjiPokusajMs == 0UL ||
+           (sadaMs - ntpZadnjiPokusajMs) >= NTP_PONOVNI_POKUSAJ_BEZ_VREMENA_MS;
+  }
+
+  return ntpZadnjiUspjehMs == 0UL ||
+         (sadaMs - ntpZadnjiUspjehMs) >= NTP_INTERVAL_MS;
+}
+
+void postaviNtpBaznoVrijemeUtcMs(uint64_t utcMs) {
+  ntpBazniUtcMs = utcMs;
+  ntpBazniMillis = millis();
+}
+
+bool jeNtpVrijemePostavljeno() {
+  return ntpIkadPostavljen;
+}
+
+uint64_t dohvatiNtpUtcMs() {
+  if (!jeNtpVrijemePostavljeno()) {
+    return 0ULL;
+  }
+
+  const unsigned long protekloMs = millis() - ntpBazniMillis;
+  return ntpBazniUtcMs + static_cast<uint64_t>(protekloMs);
+}
+
+uint32_t dohvatiNtpUnixVrijeme() {
+  const uint64_t utcMs = dohvatiNtpUtcMs();
+  return static_cast<uint32_t>(utcMs / 1000ULL);
+}
+
+uint32_t dohvatiReferentniUnixEpochZaNtp() {
+  if (jeNtpVrijemePostavljeno()) {
+    return dohvatiNtpUnixVrijeme();
+  }
+  return NTP_REFERENTNI_MIN_UNIX;
+}
+
+int64_t apsolutnaRazlikaInt64(int64_t vrijednost) {
+  return (vrijednost < 0) ? -vrijednost : vrijednost;
+}
+
+int64_t odrediUnixEpochIzNtpSekundi(uint32_t ntpSekunde, uint32_t referentniUnixEpoch) {
+  const int64_t ntpSekunde64 = static_cast<int64_t>(ntpSekunde);
+  const int64_t eraRaspon = (1LL << 32);
+  int64_t najboljiEpoch =
+      ntpSekunde64 - static_cast<int64_t>(NTP_UNIX_EPOCH_OFFSET);
+  int64_t najboljaRazlika =
+      apsolutnaRazlikaInt64(najboljiEpoch - static_cast<int64_t>(referentniUnixEpoch));
+
+  for (int eraPomak = -1; eraPomak <= 1; ++eraPomak) {
+    const int64_t kandidatEpoch =
+        ntpSekunde64 +
+        static_cast<int64_t>(eraPomak) * eraRaspon -
+        static_cast<int64_t>(NTP_UNIX_EPOCH_OFFSET);
+    const int64_t kandidatRazlika =
+        apsolutnaRazlikaInt64(kandidatEpoch - static_cast<int64_t>(referentniUnixEpoch));
+    if (kandidatRazlika < najboljaRazlika) {
+      najboljiEpoch = kandidatEpoch;
+      najboljaRazlika = kandidatRazlika;
+    }
+  }
+
+  return najboljiEpoch;
+}
+
+bool jeLjetnoVrijemeEU(uint32_t utcEpoch) {
+  RastavljenoVrijeme utcVrijeme{};
+  if (!razloziUnixVrijemeUTC(utcEpoch, &utcVrijeme)) {
+    return false;
+  }
+
+  int godina = utcVrijeme.godina;
+  int mjesec = utcVrijeme.mjesec;
+  int dan = utcVrijeme.dan;
+  int sati = utcVrijeme.sat;
 
   if (mjesec < 3 || mjesec > 10) {
     return false;
@@ -892,15 +1319,31 @@ bool jeLjetnoVrijemeEU(time_t utcEpoch) {
   return sati < 1;
 }
 
-time_t konvertirajUTCuLokalnoVrijeme(time_t utcEpoch) {
-  static const long CET_OFFSET_SEKUNDI = 3600;
-  static const long CEST_DODATAK_SEKUNDI = 3600;
+uint32_t konvertirajUTCuLokalnoVrijeme(uint32_t utcEpoch) {
+  static const uint32_t CET_OFFSET_SEKUNDI = 3600UL;
+  static const uint32_t CEST_DODATAK_SEKUNDI = 3600UL;
 
-  long ukupniOffset = CET_OFFSET_SEKUNDI;
+  uint32_t ukupniOffset = CET_OFFSET_SEKUNDI;
   if (jeLjetnoVrijemeEU(utcEpoch)) {
     ukupniOffset += CEST_DODATAK_SEKUNDI;
   }
   return utcEpoch + ukupniOffset;
+}
+
+void formatirajIsoDatumIVrijeme(const RastavljenoVrijeme& vrijeme, char* izlaz, size_t velicinaIzlaza) {
+  if (izlaz == nullptr || velicinaIzlaza == 0U) {
+    return;
+  }
+
+  snprintf(izlaz,
+           velicinaIzlaza,
+           "%04u-%02u-%02uT%02u:%02u:%02u",
+           static_cast<unsigned>(vrijeme.godina),
+           static_cast<unsigned>(vrijeme.mjesec),
+           static_cast<unsigned>(vrijeme.dan),
+           static_cast<unsigned>(vrijeme.sat),
+           static_cast<unsigned>(vrijeme.minuta),
+           static_cast<unsigned>(vrijeme.sekunda));
 }
 
 void ucitajWebAutentikaciju() {
@@ -983,16 +1426,23 @@ bool osigurajWebAutorizaciju() {
   return false;
 }
 
-void posaljiJsonStatus() {
+void posaljiJsonStatus(bool prisilno) {
+  osvjeziStatusMegai(prisilno);
+
   char ipBuffer[16];
   snprintf(ipBuffer, sizeof(ipBuffer), "%s", WiFi.localIP().toString().c_str());
 
-  char tijelo[80];
+  char tijelo[192];
   snprintf_P(tijelo,
              sizeof(tijelo),
-             PSTR("{\"wifi_ip\":\"%s\",\"wifi_connected\":%s}"),
+             PSTR("{\"wifi_ip\":\"%s\",\"wifi_connected\":%s,\"mega_status_known\":%s,\"bell1_active\":%s,\"bell2_active\":%s,\"slavljenje_active\":%s,\"mrtvacko_active\":%s}"),
              ipBuffer,
-             (WiFi.status() == WL_CONNECTED) ? "true" : "false");
+             (WiFi.status() == WL_CONNECTED) ? "true" : "false",
+             megaStatusPoznat ? "true" : "false",
+             megaZvono1Aktivno ? "true" : "false",
+             megaZvono2Aktivno ? "true" : "false",
+             megaSlavljenjeAktivno ? "true" : "false",
+             megaMrtvackoAktivno ? "true" : "false");
   webPosluzitelj.send(200, "application/json", tijelo);
 }
 
@@ -1034,47 +1484,60 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
   <style>
     :root {
       color-scheme: light;
-      --bg:#ece3d1;
-      --bg2:#f8f2e8;
-      --panel:#fffaf1;
-      --line:#c5b394;
-      --text:#2c2418;
-      --muted:#74624c;
-      --accent:#7c5b2f;
-      --accent-soft:#efe1c7;
-      --ok:#365b34;
-      --ok-soft:#dfead8;
-      --warn:#8a3a24;
-      --warn-soft:#f5ddd4;
-      --shadow:0 16px 36px rgba(67, 48, 24, 0.10);
+      --bg:#dde6f1;
+      --bg2:#f4f7fb;
+      --panel:rgba(255,255,255,0.84);
+      --line:rgba(130,149,174,0.35);
+      --text:#253246;
+      --muted:#617286;
+      --hero:#fdfefe;
+      --ok:#b94e63;
+      --ok-soft:#f8dbe2;
+      --warn:#6f7f93;
+      --warn-soft:#e7edf4;
+      --off:#eef2f7;
+      --off-line:#8a98a8;
+      --shadow:0 18px 42px rgba(75, 95, 122, 0.14);
     }
     * { box-sizing:border-box; }
     body {
       margin:0;
-      font-family: Georgia, "Times New Roman", serif;
+      font-family: "Trebuchet MS", Verdana, sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.55), transparent 28%),
+        radial-gradient(circle at top left, rgba(255,255,255,0.82), transparent 28%),
         linear-gradient(180deg, var(--bg), var(--bg2));
       color:var(--text);
     }
-    .wrap { max-width:1180px; margin:0 auto; padding:22px 18px 34px; }
+    body::before {
+      content:"";
+      position:fixed;
+      inset:0;
+      background:
+        radial-gradient(circle at 16% 18%, rgba(255,255,255,0.9), transparent 22%),
+        radial-gradient(circle at 84% 30%, rgba(210,223,239,0.7), transparent 24%),
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.16));
+      pointer-events:none;
+    }
+    .wrap {
+      position:relative;
+      max-width:1080px;
+      margin:0 auto;
+      padding:22px 18px 34px;
+    }
     .hero {
-      background:linear-gradient(135deg, rgba(255,250,241,0.98), rgba(246,235,212,0.96));
+      background:linear-gradient(135deg, rgba(255,255,255,0.95), rgba(245,248,252,0.92));
       border:1px solid var(--line);
       border-radius:22px;
       padding:22px;
       box-shadow:var(--shadow);
       margin-bottom:16px;
     }
-    .hero-top {
-      display:flex;
-      justify-content:space-between;
-      gap:16px;
-      align-items:flex-start;
-      flex-wrap:wrap;
-    }
     h1, h2, h3 { margin:0; }
-    h1 { font-size:clamp(28px, 4vw, 40px); letter-spacing:0.02em; }
+    h1 {
+      font-size:clamp(28px, 4vw, 40px);
+      letter-spacing:0.02em;
+      font-family: Georgia, "Times New Roman", serif;
+    }
     .subtitle {
       margin-top:10px;
       max-width:720px;
@@ -1082,14 +1545,8 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       line-height:1.6;
       font-size:15px;
     }
-    .hero-actions {
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:18px;
-    }
-    .link-btn,
-    .card button {
+    .secondary-card button,
+    .toggle-btn {
       appearance:none;
       border:none;
       border-radius:12px;
@@ -1099,96 +1556,41 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       cursor:pointer;
       transition:transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .link-btn {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      text-decoration:none;
-      color:var(--text);
-      background:#fff;
-      border:1px solid var(--line);
-      min-width:150px;
-    }
-    .link-btn:hover,
-    .card button:hover {
+    .secondary-card button:hover,
+    .toggle-btn:hover {
       transform:translateY(-1px);
       box-shadow:0 10px 20px rgba(67, 48, 24, 0.12);
     }
-    .status-box {
-      min-width:260px;
-      background:rgba(255,255,255,0.72);
-      border:1px solid var(--line);
-      border-radius:18px;
-      padding:14px 16px;
-    }
-    .status-grid {
+    .primary-grid {
       display:grid;
       grid-template-columns:repeat(2, minmax(0, 1fr));
-      gap:10px;
-      margin-top:10px;
+      gap:16px;
+      margin-bottom:18px;
     }
-    .status-item {
-      background:rgba(255,250,241,0.85);
-      border:1px solid rgba(197,179,148,0.65);
-      border-radius:12px;
-      padding:10px 12px;
-    }
-    .status-label {
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.08em;
-      color:var(--muted);
-      margin-bottom:4px;
-    }
-    .status-value {
-      font-size:15px;
-      font-weight:700;
-      word-break:break-word;
-    }
-    .status-badge {
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      border-radius:999px;
-      padding:8px 12px;
-      font-size:13px;
-      font-weight:700;
-      background:var(--warn-soft);
-      color:var(--warn);
-    }
-    .status-badge.ok {
-      background:var(--ok-soft);
-      color:var(--ok);
-    }
-    .dashboard {
-      display:grid;
-      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
-      gap:14px;
-    }
-    .card {
-      background:var(--panel);
+    .main-card {
+      background:linear-gradient(180deg, rgba(255,255,255,0.92), rgba(246,249,252,0.88));
       border:1px solid var(--line);
-      border-radius:20px;
-      padding:18px;
+      border-radius:24px;
+      padding:20px;
       box-shadow:var(--shadow);
       display:flex;
       flex-direction:column;
-      gap:14px;
-      min-height:220px;
+      gap:16px;
+      min-height:248px;
       position:relative;
       overflow:hidden;
     }
-    .card::before {
+    .main-card::before {
       content:"";
       position:absolute;
-      inset:auto -30px -40px auto;
-      width:120px;
-      height:120px;
+      inset:auto -18px -26px auto;
+      width:118px;
+      height:118px;
       border-radius:50%;
-      background:radial-gradient(circle, rgba(239,225,199,0.7), transparent 72%);
+      background:radial-gradient(circle, rgba(217,229,243,0.85), transparent 72%);
       pointer-events:none;
     }
-    .card-header { position:relative; z-index:1; }
+    .main-card-header { position:relative; z-index:1; }
     .eyebrow {
       font-size:11px;
       text-transform:uppercase;
@@ -1196,35 +1598,103 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       color:var(--muted);
       margin-bottom:8px;
     }
-    .card h2 {
-      font-size:26px;
+    .main-card h2 {
+      font-size:30px;
       line-height:1.05;
       margin-bottom:6px;
+      font-family: Georgia, "Times New Roman", serif;
     }
-    .card p {
+    .toggle-wrap {
+      display:grid;
+      margin-top:auto;
+      position:relative;
+      z-index:1;
+    }
+    .toggle-btn {
+      min-height:108px;
+      border-radius:20px;
+      font-size:20px;
+      letter-spacing:0.06em;
+      text-transform:uppercase;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.85),
+        0 8px 18px rgba(70, 88, 112, 0.12);
+    }
+    .toggle-btn.active {
+      background:linear-gradient(180deg, #f3f8ff, #d6e8ff);
+      color:#1f4f8f;
+      border:2px solid rgba(63,117,191,0.62);
+    }
+    .toggle-btn.inactive {
+      background:linear-gradient(180deg, #fafbfd, #e7edf4);
+      color:#4c5e74;
+      border:2px solid rgba(138,152,168,0.5);
+    }
+    .secondary-section {
+      background:rgba(255,255,255,0.62);
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:18px;
+      box-shadow:var(--shadow);
+      margin-bottom:16px;
+    }
+    .secondary-head {
+      margin-bottom:14px;
+    }
+    .secondary-head h3 {
+      font-size:22px;
+      font-family: Georgia, "Times New Roman", serif;
+      margin-bottom:6px;
+    }
+    .secondary-head p {
       margin:0;
       color:var(--muted);
       line-height:1.5;
       font-size:14px;
-      position:relative;
-      z-index:1;
+    }
+    .secondary-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));
+      gap:14px;
+    }
+    .secondary-card {
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      box-shadow:0 12px 28px rgba(75, 95, 122, 0.10);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .secondary-card h2 {
+      font-size:24px;
+      line-height:1.1;
+      font-family: Georgia, "Times New Roman", serif;
+      margin-bottom:6px;
+    }
+    .secondary-card p {
+      margin:0;
+      color:var(--muted);
+      line-height:1.5;
+      font-size:14px;
     }
     .btn-row {
       display:grid;
       grid-template-columns:1fr 1fr;
       gap:10px;
       margin-top:auto;
-      position:relative;
-      z-index:1;
     }
-    .btn-primary { background:var(--accent); color:#fffaf1; }
+    .btn-primary {
+      background:linear-gradient(180deg, #be5a70, #a64558);
+      color:#fffafc;
+    }
     .btn-secondary {
       background:#fff;
       color:var(--text);
       border:1px solid var(--line);
     }
     .log-panel {
-      margin-top:16px;
       background:#2d2419;
       color:#f7efe0;
       border-radius:18px;
@@ -1244,141 +1714,170 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       color:#bfae92;
       font-size:12px;
     }
+    @media (max-width:820px) {
+      .primary-grid { grid-template-columns:1fr; }
+    }
     @media (max-width:700px) {
       .wrap { padding:14px 12px 24px; }
       .hero { padding:18px; }
-      .status-grid { grid-template-columns:1fr; }
       .btn-row { grid-template-columns:1fr; }
-      .card { min-height:auto; }
+      .toggle-btn { min-height:92px; }
+      .main-card { min-height:auto; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <section class="hero">
-      <div class="hero-top">
-        <div>
-          <h1>Dashboard toranjskog sata</h1>
-          <p class="subtitle">
-            Ovaj ESP vodi mrezu toranjskog sata i prosljedjuje servisne naredbe prema Arduino Megi.
-            Kartice ispod salju API zahtjeve za zvona, slavljenje, mrtvacko i suncevu automatiku.
-          </p>
-          <div class="hero-actions">
-            <a class="link-btn" href="/setup">Setup WiFi</a>
-            <a class="link-btn" href="/status" target="_blank" rel="noopener">JSON status</a>
-          </div>
+      <h1>Dashboard toranjskog sata</h1>
+      <p class="subtitle">
+        Glavne cetiri komande su odmah ispod, a dodatne opcije ostaju odvojene u donjem dijelu.
+      </p>
+    </section>
+
+    <section class="primary-grid">
+      <article class="main-card">
+        <div class="main-card-header">
+          <div class="eyebrow">Gornji red</div>
+          <h2>Musko zvono</h2>
         </div>
-        <div class="status-box">
-          <div id="wifiBadge" class="status-badge">WiFi: provjera...</div>
-          <div class="status-grid">
-            <div class="status-item">
-              <div class="status-label">IP adresa</div>
-              <div id="wifiIp" class="status-value">--</div>
-            </div>
-            <div class="status-item">
-              <div class="status-label">Autorizacija</div>
-              <div class="status-value">Basic Auth</div>
-            </div>
-          </div>
+        <div class="toggle-wrap">
+          <button id="toggleBell1" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('bell1')">MU&Scaron;KO</button>
         </div>
+      </article>
+
+      <article class="main-card">
+        <div class="main-card-header">
+          <div class="eyebrow">Gornji red</div>
+          <h2>Zensko zvono</h2>
+        </div>
+        <div class="toggle-wrap">
+          <button id="toggleBell2" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('bell2')">&Zcaron;ENSKO</button>
+        </div>
+      </article>
+
+      <article class="main-card">
+        <div class="main-card-header">
+          <div class="eyebrow">Donji red</div>
+          <h2>Slavljenje</h2>
+        </div>
+        <div class="toggle-wrap">
+          <button id="toggleSlavljenje" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('slavljenje')">SLAVI</button>
+        </div>
+      </article>
+
+      <article class="main-card">
+        <div class="main-card-header">
+          <div class="eyebrow">Donji red</div>
+          <h2>Mrtvacko</h2>
+        </div>
+        <div class="toggle-wrap">
+          <button id="toggleMrtvacko" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('mrtvacko')">BRECA</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="secondary-section">
+      <div class="secondary-head">
+        <h3>Dodatne opcije</h3>
+        <p>Sunceve automatike i pomocne kontrole ostaju dostupne ispod glavne 2x2 matrice tipki toranjskog sata.</p>
+      </div>
+      <div class="secondary-grid">
+        <article class="secondary-card">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Jutro</h2>
+          <div class="btn-row">
+            <button class="btn-primary" onclick="pozoviApi('/api/solar/morning/on', 'Sunce jutro ukljuci')">Ukljuci</button>
+            <button class="btn-secondary" onclick="pozoviApi('/api/solar/morning/off', 'Sunce jutro iskljuci')">Iskljuci</button>
+          </div>
+        </article>
+
+        <article class="secondary-card">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Podne</h2>
+          <div class="btn-row">
+            <button class="btn-primary" onclick="pozoviApi('/api/solar/noon/on', 'Sunce podne ukljuci')">Ukljuci</button>
+            <button class="btn-secondary" onclick="pozoviApi('/api/solar/noon/off', 'Sunce podne iskljuci')">Iskljuci</button>
+          </div>
+        </article>
+
+        <article class="secondary-card">
+          <div class="eyebrow">Sunceva automatika</div>
+          <h2>Vecer</h2>
+          <div class="btn-row">
+            <button class="btn-primary" onclick="pozoviApi('/api/solar/evening/on', 'Sunce vecer ukljuci')">Ukljuci</button>
+            <button class="btn-secondary" onclick="pozoviApi('/api/solar/evening/off', 'Sunce vecer iskljuci')">Iskljuci</button>
+          </div>
+        </article>
       </div>
     </section>
 
-    <section class="dashboard">
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Rucna komanda</div>
-          <h2>Zvono 1</h2>
-          <p>Direktno ukljucenje ili gasenje prvog zvona toranjskog sata preko API puta prema Megi.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/bell1/on', 'Zvono 1 ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/bell1/off', 'Zvono 1 iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Rucna komanda</div>
-          <h2>Zvono 2</h2>
-          <p>Druga servisna kartica za zasebno upravljanje drugim zvonom bez ulaska u lokalni meni sata.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/bell2/on', 'Zvono 2 ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/bell2/off', 'Zvono 2 iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Posebni nacin</div>
-          <h2>Slavljenje</h2>
-          <p>Rucno pokretanje ili prekid slavljenja za servis, probu ili provjeru reakcije cekica i zvona.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/slavljenje/on', 'Slavljenje ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/slavljenje/off', 'Slavljenje iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Posebni nacin</div>
-          <h2>Mrtvacko</h2>
-          <p>Servisna kartica za ukljucenje ili zaustavljanje mrtvackog nacina rada s Megine strane.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/mrtvacko/on', 'Mrtvacko ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/mrtvacko/off', 'Mrtvacko iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Jutro</h2>
-          <p>Rucno dopusti ili zabrani jutarnji suncev dogadjaj bez mijenjanja glavnih postavki na LCD-u.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/solar/morning/on', 'Sunce jutro ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/solar/morning/off', 'Sunce jutro iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Podne</h2>
-          <p>Kontrola podnevnog suncevog zvonjenja preko jedne velike kartice, bez skrivene tekstualne rute.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/solar/noon/on', 'Sunce podne ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/solar/noon/off', 'Sunce podne iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-header">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Vecer</h2>
-          <p>Rucna servisna kartica za vecernju suncevu automatiku i brzu provjeru odgovora Megine logike.</p>
-        </div>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="pozoviApi('/api/solar/evening/on', 'Sunce vecer ukljuci')">Ukljuci</button>
-          <button class="btn-secondary" onclick="pozoviApi('/api/solar/evening/off', 'Sunce vecer iskljuci')">Iskljuci</button>
-        </div>
-      </article>
-    </section>
-
     <section class="log-panel">
-      <h3>Zadnja web akcija</h3>
       <div id="odgovor" class="log-text">Dashboard je spreman. Odaberi karticu i posalji naredbu prema Megi.</div>
-      <div class="muted-small">Napomena: API i dashboard koriste istu Basic Auth prijavu. Ako je Mega zauzeta, odgovor ce biti prikazan ovdje.</div>
     </section>
   </div>
   <script>
+    const glavneKomande = {
+      bell1: {
+        tipkaId: 'toggleBell1',
+        apiOn: '/api/bell1/on',
+        apiOff: '/api/bell1/off',
+        naziv: 'Musko zvono',
+        oznakaTipke: 'MU\u0160KO'
+      },
+      bell2: {
+        tipkaId: 'toggleBell2',
+        apiOn: '/api/bell2/on',
+        apiOff: '/api/bell2/off',
+        naziv: 'Zensko zvono',
+        oznakaTipke: '\u017dENSKO'
+      },
+      slavljenje: {
+        tipkaId: 'toggleSlavljenje',
+        apiOn: '/api/slavljenje/on',
+        apiOff: '/api/slavljenje/off',
+        naziv: 'Slavljenje',
+        oznakaTipke: 'SLAVI'
+      },
+      mrtvacko: {
+        tipkaId: 'toggleMrtvacko',
+        apiOn: '/api/mrtvacko/on',
+        apiOff: '/api/mrtvacko/off',
+        naziv: 'Mrtvacko',
+        oznakaTipke: 'BRECA'
+      }
+    };
+
+    let glavnoStanje = {
+      bell1: null,
+      bell2: null,
+      slavljenje: null,
+      mrtvacko: null
+    };
+
     function postaviLog(poruka) {
       document.getElementById('odgovor').textContent = poruka;
+    }
+
+    function postaviTipkuStanja(kljuc, aktivno, statusPoznat) {
+      const meta = glavneKomande[kljuc];
+      const tipka = document.getElementById(meta.tipkaId);
+      if (!tipka) {
+        return;
+      }
+
+      tipka.textContent = meta.oznakaTipke;
+
+      if (!statusPoznat || aktivno === null) {
+        tipka.classList.remove('active');
+        tipka.classList.add('inactive');
+        tipka.setAttribute('aria-pressed', 'false');
+        return;
+      }
+
+      tipka.classList.toggle('active', aktivno);
+      tipka.classList.toggle('inactive', !aktivno);
+      tipka.setAttribute('aria-pressed', aktivno ? 'true' : 'false');
     }
 
     async function pozoviApi(putanja, oznaka) {
@@ -1399,28 +1898,53 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       }
     }
 
-    async function osvjeziStatus() {
+    async function prebaciGlavnuKomandu(kljuc) {
+      const meta = glavneKomande[kljuc];
+      if (glavnoStanje[kljuc] === null) {
+        await osvjeziStatus(true);
+      }
+      if (glavnoStanje[kljuc] === null) {
+        postaviLog(meta.naziv + ': stanje nije dostupno, pokusaj ponovno za trenutak.');
+        return;
+      }
+
+      const trenutnoAktivno = glavnoStanje[kljuc] === true;
+      const ukljucujeSe = !trenutnoAktivno;
+      const putanja = ukljucujeSe ? meta.apiOn : meta.apiOff;
+      const oznaka = meta.naziv + (ukljucujeSe ? ' ukljuci' : ' iskljuci');
+
+      await pozoviApi(putanja, oznaka);
+      await osvjeziStatus(true);
+    }
+
+    async function osvjeziStatus(prisilno = false) {
       try {
-        const odgovor = await fetch('/status', { cache: 'no-store' });
+        const putanjaStatusa = prisilno ? '/api/status?force=1' : '/api/status';
+        const odgovor = await fetch(putanjaStatusa, { cache: 'no-store' });
         if (!odgovor.ok) {
           throw new Error('status');
         }
         const podaci = await odgovor.json();
-        const badge = document.getElementById('wifiBadge');
-        const ip = document.getElementById('wifiIp');
-        ip.textContent = podaci.wifi_ip || '--';
-        if (podaci.wifi_connected) {
-          badge.textContent = 'WiFi: spojen';
-          badge.classList.add('ok');
-        } else {
-          badge.textContent = 'WiFi: nije spojen';
-          badge.classList.remove('ok');
-        }
+
+        glavnoStanje.bell1 = podaci.mega_status_known ? !!podaci.bell1_active : null;
+        glavnoStanje.bell2 = podaci.mega_status_known ? !!podaci.bell2_active : null;
+        glavnoStanje.slavljenje = podaci.mega_status_known ? !!podaci.slavljenje_active : null;
+        glavnoStanje.mrtvacko = podaci.mega_status_known ? !!podaci.mrtvacko_active : null;
+
+        postaviTipkuStanja('bell1', glavnoStanje.bell1, !!podaci.mega_status_known);
+        postaviTipkuStanja('bell2', glavnoStanje.bell2, !!podaci.mega_status_known);
+        postaviTipkuStanja('slavljenje', glavnoStanje.slavljenje, !!podaci.mega_status_known);
+        postaviTipkuStanja('mrtvacko', glavnoStanje.mrtvacko, !!podaci.mega_status_known);
       } catch (greska) {
-        const badge = document.getElementById('wifiBadge');
-        document.getElementById('wifiIp').textContent = '--';
-        badge.textContent = 'WiFi: status nedostupan';
-        badge.classList.remove('ok');
+        glavnoStanje.bell1 = null;
+        glavnoStanje.bell2 = null;
+        glavnoStanje.slavljenje = null;
+        glavnoStanje.mrtvacko = null;
+
+        postaviTipkuStanja('bell1', null, false);
+        postaviTipkuStanja('bell2', null, false);
+        postaviTipkuStanja('slavljenje', null, false);
+        postaviTipkuStanja('mrtvacko', null, false);
       }
     }
 
@@ -1513,7 +2037,6 @@ void obradiNTPSerijskuNaredbu(const char* payload) {
 
   strncpy(ntpPosluzitelj, server, sizeof(ntpPosluzitelj) - 1);
   ntpPosluzitelj[sizeof(ntpPosluzitelj) - 1] = '\0';
-  ntpKlijent.setPoolServerName(ntpPosluzitelj);
   resetirajNtpStanje();
 
   Serial.print("NTPLOG: postavljen novi NTP server ");
@@ -1571,12 +2094,15 @@ void konfigurirajWebPosluzitelj() {
     webPosluzitelj.send(200, "text/plain", odgovor);
   });
 
-  Serial.println("WEB: Registriram /status rutu");
-  webPosluzitelj.on("/status", []() {
+  Serial.println("WEB: Registriram /api/status rutu");
+  webPosluzitelj.on("/api/status", []() {
     if (!osigurajWebAutorizaciju()) {
       return;
     }
-    posaljiJsonStatus();
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonStatus(prisilno);
   });
 
   Serial.println("WEB: Registriram API rute");

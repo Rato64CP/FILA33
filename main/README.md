@@ -9,6 +9,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - upravljanje zvonima i cekicima
 - odvojena inercija `INR1` i `INR2` za dva zvona
 - izbor rada s kocnicom zvona kroz `K:0/1`
+- sigurnosno gasenje rucnih sklopki `ZVONO 1`, `ZVONO 2` i prekidaca `SLAVLJENJE` nakon `30 min` neprekidnog ukljucenja
 - termalna zastita slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - lokalne postavke preko LCD izbornika i tipki

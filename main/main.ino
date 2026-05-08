@@ -23,6 +23,7 @@
 #include "prekidac_tisine.h"
 #include "rs485_bridge.h"
 #include "ups_nadzor.h"
+#include "daljinski_433.h"
 
 namespace {
 
@@ -73,6 +74,7 @@ void setup() {
   inicijalizirajUPSNadzor();
 
   inicijalizirajTipke();
+  inicijalizirajDaljinski433();
   inicijalizirajESP();
   inicijalizirajMenuSistem();
 
@@ -118,6 +120,7 @@ void loop() {
   osvjeziPrekidacTisine();
   osvjeziUPSNadzor();
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
+  obradiDaljinski433();
 
   upravljajZvonom();
   upravljajOtkucavanjem();

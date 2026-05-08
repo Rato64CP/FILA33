@@ -189,6 +189,9 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje) {
   }
   zadnjiObradeniRtcTick = rtcTick;
   const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if (!jeVrijemeSvjezeZaRtcTick(rtcTick)) {
+    return;
+  }
   if ((rtcVrijeme.second() % 6) != 0) {
     return;
   }

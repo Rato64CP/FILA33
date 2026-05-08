@@ -186,6 +186,7 @@ Start pune i polovine ure sada se, kad je `RTC SQW` dostupan, poravnava na stvar
 - `slavljenje` je spojeno na fizicki kip-prekidac
 - stanje `LOW` na ulazu znaci da slavljenje treba biti ukljuceno
 - povratak prekidaca u `HIGH` gasi slavljenje
+- ako fizicki prekidac slavljenja ostane neprekidno aktivan vise od `30 min`, firmware ga sigurnosno gasi i ignorira dok se prekidac fizicki ne vrati na `OFF`
 - `mrtvacko` ostaje zasebno tipkalo i radi kao `toggle` pri pritisku
 
 ### Thumbwheel za mrtvacko
@@ -221,6 +222,8 @@ Kazaljke i okretna ploca ostaju aktivne.
 
 ### Rucno upravljanje preko sklopki
 Postoje fizicke sklopke za `ZVONO 1` i `ZVONO 2`. Kada je rucni override aktivan, on ima prioritet nad automatikom.
+
+Ako pojedina sklopka ostane neprekidno ukljucena vise od `30 min`, firmware radi sigurnosno gasenje tog zvona i dalje ignorira tu sklopku dok se fizicki ne vrati na `OFF`. Time se toranjski sat stiti od zalijepljenog kontakta ili zaboravljenog rucnog ukljucenja.
 
 ### Inercija
 Nakon ukljucivanja ili iskljucivanja zvona aktivira se inercija. Vrijednost se zasebno postavlja za `Zvono 1` i `Zvono 2` kroz meni `Sustav`, a u tom periodu se blokiraju udari cekica kako se ne bi preklapala mehanicka gibanja.
@@ -329,15 +332,25 @@ Druga stranica menija `Blagdani` uredjuje Svi sveti i Dusni dan:
 - `2.11.` se preskace jutarnja Zdravomarija
 - mrtvacko za Svi sveti namjerno ignorira thumbwheel auto-stop, jer trajanje odreduje kalendarski raspored
 
-Meni `Sustav` trenutno uredjuje:
+Meni `Sustav` je sada zgusnut u dvije LCD stranice kako bi bilo manje hoda kroz meni:
+- stranica `Razno` prikazuje `LCD`, `LOG`, `RS` na prvom redu te `UPS` i `KOC` na drugom
+- stranica `Impuls/inercija` prikazuje `IN1`, `IN2` i `IMPULS`
+
+U tom rasporedu:
+- `LIJEVO/DESNO` pomice aktivno polje kroz svih 8 sustavskih postavki
+- `GORE/DOLJE` mijenja vrijednost aktivnog polja
+- `DA` sprema sve izmjene
+- `NE` izlazi bez spremanja
+
+Obuhvacene postavke su:
 - `LCD svjetlo`
 - `Logiranje`
 - `RS485`
 - `UPS mod`
 - `K` - koristenje kocnice zvona
-- `Impuls cekica`
 - `INR1` - vrijeme smirivanja za `Zvono 1`
 - `INR2` - vrijeme smirivanja za `Zvono 2`
+- `Impuls cekica`
 
 `UPS mod` koristi odvojeni ulaz za nadzor mreznog napona. Kad je ukljucen i `Mega` prijavi da mreza vise nije prisutna, firmware toranjskog sata:
 - blokira zvona kroz [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp)

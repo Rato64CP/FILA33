@@ -387,10 +387,10 @@ static void ucitajMaticniSatZaUredjivanje() {
 
 static unsigned int prilagodiTrajanjeImpulsaCekicaZaMeni(unsigned int trenutnoMs, int deltaKorak) {
   int novoMs = static_cast<int>(trenutnoMs) + (deltaKorak * 10);
-  if (novoMs > 150) {
-    novoMs = 50;
-  } else if (novoMs < 50) {
-    novoMs = 150;
+  if (novoMs > 300) {
+    novoMs = 10;
+  } else if (novoMs < 10) {
+    novoMs = 300;
   }
   return static_cast<unsigned int>(novoMs);
 }
@@ -721,39 +721,57 @@ static void prikaziMrezuMenu() {
 static void prikaziSustavMenu() {
   char redak1[17];
   char redak2[17];
-  FlashTekst::kopirajLiteral(redak1, sizeof(redak1), PSTR("SUSTAV"));
-  if (odabraniIndex == 0) {
-    snprintf_P(redak2, sizeof(redak2), PSTR("> LCD: %s"),
-               lcdPozadinskoOsvjetljenjeUredjivanje ? "ON" : "OFF");
-  } else if (odabraniIndex == 1) {
-    snprintf_P(redak2, sizeof(redak2), PSTR("> Log: %s"),
-               logiranjeUredjivanje ? "ON" : "OFF");
-  } else if (odabraniIndex == 2) {
-    snprintf_P(redak2, sizeof(redak2), PSTR("> RS485: %u"),
+  if (odabraniIndex <= 4) {
+    snprintf_P(redak1,
+               sizeof(redak1),
+               PSTR("LCD:%u LOG:%u RS:%u"),
+               lcdPozadinskoOsvjetljenjeUredjivanje ? 1U : 0U,
+               logiranjeUredjivanje ? 1U : 0U,
                rs485Uredjivanje ? 1U : 0U);
-  } else if (odabraniIndex == 3) {
-    snprintf_P(redak2, sizeof(redak2), PSTR("> UPS: %s"),
-               upsModUredjivanje ? "ON" : "OFF");
-  } else if (odabraniIndex == 4) {
-    snprintf_P(redak2, sizeof(redak2), PSTR("> K:%u"),
+    snprintf_P(redak2,
+               sizeof(redak2),
+               PSTR("UPS:%u KOC:%u"),
+               upsModUredjivanje ? 1U : 0U,
                kocnicaZvonaUredjivanje ? 1U : 0U);
-  } else if (odabraniIndex == 5) {
+  } else {
+    snprintf_P(redak1, sizeof(redak1), PSTR("IN1 IN2 IMPULS"));
     snprintf_P(redak2,
                sizeof(redak2),
-               PSTR("> Cekic:%3ums"),
+               PSTR("%03u %03u %03ums"),
+               static_cast<unsigned>(inercijaZvona1Uredjivanje),
+               static_cast<unsigned>(inercijaZvona2Uredjivanje),
                static_cast<unsigned>(trajanjeImpulsaCekicaUredjivanje));
-  } else if (odabraniIndex == 6) {
-    snprintf_P(redak2,
-               sizeof(redak2),
-               PSTR("> INR1:%5us"),
-               static_cast<unsigned>(inercijaZvona1Uredjivanje));
-  } else if (odabraniIndex == 7) {
-    snprintf_P(redak2,
-               sizeof(redak2),
-               PSTR("> INR2:%5us"),
-               static_cast<unsigned>(inercijaZvona2Uredjivanje));
   }
   prikaziPoruku(redak1, redak2);
+
+  lcd.cursor();
+  lcd.blink();
+  switch (odabraniIndex) {
+    case 0:
+      lcd.setCursor(4, 0);
+      break;
+    case 1:
+      lcd.setCursor(10, 0);
+      break;
+    case 2:
+      lcd.setCursor(15, 0);
+      break;
+    case 3:
+      lcd.setCursor(4, 1);
+      break;
+    case 4:
+      lcd.setCursor(10, 1);
+      break;
+    case 5:
+      lcd.setCursor(0, 1);
+      break;
+    case 6:
+      lcd.setCursor(4, 1);
+      break;
+    default:
+      lcd.setCursor(8, 1);
+      break;
+  }
 }
 
 static void prikaziPlocaMenu() {
@@ -1299,10 +1317,48 @@ static void obradiKlucWiFiIP(KeyEvent event) {
 static void obradiKlucSustav(KeyEvent event) {
   switch (event) {
     case KEY_UP:
-      odabraniIndex = (odabraniIndex - 1 + BROJ_STAVKI_SUSTAVA) % BROJ_STAVKI_SUSTAVA;
+      if (odabraniIndex == 0) {
+        lcdPozadinskoOsvjetljenjeUredjivanje = !lcdPozadinskoOsvjetljenjeUredjivanje;
+      } else if (odabraniIndex == 1) {
+        logiranjeUredjivanje = !logiranjeUredjivanje;
+      } else if (odabraniIndex == 2) {
+        rs485Uredjivanje = !rs485Uredjivanje;
+      } else if (odabraniIndex == 3) {
+        upsModUredjivanje = !upsModUredjivanje;
+      } else if (odabraniIndex == 4) {
+        kocnicaZvonaUredjivanje = !kocnicaZvonaUredjivanje;
+      } else if (odabraniIndex == 5) {
+        inercijaZvona1Uredjivanje =
+            prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, 1);
+      } else if (odabraniIndex == 6) {
+        inercijaZvona2Uredjivanje =
+            prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, 1);
+      } else if (odabraniIndex == 7) {
+        trajanjeImpulsaCekicaUredjivanje =
+            prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, 1);
+      }
       break;
     case KEY_DOWN:
-      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_SUSTAVA;
+      if (odabraniIndex == 0) {
+        lcdPozadinskoOsvjetljenjeUredjivanje = !lcdPozadinskoOsvjetljenjeUredjivanje;
+      } else if (odabraniIndex == 1) {
+        logiranjeUredjivanje = !logiranjeUredjivanje;
+      } else if (odabraniIndex == 2) {
+        rs485Uredjivanje = !rs485Uredjivanje;
+      } else if (odabraniIndex == 3) {
+        upsModUredjivanje = !upsModUredjivanje;
+      } else if (odabraniIndex == 4) {
+        kocnicaZvonaUredjivanje = !kocnicaZvonaUredjivanje;
+      } else if (odabraniIndex == 5) {
+        inercijaZvona1Uredjivanje =
+            prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, -1);
+      } else if (odabraniIndex == 6) {
+        inercijaZvona2Uredjivanje =
+            prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, -1);
+      } else if (odabraniIndex == 7) {
+        trajanjeImpulsaCekicaUredjivanje =
+            prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, -1);
+      }
       break;
     case KEY_SELECT:
       postaviLCDPozadinskoOsvjetljenje(lcdPozadinskoOsvjetljenjeUredjivanje);
@@ -1317,48 +1373,10 @@ static void obradiKlucSustav(KeyEvent event) {
       posaljiPCLog(F("Sustavske postavke spremljene"));
       break;
     case KEY_LEFT:
-      if (odabraniIndex == 0) {
-        lcdPozadinskoOsvjetljenjeUredjivanje = !lcdPozadinskoOsvjetljenjeUredjivanje;
-      } else if (odabraniIndex == 1) {
-        logiranjeUredjivanje = !logiranjeUredjivanje;
-      } else if (odabraniIndex == 2) {
-        rs485Uredjivanje = !rs485Uredjivanje;
-      } else if (odabraniIndex == 3) {
-        upsModUredjivanje = !upsModUredjivanje;
-      } else if (odabraniIndex == 4) {
-        kocnicaZvonaUredjivanje = !kocnicaZvonaUredjivanje;
-      } else if (odabraniIndex == 5) {
-        trajanjeImpulsaCekicaUredjivanje =
-            prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, -1);
-      } else if (odabraniIndex == 6) {
-        inercijaZvona1Uredjivanje =
-            prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, -1);
-      } else if (odabraniIndex == 7) {
-        inercijaZvona2Uredjivanje =
-            prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, -1);
-      }
+      odabraniIndex = (odabraniIndex - 1 + BROJ_STAVKI_SUSTAVA) % BROJ_STAVKI_SUSTAVA;
       break;
     case KEY_RIGHT:
-      if (odabraniIndex == 0) {
-        lcdPozadinskoOsvjetljenjeUredjivanje = !lcdPozadinskoOsvjetljenjeUredjivanje;
-      } else if (odabraniIndex == 1) {
-        logiranjeUredjivanje = !logiranjeUredjivanje;
-      } else if (odabraniIndex == 2) {
-        rs485Uredjivanje = !rs485Uredjivanje;
-      } else if (odabraniIndex == 3) {
-        upsModUredjivanje = !upsModUredjivanje;
-      } else if (odabraniIndex == 4) {
-        kocnicaZvonaUredjivanje = !kocnicaZvonaUredjivanje;
-      } else if (odabraniIndex == 5) {
-        trajanjeImpulsaCekicaUredjivanje =
-            prilagodiTrajanjeImpulsaCekicaZaMeni(trajanjeImpulsaCekicaUredjivanje, 1);
-      } else if (odabraniIndex == 6) {
-        inercijaZvona1Uredjivanje =
-            prilagodiInercijuZvonaZaMeni(inercijaZvona1Uredjivanje, 1);
-      } else if (odabraniIndex == 7) {
-        inercijaZvona2Uredjivanje =
-            prilagodiInercijuZvonaZaMeni(inercijaZvona2Uredjivanje, 1);
-      }
+      odabraniIndex = (odabraniIndex + 1) % BROJ_STAVKI_SUSTAVA;
       break;
     case KEY_BACK:
       ucitajSustavZaUredjivanje();

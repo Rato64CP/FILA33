@@ -105,6 +105,13 @@
 #define PIN_BELL1_SWITCH              44  // Rucna sklopka za BELL 1 (LOW=ON)
 #define PIN_BELL2_SWITCH              45  // Rucna sklopka za BELL 2 (LOW=ON)
 
+// ==================== 433 MHZ DALJINSKI UPRAVLJAC ====================
+// Sirovi 433 MHz prijemnik SRX882 koristi jedan data izlaz prema prekidnom
+// pinu Mege. Firmware iz tog niza impulsa prepoznaje nauceni kod tipke C
+// za toggle slavljenja toranjskog sata.
+
+#define PIN_DALJINSKI_433_DATA        3   // SRX882 DATA izlaz, prekidni ulaz za daljinski
+
 // ==================== MRTVACKO ZVONO - THUMBWHEEL TIMER ====================
 // Dvije BCD znamenke za trajanje mrtvackog zvona.
 // Pretpostavka: thumbwheel zatvara prema GND pa koristimo INPUT_PULLUP.

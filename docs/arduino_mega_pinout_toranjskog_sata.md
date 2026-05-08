@@ -90,7 +90,22 @@ Sve tipke lokalnog izbornika rade kao `INPUT_PULLUP` i aktiviraju se spajanjem n
 
 Napomena:
 - stara matricna tipkovnica vise nije dio aktivnog firmware toka toranjskog sata
-- pinovi `3`, `5` i `16` ostaju slobodni za buduce prosirenje
+- `433 MHz` prijemnik `SRX882` sada koristi `3` kao jedini data ulaz
+- pinovi `5`, `16` i `17` ostaju slobodni za buduce prosirenje
+
+## 433 MHz daljinski upravljac
+
+Predviden je sirovi `433 MHz` prijemnik `SRX882` s jednim data izlazom.
+Aktualna priprema toranjskog sata ocekuje da se iz tog signala prepozna nauceni kod tipke `C` za `toggle` slavljenja.
+
+| Funkcija | Pin | Napomena |
+|---|---:|---|
+| 433 `DATA` izlaz prijemnika | `3` | `SRX882` data signal prema prekidnom ulazu `Mega 2560` |
+
+Napomena:
+- tipka `C` daljinskog treba imati naucen kod u [main/daljinski_433.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/daljinski_433.cpp)
+- jedan pritisak tipke `C` pali slavljenje, drugi ga gasi ili skida s cekanja
+- ako se koristi drugi daljinski protokol, dekoder u `main/daljinski_433.cpp` treba prilagoditi stvarnom okviru
 
 ## Posebne tipke i prekidaci
 
@@ -162,9 +177,10 @@ Aktualna postavka firmwarea:
 ## Kratki sazetak po rasponima pinova
 
 - `2` -> `RTC SQW`
+- `3` -> `433 MHz` `SRX882 DATA`
 - `7-12` -> 6 direktnih tipki lokalnog izbornika
-- `3`, `5`, `16` -> slobodni
 - `14-15` -> `Serial3` prema `ESP8266`
+- `5`, `16`, `17` -> slobodni
 - `18-19` -> `Serial1` za aktivni `RS485`
 - `20-21` -> `I2C`
 - `22-29` -> releji kazaljki, ploce, zvona i cekica

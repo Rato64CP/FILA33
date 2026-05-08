@@ -45,15 +45,16 @@ struct OtkucavanjeStanje {
   unsigned long vrijemePocetkaMs;
   bool cekicAktivan;
   int aktivniPin;
-  unsigned long vrijemeZadnjeAktivacije;
+  unsigned long vrijemeAktivacijeUs;
+  unsigned long vrijemeZadnjePromjeneMs;
   unsigned long trajanjeImpulsaMs;
   unsigned long pauzaIzmeduUdaracaMs;
 };
 
 struct SigurnostCekicaStanje {
   bool aktivan[2];
-  unsigned long vrijemeAktivacijeMs[2];
-  unsigned long trajanjeMs[2];
+  unsigned long vrijemeAktivacijeUs[2];
+  unsigned long trajanjeUs[2];
 };
 
 OtkucavanjeStanje otkucavanje = {
@@ -62,6 +63,7 @@ OtkucavanjeStanje otkucavanje = {
     0UL,
     false,
     -1,
+    0UL,
     0UL,
     TRAJANJE_IMPULSA_CEKICA_DEFAULT,
     PAUZA_MEZI_UDARACA_DEFAULT};
@@ -164,6 +166,10 @@ unsigned long normalizirajSigurnoTrajanjeCekicaMs(unsigned long trazenoTrajanjeM
   return trazenoTrajanjeMs;
 }
 
+unsigned long pretvoriTrajanjeCekicaUMikrosekunde(unsigned long trajanjeMs) {
+  return trajanjeMs * 1000UL;
+}
+
 void aktivirajCekic_Internal(int pin,
                              unsigned long trazenoTrajanjeMs,
                              unsigned long sigurnosniMaxMs = SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS) {
@@ -174,9 +180,9 @@ void aktivirajCekic_Internal(int pin,
 
   digitalWrite(pin, HIGH);
   sigurnostCekica.aktivan[indeks] = true;
-  sigurnostCekica.vrijemeAktivacijeMs[indeks] = millis();
-  sigurnostCekica.trajanjeMs[indeks] =
-      normalizirajSigurnoTrajanjeCekicaMs(trazenoTrajanjeMs, sigurnosniMaxMs);
+  sigurnostCekica.vrijemeAktivacijeUs[indeks] = micros();
+  sigurnostCekica.trajanjeUs[indeks] = pretvoriTrajanjeCekicaUMikrosekunde(
+      normalizirajSigurnoTrajanjeCekicaMs(trazenoTrajanjeMs, sigurnosniMaxMs));
 }
 
 void deaktivirajCekic_Internal(int pin) {
@@ -187,8 +193,8 @@ void deaktivirajCekic_Internal(int pin) {
 
   digitalWrite(pin, LOW);
   sigurnostCekica.aktivan[indeks] = false;
-  sigurnostCekica.vrijemeAktivacijeMs[indeks] = 0UL;
-  sigurnostCekica.trajanjeMs[indeks] = 0UL;
+  sigurnostCekica.vrijemeAktivacijeUs[indeks] = 0UL;
+  sigurnostCekica.trajanjeUs[indeks] = 0UL;
 }
 
 void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHelper* razlog = nullptr) {
@@ -200,7 +206,8 @@ void ponistiAktivnoOtkucavanje(bool jeOtkazivanje, const __FlashStringHelper* ra
   otkucavanje.cekicAktivan = false;
   otkucavanje.aktivniPin = -1;
   otkucavanje.vrijemePocetkaMs = 0UL;
-  otkucavanje.vrijemeZadnjeAktivacije = 0UL;
+  otkucavanje.vrijemeAktivacijeUs = 0UL;
+  otkucavanje.vrijemeZadnjePromjeneMs = 0UL;
   otkucavanje.trajanjeImpulsaMs = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   otkucavanje.pauzaIzmeduUdaracaMs = PAUZA_MEZI_UDARACA_DEFAULT;
 
@@ -227,7 +234,8 @@ void pokreniSljedeciUdarac() {
 
   aktivirajCekic_Internal(otkucavanje.aktivniPin, otkucavanje.trajanjeImpulsaMs);
   otkucavanje.cekicAktivan = true;
-  otkucavanje.vrijemeZadnjeAktivacije = millis();
+  otkucavanje.vrijemeAktivacijeUs = micros();
+  otkucavanje.vrijemeZadnjePromjeneMs = millis();
   otkucavanje.preostaliUdarci--;
 
   char log[40];
@@ -259,7 +267,8 @@ void pokreniSekvencuOtkucavanja(VrstaOtkucavanja vrsta,
   otkucavanje.aktivniPin = pinCekica;
   otkucavanje.vrijemePocetkaMs = 0UL;
   otkucavanje.cekicAktivan = false;
-  otkucavanje.vrijemeZadnjeAktivacije = 0UL;
+  otkucavanje.vrijemeAktivacijeUs = 0UL;
+  otkucavanje.vrijemeZadnjePromjeneMs = 0UL;
   otkucavanje.trajanjeImpulsaMs =
       normalizirajSigurnoTrajanjeCekicaMs(trajanjeImpulsaMs, SIGURNOSNI_MAX_TRAJANJE_CEKICA_MS);
   otkucavanje.pauzaIzmeduUdaracaMs =
@@ -280,14 +289,14 @@ void pokreniSekvencuOtkucavanja(VrstaOtkucavanja vrsta,
   pokreniSljedeciUdarac();
 }
 
-void primijeniSigurnosniLimitCekica(unsigned long sadaMs) {
+void primijeniSigurnosniLimitCekica(unsigned long sadaUs, unsigned long sadaMs) {
   for (int indeks = 0; indeks < 2; ++indeks) {
     if (!sigurnostCekica.aktivan[indeks]) {
       continue;
     }
 
-    const unsigned long proteklo = sadaMs - sigurnostCekica.vrijemeAktivacijeMs[indeks];
-    if (proteklo < sigurnostCekica.trajanjeMs[indeks]) {
+    const unsigned long protekloUs = sadaUs - sigurnostCekica.vrijemeAktivacijeUs[indeks];
+    if (protekloUs < sigurnostCekica.trajanjeUs[indeks]) {
       continue;
     }
 
@@ -300,7 +309,8 @@ void primijeniSigurnosniLimitCekica(unsigned long sadaMs) {
 
   if (otkucavanje.cekicAktivan && !jeCekicSigurnosnoAktivanZaPosebniNacin(otkucavanje.aktivniPin)) {
     otkucavanje.cekicAktivan = false;
-    otkucavanje.vrijemeZadnjeAktivacije = sadaMs;
+    otkucavanje.vrijemeAktivacijeUs = 0UL;
+    otkucavanje.vrijemeZadnjePromjeneMs = sadaMs;
   }
 }
 
@@ -401,16 +411,17 @@ void inicijalizirajOtkucavanje() {
   otkucavanje.vrijemePocetkaMs = 0UL;
   otkucavanje.cekicAktivan = false;
   otkucavanje.aktivniPin = -1;
-  otkucavanje.vrijemeZadnjeAktivacije = 0UL;
+  otkucavanje.vrijemeAktivacijeUs = 0UL;
+  otkucavanje.vrijemeZadnjePromjeneMs = 0UL;
   otkucavanje.trajanjeImpulsaMs = TRAJANJE_IMPULSA_CEKICA_DEFAULT;
   otkucavanje.pauzaIzmeduUdaracaMs = PAUZA_MEZI_UDARACA_DEFAULT;
 
   sigurnostCekica.aktivan[0] = false;
   sigurnostCekica.aktivan[1] = false;
-  sigurnostCekica.vrijemeAktivacijeMs[0] = 0UL;
-  sigurnostCekica.vrijemeAktivacijeMs[1] = 0UL;
-  sigurnostCekica.trajanjeMs[0] = 0UL;
-  sigurnostCekica.trajanjeMs[1] = 0UL;
+  sigurnostCekica.vrijemeAktivacijeUs[0] = 0UL;
+  sigurnostCekica.vrijemeAktivacijeUs[1] = 0UL;
+  sigurnostCekica.trajanjeUs[0] = 0UL;
+  sigurnostCekica.trajanjeUs[1] = 0UL;
 
   inicijalizirajSlavljenjeIMrtvacko();
   blokadaOtkucavanja = false;
@@ -420,11 +431,12 @@ void inicijalizirajOtkucavanje() {
 
 void upravljajOtkucavanjem() {
   const unsigned long sadaMs = millis();
+  const unsigned long sadaUs = micros();
   const DateTime sada = dohvatiTrenutnoVrijeme();
   const uint8_t modOtkucavanja = dohvatiModOtkucavanja();
   const bool tihiRezimAktivan = jePrekidacTisineAktivan();
 
-  primijeniSigurnosniLimitCekica(sadaMs);
+  primijeniSigurnosniLimitCekica(sadaUs, sadaMs);
   upravljajSlavljenjemIMrtvackim(sadaMs);
 
   if (jeLiInerciaAktivna()) {
@@ -542,17 +554,18 @@ void upravljajOtkucavanjem() {
   }
 
   if (otkucavanje.cekicAktivan) {
-    const unsigned long proteklo = sadaMs - otkucavanje.vrijemeZadnjeAktivacije;
-    if (proteklo >= trajanjeImpulsa) {
+    const unsigned long protekloUs = sadaUs - otkucavanje.vrijemeAktivacijeUs;
+    if (protekloUs >= pretvoriTrajanjeCekicaUMikrosekunde(trajanjeImpulsa)) {
       deaktivirajCekic_Internal(otkucavanje.aktivniPin);
       otkucavanje.cekicAktivan = false;
-      otkucavanje.vrijemeZadnjeAktivacije = sadaMs;
+      otkucavanje.vrijemeAktivacijeUs = 0UL;
+      otkucavanje.vrijemeZadnjePromjeneMs = sadaMs;
     }
   } else {
-    if (otkucavanje.vrijemeZadnjeAktivacije == 0UL) {
+    if (otkucavanje.vrijemeZadnjePromjeneMs == 0UL) {
       pokreniSljedeciUdarac();
     } else {
-      const unsigned long proteklo = sadaMs - otkucavanje.vrijemeZadnjeAktivacije;
+      const unsigned long proteklo = sadaMs - otkucavanje.vrijemeZadnjePromjeneMs;
       if (proteklo >= pauzaMezi) {
         if (otkucavanje.preostaliUdarci > 0) {
           pokreniSljedeciUdarac();
