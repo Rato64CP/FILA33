@@ -90,6 +90,11 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 
 ## 🔩 Hardver koji Mega vodi
 
+- dva trofazna elektromotora `Koncar 0.55 kW / 380 V`, po jedan za `Zvono 1` i `Zvono 2`
+- mikroprekidaci na straznjoj osovini svakog zvonarskog motora za okretanje faza i sigurnu izmjenu rada zvona
+- dva elektromagnetska bata / cekica `310 VDC`, po jedan po zvonu, s impulsom oko `0,01 s`
+- pogonski motor kazaljki s mehanizmom zupcanika koji radi na `PARNI/NEPARNI` impuls oko `6 s`, sto odgovara logici u `main/kazaljke_sata.*`
+- elektroormar s kontaktorima za okretanje faza zvona, kontaktorima za batove, osiguracima i ostalom razvodnom i zastitnom opremom
 - releji za parne i neparne faze kazaljki
 - releji za okretnu plocu
 - izlazi za zvona i cekice

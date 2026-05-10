@@ -126,6 +126,11 @@
 - `DS3231 RTC`
 - `24C32 EEPROM`
 - `LCD 16x2` preko `I2C`
+- dva trofazna elektromotora `Koncar 0.55 kW / 380 V`, po jedan za svako zvono toranjskog sata
+- na straznjoj osovini svakog zvonarskog motora mikroprekidaci za okretanje faza i prijelaz rada zvona
+- dva elektromagnetska bata / cekica `310 VDC`, po jedan za svako zvono, s impulsom oko `0,01 s`
+- pogonski motor toranjskog sata za kazaljke s mehanizmom zupcanika koji radi na `PARNI/NEPARNI` impuls u trajanju oko `6 s`
+- elektroormar s kontaktorima za okretanje faza zvona, kontaktorima za batove, osiguracima i ostalom zastitnom opremom
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
 - LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`

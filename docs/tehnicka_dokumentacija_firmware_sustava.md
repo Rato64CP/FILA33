@@ -13,6 +13,16 @@ Firmware upravlja cetirima glavnim podsustavima toranjskog sata:
 - **Zvona**: dulji rad releja zvona, ukljucujuci rucne sklopke i automatske ulaze s ploce.
 - **Cekice / otkucavanje**: kratki impulsi za puni sat, pola sata, slavljenje i mrtvacko.
 
+### Fizicki hardver koji firmware vodi
+Izvrsni sloj toranjskog sata na terenu sastoji se od:
+- dva trofazna elektromotora `Koncar 0.55 kW / 380 V`, po jedan za svako zvono
+- mikroprekidaca na straznjoj osovini svakog zvonarskog motora, koji sudjeluju u logici okretanja faza i prijelaza rada zvona
+- dva elektromagnetska bata / cekica `310 VDC`, po jedan za svako zvono, s vrlo kratkim impulsom oko `0,01 s`
+- pogonskog motora kazaljki s mehanizmom zupcanika koji se pomice preko `PARNI/NEPARNI` impulsa trajanja oko `6 s`
+- elektroormara s kontaktorima za okretanje faza zvona, kontaktorima za batove, osiguracima i ostalom razvodnom i zastitnom opremom
+
+Firmware u `main/zvonjenje.*`, `main/otkucavanje.*` i `main/kazaljke_sata.*` upravlja relejnim i logickim slojem toranjskog sata, dok se stvarno energetsko ukljucivanje motora i elektromagnetskih batova odvija preko kontaktora i zastite u elektroormaru.
+
 ### Koncept glavne runtime petlje
 Glavna `loop()` petlja je organizirana kao kooperativni scheduler bez blokiranja:
 1. osvjezi watchdog
