@@ -11,6 +11,7 @@
 #include "otkucavanje.h"
 #include "slavljenje_mrtvacko.h"
 #include "pc_serial.h"
+#include "prekidac_tisine.h"
 #include "kazaljke_sata.h"
 #include "okretna_ploca.h"
 #include "postavke.h"
@@ -159,10 +160,10 @@ static void posaljiStatusESPU() {
              sada.minute(),
              sada.second());
 
-  char statusLinija[128];
+  char statusLinija[176];
   snprintf_P(statusLinija,
              sizeof(statusLinija),
-             PSTR("STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d"),
+             PSTR("STATUS:time=%s|src=%s|ok=%d|wifi=%d|mq=%d|mqen=%d|ntp=%d|hs=%d|hp=%d|ps=%d|pp=%d|sl=%d|mr=%d|ot=%d|b1=%d|b2=%d|sj=%d|sp=%d|sv=%d|tm=%d"),
              vrijemeIso,
              dohvatiOznakuIzvoraVremena(),
              jeVrijemePotvrdjenoZaAutomatiku() ? 1 : 0,
@@ -178,7 +179,11 @@ static void posaljiStatusESPU() {
              jeMrtvackoUTijeku() ? 1 : 0,
              jeOtkucavanjeUTijeku() ? 1 : 0,
              jeZvonoAktivno(1) ? 1 : 0,
-             jeZvonoAktivno(2) ? 1 : 0);
+             jeZvonoAktivno(2) ? 1 : 0,
+             jeSuncevDogadajOmogucen(SUNCEVI_DOGADAJ_JUTRO) ? 1 : 0,
+             jeSuncevDogadajOmogucen(SUNCEVI_DOGADAJ_PODNE) ? 1 : 0,
+             jeSuncevDogadajOmogucen(SUNCEVI_DOGADAJ_VECER) ? 1 : 0,
+             jePrekidacTisineAktivan() ? 1 : 0);
   espSerijskiPort.println(statusLinija);
 }
 
@@ -787,10 +792,12 @@ static void obradiESPRedak() {
     }
     else if (strcmp(komanda, "OTKUCAVANJE_OFF") == 0) postaviBlokaduOtkucavanja(true);
     else if (strcmp(komanda, "OTKUCAVANJE_ON") == 0)  postaviBlokaduOtkucavanja(false);
-    else if (strcmp(komanda, "SLAVLJENJE_ON") == 0)   zapocniSlavljenje();
+    else if (strcmp(komanda, "SLAVLJENJE_ON") == 0)   uspjeh = pokusajZapocetiSlavljenjeBezCekanja();
     else if (strcmp(komanda, "SLAVLJENJE_OFF") == 0)  zaustaviSlavljenje();
-    else if (strcmp(komanda, "MRTVACKO_ON") == 0)     zapocniMrtvacko();
+    else if (strcmp(komanda, "MRTVACKO_ON") == 0)     uspjeh = pokusajZapocetiMrtvackoBezCekanja();
     else if (strcmp(komanda, "MRTVACKO_OFF") == 0)    zaustaviMrtvacko();
+    else if (strcmp(komanda, "TIHI_ON") == 0)         postaviWebTihiRezim(true);
+    else if (strcmp(komanda, "TIHI_OFF") == 0)        postaviWebTihiRezim(false);
     else if (strcmp(komanda, "SUNCE_JUTRO_ON") == 0)
       postaviSuncevDogadaj(
           SUNCEVI_DOGADAJ_JUTRO,

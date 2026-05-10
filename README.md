@@ -17,13 +17,13 @@
 - zakljucava mehaniku u `safe mode` ako se dogodi previse watchdog resetova u kratkom vremenu
 - prati zdravlje `RTC` i `EEPROM` podsustava i prelazi u ograniceni rad kad kvar postane ponovljiv
 - pamti latched kvar `EEPROM-a` do rucne potvrde operatera
-- podrzava jedinstveni tihi rezim za uskrsnu tisinu i rucni kip-prekidac
+- podrzava jedinstveni tihi rezim za uskrsnu tisinu, rucni kip-prekidac i webski virtualni toggle preko `ESP` dashboarda
 - podrzava `UPS mod` koji bez mreze ostavlja logiku toranjskog sata zivom, ali blokira izlaze prema kazaljkama, zvonima i cekicima
 
 ## 🧭 Arhitektura
 
 - `Arduino Mega 2560` upravlja kazaljkama, okretnom plocom, zvonima, cekicima, lokalnim postavkama i recovery logikom
-- ESP mrezni sloj sluzi za `WiFi`, `NTP`, bezicni servisni API i buduce integracije
+- ESP mrezni sloj sluzi za `WiFi`, `NTP`, bezicni servisni API, `OTA` nadogradnju i servisni dashboard
 - `Mega 2560` je jedino mjesto istine za stanje toranjskog sata
 - osnovni rad sata mora ostati moguc i bez mreze
 
@@ -40,6 +40,7 @@
 - aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
 - `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
+- prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije prve sinkronizacije toranjskog sata
 - stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`
 
 ## 🧩 Struktura Projekta
@@ -71,6 +72,7 @@
 - status LED koristi `GPIO12 / D6`
 - setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`
 - nakon spremanja nove mreze `ESP8266` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
+- servisni dashboard na `ESP` sada koristi glavne tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`, sunceve tipke `JUTRO`, `PODNE`, `VECER` i crveni toggle `TIHI MOD`
 
 ## 💾 EEPROM I Recovery
 
@@ -94,7 +96,7 @@
 
 ## 🔕 Tihi Rezim I BAT
 
-- jedinstveni tihi rezim moze se aktivirati uskrsnom tisinom ili rucnim kip-prekidacem
+- jedinstveni tihi rezim moze se aktivirati uskrsnom tisinom, rucnim kip-prekidacem ili webskim virtualnim toggleom na `ESP` dashboardu
 - lampica tihog moda svijetli samo kad je stvarno aktivan konacni tihi rezim
 - tihi rezim blokira zvona, cekice, slavljenje i mrtvacko, ali ne zaustavlja kazaljke ni okretnu plocu
 - `UPS mod` pali lampicu tihog moda i na LCD-u prikazuje `NEMA STRUJE!` dok mehanika toranjskog sata radi samo s pomocnog napajanja

@@ -321,6 +321,14 @@ bool jeOperacijaCekicaDozvoljena() {
     return false;
   }
 
+  // Cekici toranjskog sata ne smiju raditi dok je aktivno bilo koje zvono.
+  // Nakon gasenja zvona dodatno se ceka i inercija kroz zasebnu provjeru ispod.
+  // Isto pravilo mora vrijediti za satno otkucavanje, slavljenje i mrtvacko,
+  // neovisno dolazi li zahtjev lokalno, daljinski ili preko ESP mreznog mosta.
+  if (jeZvonoUTijeku()) {
+    return false;
+  }
+
   if (jeUPSModAktivan()) {
     return false;
   }

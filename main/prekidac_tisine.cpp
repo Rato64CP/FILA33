@@ -15,6 +15,7 @@ namespace {
 
 bool tihiRezimAktivan = false;
 bool rucniPrekidacTisineAktivan = false;
+bool webTihiRezimAktivan = false;
 bool rucnoPrisilnoIskljucenjeTijekomUskrsa = false;
 bool uskrsnaTisinaAktivna = false;
 
@@ -29,6 +30,7 @@ bool procitajFizickoStanjePrekidacaTisine() {
 void primijeniJedinstveniTihiRezim(bool inicijalno) {
   const bool noviTihiRezim =
       rucniPrekidacTisineAktivan ||
+      webTihiRezimAktivan ||
       (uskrsnaTisinaAktivna && !rucnoPrisilnoIskljucenjeTijekomUskrsa);
   if (!inicijalno && tihiRezimAktivan == noviTihiRezim) {
     return;
@@ -57,6 +59,7 @@ void inicijalizirajPrekidacTisine() {
   pinMode(PIN_LAMPICA_TIHI_REZIM, OUTPUT);
   digitalWrite(PIN_LAMPICA_TIHI_REZIM, LOW);
   rucniPrekidacTisineAktivan = procitajFizickoStanjePrekidacaTisine();
+  webTihiRezimAktivan = false;
   rucnoPrisilnoIskljucenjeTijekomUskrsa = false;
   uskrsnaTisinaAktivna = jeUskrsnaTisinaAktivna(dohvatiTrenutnoVrijeme());
   primijeniJedinstveniTihiRezim(true);
@@ -65,6 +68,9 @@ void inicijalizirajPrekidacTisine() {
 void osvjeziPrekidacTisine() {
   SwitchState novoStanje = SWITCH_RELEASED;
   if (obradiDebouncedInput(PIN_PREKIDAC_TISINE, 30, &novoStanje)) {
+    // Fizicki kip prekidac postaje autoritet nad rucnim tihim modom
+    // i gasi prethodno webom zadanu virtualnu blokadu toranjskog sata.
+    webTihiRezimAktivan = false;
     rucniPrekidacTisineAktivan = (novoStanje == SWITCH_PRESSED);
     if (rucniPrekidacTisineAktivan) {
       rucnoPrisilnoIskljucenjeTijekomUskrsa = false;
@@ -93,6 +99,18 @@ void osvjeziPrekidacTisine() {
 
 bool jePrekidacTisineAktivan() {
   return tihiRezimAktivan;
+}
+
+void postaviWebTihiRezim(bool aktivan) {
+  if (webTihiRezimAktivan == aktivan) {
+    return;
+  }
+
+  webTihiRezimAktivan = aktivan;
+  posaljiPCLog(webTihiRezimAktivan
+                   ? F("Tihi rezim: web virtualni prekidac UKLJUCEN")
+                   : F("Tihi rezim: web virtualni prekidac ISKLJUCEN"));
+  primijeniJedinstveniTihiRezim(false);
 }
 
 void osvjeziSignalizacijuTihogRezima() {

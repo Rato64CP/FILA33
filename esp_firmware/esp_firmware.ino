@@ -1,10 +1,12 @@
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <Updater.h>
 using ToranjWebServer = ESP8266WebServer;
 #elif defined(ESP32)
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Update.h>
 using ToranjWebServer = WebServer;
 #else
 #error "Ovaj firmware podrzava samo ESP8266 ili ESP32."
@@ -48,6 +50,7 @@ static const unsigned long NTP_INTERVAL_MS = 60000UL;
 static const unsigned long NTP_TIMEOUT_MS = 5000UL;
 static const unsigned long NTP_PONOVNI_POKUSAJ_BEZ_VREMENA_MS = 10000UL;
 static const unsigned long NTP_MAKSIMALNA_STAROST_ODGOVORA_MS = 3UL * NTP_INTERVAL_MS;
+static const uint64_t NTP_MAKS_DOPUSTENO_ODSTUPANJE_PRVA_DVA_UZORKA_MS = 2000ULL;
 static const uint16_t NTP_LOKALNI_PORT = 2390U;
 static const uint16_t NTP_UDP_PORT = 123U;
 static const size_t NTP_VELICINA_PAKETA = 48U;
@@ -87,11 +90,14 @@ enum CmdOdgovorMegai {
 bool ntpIkadPostavljen = false;
 bool ntpUdpPokrenut = false;
 bool ntpZahtjevUTijeku = false;
+bool ntpPrviUzorakTrebaPotvrdu = true;
+bool ntpPrviUzorakZapamcen = false;
 unsigned long ntpZadnjiUspjehMs = 0;
 unsigned long ntpZadnjiPokusajMs = 0;
 unsigned long ntpZahtjevPoslanMs = 0;
 unsigned long ntpBazniMillis = 0;
 uint64_t ntpBazniUtcMs = 0;
+uint64_t ntpPrviUzorakUtcMs = 0ULL;
 unsigned long wifiSpojenOdMs = 0;
 bool wifiSpojenOdPoznat = false;
 bool megaStatusPoznat = false;
@@ -99,6 +105,10 @@ bool megaZvono1Aktivno = false;
 bool megaZvono2Aktivno = false;
 bool megaSlavljenjeAktivno = false;
 bool megaMrtvackoAktivno = false;
+bool megaSunceJutroAktivno = false;
+bool megaSuncePodneAktivno = false;
+bool megaSunceVecerAktivno = false;
+bool megaTihiRezimAktivan = false;
 unsigned long megaStatusZadnjeOsvjezavanjeMs = 0;
 unsigned long megaStatusSerijskiBroj = 0;
 
@@ -122,6 +132,12 @@ unsigned long setupTipkaPocetakMs = 0;
 unsigned long setupApPokrenutMs = 0;
 unsigned long setupApZakazanoGasenjeMs = 0;
 CmdOdgovorMegai zadnjiCmdOdgovorMega = CMD_ODGOVOR_CEKA;
+bool otaAzuriranjeUTijeku = false;
+bool otaRestartZakazan = false;
+unsigned long otaRestartZakazanMs = 0;
+bool otaUspjesanZadnjiPut = false;
+
+static const unsigned long OTA_RESTART_ODGODA_MS = 1200UL;
 
 void poveziNaWiFi();
 bool postaviStatickuKonfiguraciju();
@@ -170,6 +186,9 @@ void posaljiJsonStatus(bool prisilno = false);
 void ucitajWebAutentikaciju();
 bool osigurajWebAutorizaciju();
 void posaljiApiKomanduMegai(const char* naredba, const char* odgovor);
+void obradiOtaUpload();
+void zakaziRestartNakonOta();
+void obradiZakazaniRestartNakonOta();
 CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long timeoutMs);
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs);
 void pokreniSetupPristupnuTocku();
@@ -190,11 +209,14 @@ static void resetirajNtpStanje() {
   resetirajNtpUdpSloj();
   ntpIkadPostavljen = false;
   ntpZahtjevUTijeku = false;
+  ntpPrviUzorakTrebaPotvrdu = true;
+  ntpPrviUzorakZapamcen = false;
   ntpZadnjiUspjehMs = 0;
   ntpZadnjiPokusajMs = 0;
   ntpZahtjevPoslanMs = 0;
   ntpBazniMillis = 0;
   ntpBazniUtcMs = 0;
+  ntpPrviUzorakUtcMs = 0ULL;
 }
 
 static void oznaciWiFiKaoOdspojen() {
@@ -258,6 +280,16 @@ void setup() {
 }
 
 void loop() {
+  if (otaRestartZakazan) {
+    obradiZakazaniRestartNakonOta();
+  }
+
+  if (otaAzuriranjeUTijeku) {
+    webPosluzitelj.handleClient();
+    yield();
+    return;
+  }
+
   obradiSerijskiUlaz();
   odrzavajSetupTipku();
   odrzavajSetupPristupnuTocku();
@@ -462,6 +494,49 @@ static bool jeNtpVrijemeSvjezeZaMegu(unsigned long sadaMs) {
          (sadaMs - ntpZadnjiUspjehMs) <= NTP_MAKSIMALNA_STAROST_ODGOVORA_MS;
 }
 
+static bool jeNtpVrijemeStabilizirano() {
+  return !ntpPrviUzorakTrebaPotvrdu || ntpIkadPostavljen;
+}
+
+static bool prihvatiNtpUzorakZaToranjskiSat(uint64_t utcMs) {
+  if (!ntpPrviUzorakTrebaPotvrdu) {
+    postaviNtpBaznoVrijemeUtcMs(utcMs);
+    ntpIkadPostavljen = true;
+    ntpZadnjiUspjehMs = millis();
+    return true;
+  }
+
+  if (!ntpPrviUzorakZapamcen) {
+    ntpPrviUzorakZapamcen = true;
+    ntpPrviUzorakUtcMs = utcMs;
+    Serial.println("NTPLOG: prvi NTP uzorak nakon restarta spremljen, cekam potvrdu drugim uzorkom");
+    return false;
+  }
+
+  uint64_t razlikaMs = 0ULL;
+  if (utcMs >= ntpPrviUzorakUtcMs) {
+    razlikaMs = utcMs - ntpPrviUzorakUtcMs;
+  } else {
+    razlikaMs = ntpPrviUzorakUtcMs - utcMs;
+  }
+
+  if (razlikaMs > NTP_MAKS_DOPUSTENO_ODSTUPANJE_PRVA_DVA_UZORKA_MS) {
+    ntpPrviUzorakUtcMs = utcMs;
+    Serial.print("NTPLOG: drugi NTP uzorak previse odstupa od prvog, ponavljam potvrdu, razlika_ms=");
+    Serial.println(static_cast<unsigned long>(razlikaMs));
+    return false;
+  }
+
+  ntpPrviUzorakTrebaPotvrdu = false;
+  ntpPrviUzorakZapamcen = false;
+  ntpPrviUzorakUtcMs = 0ULL;
+  postaviNtpBaznoVrijemeUtcMs(utcMs);
+  ntpIkadPostavljen = true;
+  ntpZadnjiUspjehMs = millis();
+  Serial.println("NTPLOG: prvi NTP uzorak potvrden drugim uzorkom");
+  return true;
+}
+
 bool osvjeziNTPSat(bool prisilno) {
   static unsigned long zadnjiLog = 0;
   unsigned long sada = millis();
@@ -493,6 +568,26 @@ bool osvjeziNTPSat(bool prisilno) {
     }
     obradiNtpTimeout();
     sada = millis();
+  }
+
+  if (prisilno && !jeNtpVrijemePostavljeno() &&
+      ntpPrviUzorakTrebaPotvrdu && ntpPrviUzorakZapamcen && !ntpZahtjevUTijeku) {
+    Serial.println("NTPLOG: prvi uzorak je spremljen, odmah trazim drugi radi stabilizacije");
+    if (posaljiNtpUpit()) {
+      const unsigned long pocetakDrugogCekanja = millis();
+      while (ntpZahtjevUTijeku &&
+             (millis() - pocetakDrugogCekanja) <= (NTP_TIMEOUT_MS + 250UL)) {
+        if (obradiNtpOdgovor()) {
+          promjena = true;
+          break;
+        }
+        obradiNtpTimeout();
+        yield();
+        delay(1);
+      }
+      obradiNtpTimeout();
+      sada = millis();
+    }
   }
 
   if (!promjena && !jeNtpVrijemePostavljeno() &&
@@ -680,11 +775,19 @@ bool obradiStatusMegai(const char* payload) {
   bool zvono2Aktivno = false;
   bool slavljenjeAktivno = false;
   bool mrtvackoAktivno = false;
+  bool sunceJutroAktivno = false;
+  bool suncePodneAktivno = false;
+  bool sunceVecerAktivno = false;
+  bool tihiRezimAktivan = false;
 
   if (!procitajStatusZastavicu(payload, "b1=", &zvono1Aktivno) ||
       !procitajStatusZastavicu(payload, "b2=", &zvono2Aktivno) ||
       !procitajStatusZastavicu(payload, "sl=", &slavljenjeAktivno) ||
-      !procitajStatusZastavicu(payload, "mr=", &mrtvackoAktivno)) {
+      !procitajStatusZastavicu(payload, "mr=", &mrtvackoAktivno) ||
+      !procitajStatusZastavicu(payload, "sj=", &sunceJutroAktivno) ||
+      !procitajStatusZastavicu(payload, "sp=", &suncePodneAktivno) ||
+      !procitajStatusZastavicu(payload, "sv=", &sunceVecerAktivno) ||
+      !procitajStatusZastavicu(payload, "tm=", &tihiRezimAktivan)) {
     return false;
   }
 
@@ -692,6 +795,10 @@ bool obradiStatusMegai(const char* payload) {
   megaZvono2Aktivno = zvono2Aktivno;
   megaSlavljenjeAktivno = slavljenjeAktivno;
   megaMrtvackoAktivno = mrtvackoAktivno;
+  megaSunceJutroAktivno = sunceJutroAktivno;
+  megaSuncePodneAktivno = suncePodneAktivno;
+  megaSunceVecerAktivno = sunceVecerAktivno;
+  megaTihiRezimAktivan = tihiRezimAktivan;
   megaStatusPoznat = true;
   megaStatusZadnjeOsvjezavanjeMs = millis();
   ++megaStatusSerijskiBroj;
@@ -700,9 +807,15 @@ bool obradiStatusMegai(const char* payload) {
 
 bool osvjeziStatusMegai(bool prisilno) {
   const unsigned long sadaMs = millis();
-  if (!prisilno && megaStatusPoznat &&
-      (sadaMs - megaStatusZadnjeOsvjezavanjeMs) <= STATUS_MAKSIMALNA_STAROST_MS) {
-    return true;
+  if (!prisilno) {
+    if (megaStatusPoznat &&
+        (sadaMs - megaStatusZadnjeOsvjezavanjeMs) <= STATUS_MAKSIMALNA_STAROST_MS) {
+      return true;
+    }
+
+    // Home dashboard mora se otvoriti odmah, cak i ako Mega trenutno ne vrati status.
+    // Zato ne radimo aktivni serijski upit osim kad je osvjezavanje izricito prisiljeno.
+    return megaStatusPoznat;
   }
 
   const unsigned long pocetniBroj = megaStatusSerijskiBroj;
@@ -862,7 +975,11 @@ void obradiSerijskiUlaz() {
               osvjeziNTPSat(true);
               sada = millis();
               if (!jeNtpVrijemeSvjezeZaMegu(sada)) {
-                Serial.println("NTPLOG: NTP zahtjev odbijen jer nema dovoljno svjezeg NTP vremena");
+                if (!jeNtpVrijemeStabilizirano()) {
+                  Serial.println("NTPLOG: NTP zahtjev odbijen jer prvi uzorak jos nije potvrden drugim uzorkom");
+                } else {
+                  Serial.println("NTPLOG: NTP zahtjev odbijen jer nema dovoljno svjezeg NTP vremena");
+                }
                 Serial.println("ERR:NTPREQ");
               } else {
                 posaljiNTPPremaMegai();
@@ -1191,9 +1308,9 @@ bool obradiNtpOdgovor() {
       static_cast<uint64_t>(unixEpoch) * 1000ULL + razlomakMs +
       static_cast<uint64_t>(roundTripMs / 2UL);
 
-  postaviNtpBaznoVrijemeUtcMs(utcMs);
-  ntpIkadPostavljen = true;
-  ntpZadnjiUspjehMs = millis();
+  if (!prihvatiNtpUzorakZaToranjskiSat(utcMs)) {
+    return false;
+  }
 
   Serial.print("NTPLOG: osvjezeno, epoch=");
   Serial.println(dohvatiNtpUnixVrijeme());
@@ -1376,7 +1493,9 @@ void posaljiApiKomanduMegai(const char* naredba, const char* odgovor) {
   }
 
   if (status == CMD_ODGOVOR_BUSY) {
-    webPosluzitelj.send(409, "text/plain", "Mega je zauzeta i nije prihvatila naredbu");
+    webPosluzitelj.send(409,
+                        "text/plain",
+                        "Naredba sada nije prihvacena. Pricekaj da se smire zvona i inercija pa pokusaj ponovno.");
     return;
   }
 
@@ -1432,17 +1551,21 @@ void posaljiJsonStatus(bool prisilno) {
   char ipBuffer[16];
   snprintf(ipBuffer, sizeof(ipBuffer), "%s", WiFi.localIP().toString().c_str());
 
-  char tijelo[192];
+  char tijelo[352];
   snprintf_P(tijelo,
              sizeof(tijelo),
-             PSTR("{\"wifi_ip\":\"%s\",\"wifi_connected\":%s,\"mega_status_known\":%s,\"bell1_active\":%s,\"bell2_active\":%s,\"slavljenje_active\":%s,\"mrtvacko_active\":%s}"),
+             PSTR("{\"wifi_ip\":\"%s\",\"wifi_connected\":%s,\"mega_status_known\":%s,\"bell1_active\":%s,\"bell2_active\":%s,\"slavljenje_active\":%s,\"mrtvacko_active\":%s,\"solar_morning_active\":%s,\"solar_noon_active\":%s,\"solar_evening_active\":%s,\"silent_mode_active\":%s}"),
              ipBuffer,
              (WiFi.status() == WL_CONNECTED) ? "true" : "false",
              megaStatusPoznat ? "true" : "false",
              megaZvono1Aktivno ? "true" : "false",
              megaZvono2Aktivno ? "true" : "false",
              megaSlavljenjeAktivno ? "true" : "false",
-             megaMrtvackoAktivno ? "true" : "false");
+             megaMrtvackoAktivno ? "true" : "false",
+             megaSunceJutroAktivno ? "true" : "false",
+             megaSuncePodneAktivno ? "true" : "false",
+             megaSunceVecerAktivno ? "true" : "false",
+             megaTihiRezimAktivan ? "true" : "false");
   webPosluzitelj.send(200, "application/json", tijelo);
 }
 
@@ -1456,7 +1579,10 @@ void posaljiHtmlStranicuIzProgMema(PGM_P stranica) {
   char meduspremnik[HTML_CHUNK_VELICINA + 1];
   const size_t duljina = strlen_P(stranica);
 
-  webPosluzitelj.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  webPosluzitelj.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  webPosluzitelj.sendHeader("Pragma", "no-cache");
+  webPosluzitelj.sendHeader("Connection", "close");
+  webPosluzitelj.setContentLength(duljina);
   webPosluzitelj.send(200, "text/html; charset=utf-8", "");
 
   size_t pomak = 0;
@@ -1484,336 +1610,185 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
   <style>
     :root {
       color-scheme: light;
-      --bg:#dde6f1;
-      --bg2:#f4f7fb;
-      --panel:rgba(255,255,255,0.84);
-      --line:rgba(130,149,174,0.35);
-      --text:#253246;
+      --bg:#e7edf5;
+      --panel:#f8fbff;
+      --line:#b8c4d3;
+      --text:#223246;
       --muted:#617286;
-      --hero:#fdfefe;
-      --ok:#b94e63;
-      --ok-soft:#f8dbe2;
-      --warn:#6f7f93;
-      --warn-soft:#e7edf4;
-      --off:#eef2f7;
-      --off-line:#8a98a8;
-      --shadow:0 18px 42px rgba(75, 95, 122, 0.14);
+      --blue:#dcecff;
+      --blue-line:#4b84c8;
+      --blue-strong:#b9d5fb;
+      --blue-strong-line:#2f67b1;
+      --gray:#edf1f6;
+      --gray-line:#95a3b3;
+      --danger:#b45167;
+      --danger-dark:#983f54;
+      --shadow:0 10px 24px rgba(63, 82, 110, 0.12);
     }
     * { box-sizing:border-box; }
     body {
       margin:0;
-      font-family: "Trebuchet MS", Verdana, sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.82), transparent 28%),
-        linear-gradient(180deg, var(--bg), var(--bg2));
+      font-family: Arial, sans-serif;
+      background:linear-gradient(180deg, #dfe7f1, #f4f7fb);
       color:var(--text);
     }
-    body::before {
-      content:"";
-      position:fixed;
-      inset:0;
-      background:
-        radial-gradient(circle at 16% 18%, rgba(255,255,255,0.9), transparent 22%),
-        radial-gradient(circle at 84% 30%, rgba(210,223,239,0.7), transparent 24%),
-        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.16));
-      pointer-events:none;
-    }
     .wrap {
-      position:relative;
-      max-width:1080px;
+      max-width:820px;
       margin:0 auto;
-      padding:22px 18px 34px;
+      padding:16px 12px 24px;
     }
-    .hero {
-      background:linear-gradient(135deg, rgba(255,255,255,0.95), rgba(245,248,252,0.92));
-      border:1px solid var(--line);
-      border-radius:22px;
-      padding:22px;
-      box-shadow:var(--shadow);
-      margin-bottom:16px;
-    }
-    h1, h2, h3 { margin:0; }
-    h1 {
-      font-size:clamp(28px, 4vw, 40px);
+    .title {
+      margin:0 0 14px;
+      text-align:center;
+      font-size:28px;
       letter-spacing:0.02em;
-      font-family: Georgia, "Times New Roman", serif;
     }
-    .subtitle {
-      margin-top:10px;
-      max-width:720px;
-      color:var(--muted);
-      line-height:1.6;
-      font-size:15px;
-    }
-    .secondary-card button,
-    .toggle-btn {
-      appearance:none;
-      border:none;
-      border-radius:12px;
-      padding:12px 16px;
-      font:inherit;
-      font-weight:700;
-      cursor:pointer;
-      transition:transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
-    }
-    .secondary-card button:hover,
-    .toggle-btn:hover {
-      transform:translateY(-1px);
-      box-shadow:0 10px 20px rgba(67, 48, 24, 0.12);
-    }
-    .primary-grid {
+    .grid {
       display:grid;
-      grid-template-columns:repeat(2, minmax(0, 1fr));
-      gap:16px;
+      grid-template-columns:1fr 1fr;
+      gap:14px;
       margin-bottom:18px;
     }
-    .main-card {
-      background:linear-gradient(180deg, rgba(255,255,255,0.92), rgba(246,249,252,0.88));
-      border:1px solid var(--line);
-      border-radius:24px;
-      padding:20px;
-      box-shadow:var(--shadow);
-      display:flex;
-      flex-direction:column;
-      gap:16px;
-      min-height:248px;
-      position:relative;
-      overflow:hidden;
-    }
-    .main-card::before {
-      content:"";
-      position:absolute;
-      inset:auto -18px -26px auto;
-      width:118px;
-      height:118px;
-      border-radius:50%;
-      background:radial-gradient(circle, rgba(217,229,243,0.85), transparent 72%);
-      pointer-events:none;
-    }
-    .main-card-header { position:relative; z-index:1; }
-    .eyebrow {
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.08em;
-      color:var(--muted);
-      margin-bottom:8px;
-    }
-    .main-card h2 {
-      font-size:30px;
-      line-height:1.05;
-      margin-bottom:6px;
-      font-family: Georgia, "Times New Roman", serif;
-    }
-    .toggle-wrap {
-      display:grid;
-      margin-top:auto;
-      position:relative;
-      z-index:1;
-    }
-    .toggle-btn {
-      min-height:108px;
-      border-radius:20px;
-      font-size:20px;
-      letter-spacing:0.06em;
-      text-transform:uppercase;
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.85),
-        0 8px 18px rgba(70, 88, 112, 0.12);
-    }
-    .toggle-btn.active {
-      background:linear-gradient(180deg, #f3f8ff, #d6e8ff);
-      color:#1f4f8f;
-      border:2px solid rgba(63,117,191,0.62);
-    }
-    .toggle-btn.inactive {
-      background:linear-gradient(180deg, #fafbfd, #e7edf4);
-      color:#4c5e74;
-      border:2px solid rgba(138,152,168,0.5);
-    }
-    .secondary-section {
-      background:rgba(255,255,255,0.62);
-      border:1px solid var(--line);
-      border-radius:22px;
-      padding:18px;
-      box-shadow:var(--shadow);
-      margin-bottom:16px;
-    }
-    .secondary-head {
-      margin-bottom:14px;
-    }
-    .secondary-head h3 {
-      font-size:22px;
-      font-family: Georgia, "Times New Roman", serif;
-      margin-bottom:6px;
-    }
-    .secondary-head p {
-      margin:0;
-      color:var(--muted);
-      line-height:1.5;
-      font-size:14px;
-    }
-    .secondary-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));
-      gap:14px;
-    }
-    .secondary-card {
+    .card,
+    .section,
+    .log-panel {
       background:var(--panel);
       border:1px solid var(--line);
       border-radius:18px;
-      padding:16px;
-      box-shadow:0 12px 28px rgba(75, 95, 122, 0.10);
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-    }
-    .secondary-card h2 {
-      font-size:24px;
-      line-height:1.1;
-      font-family: Georgia, "Times New Roman", serif;
-      margin-bottom:6px;
-    }
-    .secondary-card p {
-      margin:0;
-      color:var(--muted);
-      line-height:1.5;
-      font-size:14px;
-    }
-    .btn-row {
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-      margin-top:auto;
-    }
-    .btn-primary {
-      background:linear-gradient(180deg, #be5a70, #a64558);
-      color:#fffafc;
-    }
-    .btn-secondary {
-      background:#fff;
-      color:var(--text);
-      border:1px solid var(--line);
-    }
-    .log-panel {
-      background:#2d2419;
-      color:#f7efe0;
-      border-radius:18px;
-      padding:16px 18px;
       box-shadow:var(--shadow);
     }
-    .log-panel h3 { font-size:16px; margin-bottom:10px; }
+    .card {
+      padding:16px;
+      text-align:center;
+    }
+    .section h3 {
+      margin:0 0 12px;
+      font-size:24px;
+    }
+    .toggle-btn {
+      width:100%;
+      border-radius:16px;
+      border:2px solid var(--gray-line);
+      background:var(--gray);
+      color:#47596f;
+      min-height:92px;
+      font-size:24px;
+      font-weight:700;
+      letter-spacing:0.05em;
+      cursor:pointer;
+    }
+    .toggle-btn.active {
+      background:var(--blue);
+      border-color:var(--blue-line);
+      color:#1b4d8f;
+    }
+    .toggle-btn.primary {
+      min-height:108px;
+      font-size:28px;
+    }
+    .toggle-btn.primary.active {
+      background:var(--blue-strong);
+      border-color:var(--blue-strong-line);
+      color:#123f79;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,0.45);
+    }
+    .toggle-btn.secondary {
+      min-height:68px;
+      font-size:20px;
+      letter-spacing:0.03em;
+    }
+    .toggle-btn.quiet-mode {
+      min-height:74px;
+      font-size:21px;
+      letter-spacing:0.03em;
+    }
+    .toggle-btn.quiet-mode.active {
+      background:#f1b9c2;
+      border-color:var(--danger-dark);
+      color:#7e2038;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,0.4);
+    }
+    .section {
+      padding:16px;
+      margin-bottom:14px;
+    }
+    .section-note {
+      margin:0 0 12px;
+      font-size:13px;
+      line-height:1.45;
+      color:var(--muted);
+    }
+    .secondary-grid {
+      display:grid;
+      grid-template-columns:repeat(3, 1fr);
+      gap:12px;
+    }
+    .mini-card {
+      padding:0;
+    }
+    .quiet-mode-wrap {
+      margin-top:14px;
+    }
+    .log-panel {
+      padding:14px 16px;
+    }
     .log-text {
-      min-height:52px;
+      min-height:24px;
       white-space:pre-wrap;
-      line-height:1.5;
+      line-height:1.45;
       font-size:14px;
-      color:#eadfcb;
-    }
-    .muted-small {
-      margin-top:10px;
-      color:#bfae92;
-      font-size:12px;
-    }
-    @media (max-width:820px) {
-      .primary-grid { grid-template-columns:1fr; }
     }
     @media (max-width:700px) {
-      .wrap { padding:14px 12px 24px; }
-      .hero { padding:18px; }
-      .btn-row { grid-template-columns:1fr; }
-      .toggle-btn { min-height:92px; }
-      .main-card { min-height:auto; }
+      .grid,
+      .secondary-grid {
+        grid-template-columns:1fr;
+      }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <section class="hero">
-      <h1>Dashboard toranjskog sata</h1>
-      <p class="subtitle">
-        Glavne cetiri komande su odmah ispod, a dodatne opcije ostaju odvojene u donjem dijelu.
-      </p>
-    </section>
+    <h1 class="title">ZVONKO</h1>
 
-    <section class="primary-grid">
-      <article class="main-card">
-        <div class="main-card-header">
-          <div class="eyebrow">Gornji red</div>
-          <h2>Musko zvono</h2>
-        </div>
-        <div class="toggle-wrap">
-          <button id="toggleBell1" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('bell1')">MU&Scaron;KO</button>
-        </div>
+    <section class="grid">
+      <article class="card">
+        <button id="toggleBell1" class="toggle-btn primary inactive" onclick="prebaciGlavnuKomandu('bell1')">MU&Scaron;KO</button>
       </article>
 
-      <article class="main-card">
-        <div class="main-card-header">
-          <div class="eyebrow">Gornji red</div>
-          <h2>Zensko zvono</h2>
-        </div>
-        <div class="toggle-wrap">
-          <button id="toggleBell2" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('bell2')">&Zcaron;ENSKO</button>
-        </div>
+      <article class="card">
+        <button id="toggleBell2" class="toggle-btn primary inactive" onclick="prebaciGlavnuKomandu('bell2')">&Zcaron;ENSKO</button>
       </article>
 
-      <article class="main-card">
-        <div class="main-card-header">
-          <div class="eyebrow">Donji red</div>
-          <h2>Slavljenje</h2>
-        </div>
-        <div class="toggle-wrap">
-          <button id="toggleSlavljenje" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('slavljenje')">SLAVI</button>
-        </div>
+      <article class="card">
+        <button id="toggleSlavljenje" class="toggle-btn primary inactive" onclick="prebaciGlavnuKomandu('slavljenje')">SLAVI</button>
       </article>
 
-      <article class="main-card">
-        <div class="main-card-header">
-          <div class="eyebrow">Donji red</div>
-          <h2>Mrtvacko</h2>
-        </div>
-        <div class="toggle-wrap">
-          <button id="toggleMrtvacko" class="toggle-btn inactive" onclick="prebaciGlavnuKomandu('mrtvacko')">BRECA</button>
-        </div>
+      <article class="card">
+        <button id="toggleMrtvacko" class="toggle-btn primary inactive" onclick="prebaciGlavnuKomandu('mrtvacko')">BRECA</button>
       </article>
     </section>
 
-    <section class="secondary-section">
-      <div class="secondary-head">
-        <h3>Dodatne opcije</h3>
-        <p>Sunceve automatike i pomocne kontrole ostaju dostupne ispod glavne 2x2 matrice tipki toranjskog sata.</p>
-      </div>
+    <section class="section">
+      <h3>Dodatne opcije</h3>
+      <p class="section-note">Ako su gumbi ukljuceni, zdravomarije ce zvoniti prema suncanom rasporedu, a podne u 12.00 sati.</p>
       <div class="secondary-grid">
-        <article class="secondary-card">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Jutro</h2>
-          <div class="btn-row">
-            <button class="btn-primary" onclick="pozoviApi('/api/solar/morning/on', 'Sunce jutro ukljuci')">Ukljuci</button>
-            <button class="btn-secondary" onclick="pozoviApi('/api/solar/morning/off', 'Sunce jutro iskljuci')">Iskljuci</button>
-          </div>
+        <article class="mini-card">
+          <button id="toggleSunceJutro" class="toggle-btn secondary inactive" onclick="prebaciSuncevuKomandu('jutro')">JUTRO</button>
         </article>
-
-        <article class="secondary-card">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Podne</h2>
-          <div class="btn-row">
-            <button class="btn-primary" onclick="pozoviApi('/api/solar/noon/on', 'Sunce podne ukljuci')">Ukljuci</button>
-            <button class="btn-secondary" onclick="pozoviApi('/api/solar/noon/off', 'Sunce podne iskljuci')">Iskljuci</button>
-          </div>
+        <article class="mini-card">
+          <button id="toggleSuncePodne" class="toggle-btn secondary inactive" onclick="prebaciSuncevuKomandu('podne')">PODNE</button>
         </article>
-
-        <article class="secondary-card">
-          <div class="eyebrow">Sunceva automatika</div>
-          <h2>Vecer</h2>
-          <div class="btn-row">
-            <button class="btn-primary" onclick="pozoviApi('/api/solar/evening/on', 'Sunce vecer ukljuci')">Ukljuci</button>
-            <button class="btn-secondary" onclick="pozoviApi('/api/solar/evening/off', 'Sunce vecer iskljuci')">Iskljuci</button>
-          </div>
+        <article class="mini-card">
+          <button id="toggleSunceVecer" class="toggle-btn secondary inactive" onclick="prebaciSuncevuKomandu('vecer')">VECER</button>
         </article>
+      </div>
+      <div class="quiet-mode-wrap">
+        <button id="toggleTihiMod" class="toggle-btn quiet-mode inactive" onclick="prebaciTihiMod()">TIHI MOD</button>
       </div>
     </section>
 
     <section class="log-panel">
-      <div id="odgovor" class="log-text">Dashboard je spreman. Odaberi karticu i posalji naredbu prema Megi.</div>
+      <div id="odgovor" class="log-text">Dashboard je spreman.</div>
     </section>
   </div>
   <script>
@@ -1848,6 +1823,30 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       }
     };
 
+    const sunceveKomande = {
+      jutro: {
+        tipkaId: 'toggleSunceJutro',
+        apiOn: '/api/solar/morning/on',
+        apiOff: '/api/solar/morning/off',
+        naziv: 'Sunce jutro',
+        oznakaTipke: 'JUTRO'
+      },
+      podne: {
+        tipkaId: 'toggleSuncePodne',
+        apiOn: '/api/solar/noon/on',
+        apiOff: '/api/solar/noon/off',
+        naziv: 'Sunce podne',
+        oznakaTipke: 'PODNE'
+      },
+      vecer: {
+        tipkaId: 'toggleSunceVecer',
+        apiOn: '/api/solar/evening/on',
+        apiOff: '/api/solar/evening/off',
+        naziv: 'Sunce vecer',
+        oznakaTipke: 'VECER'
+      }
+    };
+
     let glavnoStanje = {
       bell1: null,
       bell2: null,
@@ -1855,12 +1854,20 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       mrtvacko: null
     };
 
+    let suncevoStanje = {
+      jutro: null,
+      podne: null,
+      vecer: null
+    };
+
+    let tihiModAktivan = null;
+
     function postaviLog(poruka) {
       document.getElementById('odgovor').textContent = poruka;
     }
 
     function postaviTipkuStanja(kljuc, aktivno, statusPoznat) {
-      const meta = glavneKomande[kljuc];
+      const meta = glavneKomande[kljuc] || sunceveKomande[kljuc];
       const tipka = document.getElementById(meta.tipkaId);
       if (!tipka) {
         return;
@@ -1917,10 +1924,58 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       await osvjeziStatus(true);
     }
 
+    async function prebaciSuncevuKomandu(kljuc) {
+      const meta = sunceveKomande[kljuc];
+      if (suncevoStanje[kljuc] === null) {
+        await osvjeziStatus(true);
+      }
+      if (suncevoStanje[kljuc] === null) {
+        postaviLog(meta.naziv + ': stanje nije dostupno, pokusaj ponovno za trenutak.');
+        return;
+      }
+
+      const trenutnoAktivno = suncevoStanje[kljuc] === true;
+      const ukljucujeSe = !trenutnoAktivno;
+      const putanja = ukljucujeSe ? meta.apiOn : meta.apiOff;
+      const oznaka = meta.naziv + (ukljucujeSe ? ' ukljuci' : ' iskljuci');
+
+      await pozoviApi(putanja, oznaka);
+      await osvjeziStatus(true);
+    }
+
+    async function prebaciTihiMod() {
+      if (tihiModAktivan === null) {
+        await osvjeziStatus(true);
+      }
+      if (tihiModAktivan === null) {
+        postaviLog('Tihi mod: stanje nije dostupno, pokusaj ponovno za trenutak.');
+        return;
+      }
+
+      const ukljucujeSe = !tihiModAktivan;
+      const putanja = ukljucujeSe ? '/api/quiet/on' : '/api/quiet/off';
+      const oznaka = ukljucujeSe ? 'Tihi mod ukljuci' : 'Tihi mod iskljuci';
+
+      await pozoviApi(putanja, oznaka);
+      await osvjeziStatus(true);
+    }
+
     async function osvjeziStatus(prisilno = false) {
+      const timeoutMs = prisilno ? 1500 : 700;
+      const imaAbortKontroler = typeof AbortController === 'function';
+      const kontroler = imaAbortKontroler ? new AbortController() : null;
+      const timeoutId = imaAbortKontroler
+        ? setTimeout(() => kontroler.abort(), timeoutMs)
+        : 0;
       try {
         const putanjaStatusa = prisilno ? '/api/status?force=1' : '/api/status';
-        const odgovor = await fetch(putanjaStatusa, { cache: 'no-store' });
+        const odgovor = await fetch(putanjaStatusa, {
+          cache: 'no-store',
+          signal: kontroler ? kontroler.signal : undefined
+        });
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         if (!odgovor.ok) {
           throw new Error('status');
         }
@@ -1930,25 +1985,64 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
         glavnoStanje.bell2 = podaci.mega_status_known ? !!podaci.bell2_active : null;
         glavnoStanje.slavljenje = podaci.mega_status_known ? !!podaci.slavljenje_active : null;
         glavnoStanje.mrtvacko = podaci.mega_status_known ? !!podaci.mrtvacko_active : null;
+        suncevoStanje.jutro = podaci.mega_status_known ? !!podaci.solar_morning_active : null;
+        suncevoStanje.podne = podaci.mega_status_known ? !!podaci.solar_noon_active : null;
+        suncevoStanje.vecer = podaci.mega_status_known ? !!podaci.solar_evening_active : null;
+        tihiModAktivan = podaci.mega_status_known ? !!podaci.silent_mode_active : null;
 
         postaviTipkuStanja('bell1', glavnoStanje.bell1, !!podaci.mega_status_known);
         postaviTipkuStanja('bell2', glavnoStanje.bell2, !!podaci.mega_status_known);
         postaviTipkuStanja('slavljenje', glavnoStanje.slavljenje, !!podaci.mega_status_known);
         postaviTipkuStanja('mrtvacko', glavnoStanje.mrtvacko, !!podaci.mega_status_known);
+        postaviTipkuStanja('jutro', suncevoStanje.jutro, !!podaci.mega_status_known);
+        postaviTipkuStanja('podne', suncevoStanje.podne, !!podaci.mega_status_known);
+        postaviTipkuStanja('vecer', suncevoStanje.vecer, !!podaci.mega_status_known);
+        postaviTipkuTihogModa(tihiModAktivan, !!podaci.mega_status_known);
       } catch (greska) {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         glavnoStanje.bell1 = null;
         glavnoStanje.bell2 = null;
         glavnoStanje.slavljenje = null;
         glavnoStanje.mrtvacko = null;
+        suncevoStanje.jutro = null;
+        suncevoStanje.podne = null;
+        suncevoStanje.vecer = null;
+        tihiModAktivan = null;
 
         postaviTipkuStanja('bell1', null, false);
         postaviTipkuStanja('bell2', null, false);
         postaviTipkuStanja('slavljenje', null, false);
         postaviTipkuStanja('mrtvacko', null, false);
+        postaviTipkuStanja('jutro', null, false);
+        postaviTipkuStanja('podne', null, false);
+        postaviTipkuStanja('vecer', null, false);
+        postaviTipkuTihogModa(null, false);
       }
     }
 
-    osvjeziStatus();
+    function postaviTipkuTihogModa(aktivno, statusPoznat) {
+      const tipka = document.getElementById('toggleTihiMod');
+      if (!tipka) {
+        return;
+      }
+
+      tipka.textContent = 'TIHI MOD';
+
+      if (!statusPoznat || aktivno === null) {
+        tipka.classList.remove('active');
+        tipka.classList.add('inactive');
+        tipka.setAttribute('aria-pressed', 'false');
+        return;
+      }
+
+      tipka.classList.toggle('active', aktivno);
+      tipka.classList.toggle('inactive', !aktivno);
+      tipka.setAttribute('aria-pressed', aktivno ? 'true' : 'false');
+    }
+
+    setTimeout(() => osvjeziStatus(true), 250);
     setInterval(osvjeziStatus, 10000);
   </script>
 </body>
@@ -2017,6 +2111,70 @@ static const char WEB_SETUP_STRANICA[] PROGMEM = R"HTML(
 </html>
 )HTML";
 
+static const char WEB_OTA_STRANICA[] PROGMEM = R"HTML(
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZVONKO OTA</title>
+  <style>
+    :root { color-scheme: light; --bg:#e8eef6; --panel:#f9fbff; --line:#bcc7d6; --text:#223246; --accent:#3f78bd; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: Arial, sans-serif; background:linear-gradient(180deg,#dfe7f1,#f5f8fc); color:var(--text); }
+    .wrap { max-width:620px; margin:0 auto; padding:20px 14px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 10px 24px rgba(63,82,110,0.12); }
+    h1 { margin:0 0 10px; font-size:28px; }
+    p { line-height:1.55; }
+    input[type=file], button { width:100%; padding:12px; border-radius:12px; border:1px solid var(--line); font:inherit; }
+    button { margin-top:12px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer; }
+    .log { margin-top:14px; min-height:24px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>OTA nadogradnja ESP modula</h1>
+      <p>Odaberi novu <code>.bin</code> datoteku za mrezni modul toranjskog sata. Tijekom upisa firmwarea nemoj gasiti napajanje ni prekidati WiFi vezu.</p>
+      <form id="otaForm">
+        <input id="firmware" name="update" type="file" accept=".bin,application/octet-stream" required>
+        <button type="submit">Pokreni OTA nadogradnju</button>
+      </form>
+      <div id="odgovor" class="log">Stranica je spremna za upload novog firmwarea.</div>
+    </div>
+  </div>
+  <script>
+    const forma = document.getElementById('otaForm');
+    const odgovor = document.getElementById('odgovor');
+    forma.addEventListener('submit', async (dogadaj) => {
+      dogadaj.preventDefault();
+      const datoteka = document.getElementById('firmware').files[0];
+      if (!datoteka) {
+        odgovor.textContent = 'Odaberi firmware datoteku prije slanja.';
+        return;
+      }
+
+      const podaci = new FormData();
+      podaci.append('update', datoteka);
+      odgovor.textContent = 'Upload je pokrenut, pricekaj zavrsetak...';
+
+      try {
+        const r = await fetch('/update', {
+          method: 'POST',
+          body: podaci,
+          cache: 'no-store'
+        });
+        const t = await r.text();
+        odgovor.textContent = t;
+      } catch (greska) {
+        odgovor.textContent = 'OTA upload nije uspio. Provjeri WiFi vezu i pokusaj ponovno.';
+      }
+    });
+  </script>
+</body>
+</html>
+)HTML";
+
 
 void obradiNTPSerijskuNaredbu(const char* payload) {
   char server[sizeof(ntpPosluzitelj)];
@@ -2042,6 +2200,77 @@ void obradiNTPSerijskuNaredbu(const char* payload) {
   Serial.print("NTPLOG: postavljen novi NTP server ");
   Serial.println(ntpPosluzitelj);
   Serial.println("ACK:NTPCFG");
+}
+
+void zakaziRestartNakonOta() {
+  otaRestartZakazan = true;
+  otaRestartZakazanMs = millis();
+}
+
+void obradiZakazaniRestartNakonOta() {
+  if ((millis() - otaRestartZakazanMs) < OTA_RESTART_ODGODA_MS) {
+    return;
+  }
+
+  Serial.println("OTA: restart ESP modula nakon uspjesne nadogradnje");
+  delay(50);
+  ESP.restart();
+}
+
+void obradiOtaUpload() {
+  HTTPUpload& upload = webPosluzitelj.upload();
+
+  switch (upload.status) {
+    case UPLOAD_FILE_START: {
+      otaAzuriranjeUTijeku = true;
+      otaRestartZakazan = false;
+      otaUspjesanZadnjiPut = false;
+      resetirajNtpStanje();
+      Serial.printf("OTA: pocetak nadogradnje %s\n", upload.filename.c_str());
+
+#if defined(ESP8266)
+      const uint32_t maksimalnaVelicina =
+          (ESP.getFreeSketchSpace() - 0x1000U) & 0xFFFFF000U;
+      if (!Update.begin(maksimalnaVelicina)) {
+        Update.printError(Serial);
+      }
+#elif defined(ESP32)
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+#endif
+      break;
+    }
+
+    case UPLOAD_FILE_WRITE:
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+      yield();
+      break;
+
+    case UPLOAD_FILE_END:
+      if (Update.end(true)) {
+        otaUspjesanZadnjiPut = true;
+        Serial.printf("OTA: nadogradnja zavrsena, %u bajtova\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+      otaAzuriranjeUTijeku = false;
+      break;
+
+    case UPLOAD_FILE_ABORTED:
+#if defined(ESP32)
+      Update.abort();
+#endif
+      otaAzuriranjeUTijeku = false;
+      otaUspjesanZadnjiPut = false;
+      Serial.println("OTA: upload prekinut");
+      break;
+
+    default:
+      break;
+  }
 }
 
 void konfigurirajWebPosluzitelj() {
@@ -2092,6 +2321,33 @@ void konfigurirajWebPosluzitelj() {
     }
 
     webPosluzitelj.send(200, "text/plain", odgovor);
+  });
+
+  Serial.println("WEB: Registriram /update rutu");
+  webPosluzitelj.on("/update", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiHtmlStranicuIzProgMema(WEB_OTA_STRANICA);
+  });
+  webPosluzitelj.on("/update", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    if (!otaUspjesanZadnjiPut) {
+      webPosluzitelj.send(500,
+                          "text/plain",
+                          "OTA nadogradnja nije uspjela. Provjeri serijski log ESP modula.");
+      return;
+    }
+
+    zakaziRestartNakonOta();
+    webPosluzitelj.send(200,
+                        "text/plain",
+                        "OTA nadogradnja je uspjela. ESP modul ce se uskoro restartati.");
+  }, []() {
+    obradiOtaUpload();
   });
 
   Serial.println("WEB: Registriram /api/status rutu");
@@ -2189,6 +2445,18 @@ void konfigurirajWebPosluzitelj() {
       return;
     }
     posaljiApiKomanduMegai("SUNCE_VECER_OFF", "Vecernja sunceva automatika iskljucena");
+  });
+  webPosluzitelj.on("/api/quiet/on", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiApiKomanduMegai("TIHI_ON", "Tihi mod ukljucen");
+  });
+  webPosluzitelj.on("/api/quiet/off", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiApiKomanduMegai("TIHI_OFF", "Tihi mod iskljucen");
   });
 
   webPosluzitelj.onNotFound([]() {

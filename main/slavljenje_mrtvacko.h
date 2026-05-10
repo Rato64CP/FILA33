@@ -9,12 +9,14 @@ void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs);
 
 // Slavljenje koristi cekice izvan redovnog satnog otkucavanja.
 void zapocniSlavljenje();
+bool pokusajZapocetiSlavljenjeBezCekanja();
 void zaustaviSlavljenje();
 bool jeSlavljenjeUTijeku();
 void preklopiSlavljenjeDaljinskimUpravljacem();
 
 // Mrtvacko koristi cekice izvan redovnog satnog otkucavanja.
 void zapocniMrtvacko();
+bool pokusajZapocetiMrtvackoBezCekanja();
 bool pokusajZapocetiMrtvackoBezAutoStopa();
 void zaustaviMrtvacko();
 bool jeMrtvackoUTijeku();

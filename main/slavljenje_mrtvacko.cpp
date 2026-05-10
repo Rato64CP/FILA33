@@ -471,9 +471,69 @@ void obradiSigurnosniTimeoutRucnogSlavljenja(unsigned long sadaMs) {
       F("Prekidac slavljenja: sigurnosno gasenje nakon 30 min, cekam fizicki povrat prekidaca na OFF"));
 }
 
+bool pokreniSlavljenjeInterno(bool postaviCekanjeAkoBlokirano) {
+  const unsigned long sadaMs = millis();
+  const uint8_t modSlavljenja = dohvatiModSlavljenja();
+
+  if (slavljenje.aktivno) {
+    slavljenjeNaCekanju = false;
+    return true;
+  }
+
+  if (jeBlokadaUPSModaAktivna()) {
+    slavljenjeNaCekanju = false;
+    posaljiPCLog(F("Slavljenje: blokirano dok toranjski sat radi samo s UPS-a"));
+    return false;
+  }
+
+  if (!jeOperacijaCekicaDozvoljena()) {
+    if (postaviCekanjeAkoBlokirano) {
+      slavljenjeNaCekanju = true;
+      posaljiPCLog(F("Slavljenje: ne moze se odmah pokrenuti, ostaje na cekanju"));
+    }
+    return false;
+  }
+
+  if (mrtvacko.aktivno) {
+    if (postaviCekanjeAkoBlokirano) {
+      slavljenjeNaCekanju = true;
+      posaljiPCLog(F("Slavljenje: mrtvacko je aktivno, zahtjev ostaje na cekanju"));
+    }
+    return false;
+  }
+
+  slavljenjeNaCekanju = false;
+  prekiniAktivnoOtkucavanjeZbogPosebnogNacina(F("slavljenje preuzima cekice toranjskog sata"));
+
+  slavljenje.aktivno = true;
+  slavljenje.vrijemePocetkaMs = sadaMs;
+  slavljenje.trenutniKorak = 0;
+  slavljenje.aktivniMod = modSlavljenja;
+  slavljenje.vrijemeKorakaMs = sadaMs;
+  slavljenje.cekicAktivan = true;
+  slavljenje.aktivniPin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
+  slavljenje.termalnaPauzaAktivna = false;
+  slavljenje.termalnaZastitaAktivirana = false;
+  slavljenje.vrijemePocetkaTermalnePauzeMs = 0UL;
+  slavljenje.sljedecaTermalnaPauzaMs =
+      sadaMs + SLAVLJENJE_TERMALNA_ZASTITA_POCETAK_MS;
+  aktivirajJedanCekicZaPosebniNacin(
+      slavljenje.aktivniPin, dohvatiTrajanjeImpulsaSlavljenjaZaMod(modSlavljenja));
+  digitalWrite(PIN_LAMPICA_SLAVLJENJE, HIGH);
+
+  posaljiLogStartaSlavljenja(modSlavljenja);
+  signalizirajCelebration_Mode();
+  return true;
+}
+
 bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokirano) {
   const unsigned long sadaMs = millis();
   const uint8_t modMrtvackog = dohvatiModMrtvackog();
+
+  if (mrtvacko.aktivno) {
+    mrtvackoNaCekanju = false;
+    return true;
+  }
 
   if (jeBlokadaUPSModaAktivna()) {
     mrtvackoNaCekanju = false;
@@ -582,48 +642,11 @@ void upravljajSlavljenjemIMrtvackim(unsigned long sadaMs) {
 }
 
 void zapocniSlavljenje() {
-  const unsigned long sadaMs = millis();
-  const uint8_t modSlavljenja = dohvatiModSlavljenja();
+  (void)pokreniSlavljenjeInterno(true);
+}
 
-  if (jeBlokadaUPSModaAktivna()) {
-    slavljenjeNaCekanju = false;
-    posaljiPCLog(F("Slavljenje: blokirano dok toranjski sat radi samo s UPS-a"));
-    return;
-  }
-
-  if (!jeOperacijaCekicaDozvoljena()) {
-    slavljenjeNaCekanju = true;
-    posaljiPCLog(F("Slavljenje: ne moze se odmah pokrenuti, ostaje na cekanju"));
-    return;
-  }
-
-  if (mrtvacko.aktivno) {
-    slavljenjeNaCekanju = true;
-    posaljiPCLog(F("Slavljenje: mrtvacko je aktivno, zahtjev ostaje na cekanju"));
-    return;
-  }
-
-  slavljenjeNaCekanju = false;
-  prekiniAktivnoOtkucavanjeZbogPosebnogNacina(F("slavljenje preuzima cekice toranjskog sata"));
-
-  slavljenje.aktivno = true;
-  slavljenje.vrijemePocetkaMs = sadaMs;
-  slavljenje.trenutniKorak = 0;
-  slavljenje.aktivniMod = modSlavljenja;
-  slavljenje.vrijemeKorakaMs = sadaMs;
-  slavljenje.cekicAktivan = true;
-  slavljenje.aktivniPin = dohvatiPinSlavljenjaZaKorak(modSlavljenja, 0);
-  slavljenje.termalnaPauzaAktivna = false;
-  slavljenje.termalnaZastitaAktivirana = false;
-  slavljenje.vrijemePocetkaTermalnePauzeMs = 0UL;
-  slavljenje.sljedecaTermalnaPauzaMs =
-      sadaMs + SLAVLJENJE_TERMALNA_ZASTITA_POCETAK_MS;
-  aktivirajJedanCekicZaPosebniNacin(
-      slavljenje.aktivniPin, dohvatiTrajanjeImpulsaSlavljenjaZaMod(modSlavljenja));
-  digitalWrite(PIN_LAMPICA_SLAVLJENJE, HIGH);
-
-  posaljiLogStartaSlavljenja(modSlavljenja);
-  signalizirajCelebration_Mode();
+bool pokusajZapocetiSlavljenjeBezCekanja() {
+  return pokreniSlavljenjeInterno(false);
 }
 
 void zaustaviSlavljenje() {
@@ -650,6 +673,10 @@ bool jeSlavljenjeUTijeku() {
 
 void zapocniMrtvacko() {
   (void)pokreniMrtvackoInterno(true, true);
+}
+
+bool pokusajZapocetiMrtvackoBezCekanja() {
+  return pokreniMrtvackoInterno(true, false);
 }
 
 bool pokusajZapocetiMrtvackoBezAutoStopa() {
@@ -686,18 +713,9 @@ void preklopiSlavljenjeDaljinskimUpravljacem() {
     return;
   }
 
-  if (slavljenjeNaCekanju) {
-    slavljenjeNaCekanju = false;
-    posaljiPCLog(F("433 MHz tipka C: slavljenje skinuto s cekanja"));
-    return;
-  }
-
-  zapocniSlavljenje();
-  if (slavljenje.aktivno) {
+  if (pokusajZapocetiSlavljenjeBezCekanja()) {
     posaljiPCLog(F("433 MHz tipka C: slavljenje pokrenuto"));
-  } else if (slavljenjeNaCekanju) {
-    posaljiPCLog(F("433 MHz tipka C: slavljenje ostaje na cekanju"));
   } else {
-    posaljiPCLog(F("433 MHz tipka C: zahtjev odbijen sigurnosnim pravilima"));
+    posaljiPCLog(F("433 MHz tipka C: ne mogu ukljuciti dok se ne smire zvona i inercija, pokusaj ponovno"));
   }
 }

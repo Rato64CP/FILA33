@@ -19,7 +19,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - runtime dijagnostika `EEPROM-a` i latched fault potvrda preko LCD-a i tipki
 - obrada RTC i NTP izvora vremena
 - degradirani nacin rada za `RTC` i `EEPROM` kad se kvar ponavlja
-- jedinstveni tihi rezim, BAT logika i lokalni overridei
+- jedinstveni tihi rezim, BAT logika, lokalni overridei i webski virtualni toggle tihog moda
 - `UPS mod` s odvojenim ulazom za nadzor mreznog napona
 
 ## 🧭 Podjela poslova Mega / ESP
@@ -64,6 +64,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
+- prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije nego sto ga `Mega` prihvati za toranjski sat
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
 - prihvaceni `NTP` zapis i start redovnog otkucavanja poravnavaju se na `RTC SQW` granicu sekunde kad je dostupna
 
