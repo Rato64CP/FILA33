@@ -1,6 +1,6 @@
 # ZVONKO v. 1.0 - Arduino Mega pinout toranjskog sata
 
-Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Mega 2560` u sustavu `ZVONKO v. 1.0`. Glavni izvor istine i dalje ostaje [podesavanja_piny.h](C:/Users/Rato/Documents/GitHub/FILA33/main/podesavanja_piny.h), a ova datoteka sluzi kao pomoc pri spajanju, servisiranju i provjeri instalacije.
+Ovaj dokument je citljiv pregled svih aktivnih pinova i konekcija za `Arduino Mega 2560` u sustavu `ZVONKO v. 1.0`. Glavni izvor istine i dalje ostaje [podesavanja_piny.h](../main/podesavanja_piny.h), a ova datoteka sluzi kao pomoc pri spajanju, servisiranju i provjeri instalacije.
 
 ## Brzi pregled izlaznih pinova
 
@@ -103,7 +103,7 @@ Aktualna priprema toranjskog sata ocekuje da se iz tog signala prepozna nauceni 
 | 433 `DATA` izlaz prijemnika | `3` | `SRX882` data signal prema prekidnom ulazu `Mega 2560` |
 
 Napomena:
-- tipka `C` daljinskog treba imati naucen kod u [main/daljinski_433.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/daljinski_433.cpp)
+- tipka `C` daljinskog treba imati naucen kod u [main/daljinski_433.cpp](../main/daljinski_433.cpp)
 - jedan pritisak tipke `C` pali slavljenje, drugi ga gasi ili skida s cekanja
 - ako se koristi drugi daljinski protokol, dekoder u `main/daljinski_433.cpp` treba prilagoditi stvarnom okviru
 
@@ -193,4 +193,4 @@ Aktualna postavka firmwarea:
 
 ## Napomena za razvoj
 
-Ako se raspored pinova ikad mijenja, prvo treba uskladiti [podesavanja_piny.h](C:/Users/Rato/Documents/GitHub/FILA33/main/podesavanja_piny.h), a tek zatim ovu dokumentaciju.
+Ako se raspored pinova ikad mijenja, prvo treba uskladiti [podesavanja_piny.h](../main/podesavanja_piny.h), a tek zatim ovu dokumentaciju.

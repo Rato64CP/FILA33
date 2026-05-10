@@ -136,10 +136,10 @@
 
 ## 📚 Dodatni README
 
-- [README za Mega firmware](/C:/Users/Rato/Documents/GitHub/FILA33/main/README.md)
-- [README za ESP firmware](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/README.md)
-- [Popis ESP web API ruta toranjskog sata](/C:/Users/Rato/Documents/GitHub/FILA33/docs/esp_web_api_toranjskog_sata.md)
-- [Tehnicka dokumentacija firmware sustava](/C:/Users/Rato/Documents/GitHub/FILA33/docs/tehnicka_dokumentacija_firmware_sustava.md)
+- [README za Mega firmware](main/README.md)
+- [README za ESP firmware](esp_firmware/README.md)
+- [Popis ESP web API ruta toranjskog sata](docs/esp_web_api_toranjskog_sata.md)
+- [Tehnicka dokumentacija firmware sustava](docs/tehnicka_dokumentacija_firmware_sustava.md)
 
 ## 🛠️ Napomene Za Razvoj
 

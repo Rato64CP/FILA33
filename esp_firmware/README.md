@@ -1,6 +1,6 @@
 # 🔧 ZVONKO v. 1.0 - ESP firmware
 
-Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni modul toranjskog sata. `ESP` serijski suraduje s `Arduino Megom 2560` kroz [main/esp_serial.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp), ali ne preuzima vlasnistvo nad `RTC`-om, zvonima, cekicima, kazaljkama ni okretnom plocom.
+Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni modul toranjskog sata. `ESP` serijski suraduje s `Arduino Megom 2560` kroz [main/esp_serial.cpp](../main/esp_serial.cpp), ali ne preuzima vlasnistvo nad `RTC`-om, zvonima, cekicima, kazaljkama ni okretnom plocom.
 
 ## ✨ Uloga ESP modula
 
@@ -12,7 +12,7 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - potvrduje prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta drugim uzorkom prije prve sinkronizacije toranjskog sata
 - pruza svedeni web dashboard i servisni API prema Megi
 - prihvaca setup `WiFi` kroz privremeni `AP`
-- ostaje pomocni mrezni sloj i ne zaobilazi odluke koje donose [main/time_glob.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp), [main/prekidac_tisine.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/prekidac_tisine.cpp) i [main/power_recovery.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp)
+- ostaje pomocni mrezni sloj i ne zaobilazi odluke koje donose [main/time_glob.cpp](../main/time_glob.cpp), [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp) i [main/power_recovery.cpp](../main/power_recovery.cpp)
 
 ## 🌐 Aktivne web rute
 
@@ -28,7 +28,7 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - gornje tipke su naglasene i tamnije plave kad su ukljucene
 - donji blok koristi tipke `JUTRO`, `PODNE`, `VECER`
 - ispod suncevih tipki postoji crveni toggle `TIHI MOD`
-- `TIHI MOD` preko weba ulazi u isti jedinstveni tihi rezim kao [main/prekidac_tisine.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/prekidac_tisine.cpp)
+- `TIHI MOD` preko weba ulazi u isti jedinstveni tihi rezim kao [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp)
 - ako korisnik promijeni stanje fizickim kip-prekidacem tihog moda, dashboard nakon sljedezeg `STATUS:` osvjezavanja prikazuje stvarno stanje iz Mege
 - dashboard pri prvom otvaranju odmah radi jedan prisilni dohvat `STATUS?` kako bi se tipke obojile prema stvarnom stanju toranjskog sata
 
@@ -63,19 +63,19 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - `WIFI:CONNECTED`, `WIFI:DISCONNECTED`, `WIFI:LOCAL_IP:...`, `WIFI:MAC:...` prijavljuju stanje veze
 - `NTP:YYYY-MM-DDTHH:MM:SS;DST=0/1` salje lokalno vrijeme toranjskog sata
 - `SETUPWIFI:<ssid>|<lozinka>` prosljeduje novu mrezu koju je korisnik upisao kroz setup `AP`
-- `CMD:<naredba>` prenosi servisne naredbe prema [main/esp_serial.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp)
+- `CMD:<naredba>` prenosi servisne naredbe prema [main/esp_serial.cpp](../main/esp_serial.cpp)
 - `STATUS:` vraca objedinjeni status koji dashboard koristi za boju tipki
 - `ACK:*`, `ERR:*` i `NTPLOG:*` linije sluze za potvrde i dijagnostiku mreznog mosta
 
 ## ⏱️ UDP NTP tok
 
-- `ESP` vise ne koristi `NTPClient`, nego vlastiti UDP `NTP` dohvat u [esp_firmware.ino](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/esp_firmware.ino)
+- `ESP` vise ne koristi `NTPClient`, nego vlastiti UDP `NTP` dohvat u [esp_firmware.ino](esp_firmware.ino)
 - prije novog upita odbacuju se zaostali UDP paketi kako kasni odgovor ne bi pokvario novo `RTT` mjerenje
 - prihvacaju se samo valjani `NTP` odgovori, uz osnovnu provjeru `mode`, `stratum` vrijednosti i vremena
 - prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta ne salje se odmah Megi
 - prvi uzorak se pamti, a `ESP` odmah trazi drugi uzorak radi stabilizacije
 - tek potvrden drugi uzorak postaje autoritet za prvu `NTP` sinkronizaciju toranjskog sata
-- `ESP` iz odgovora racuna precizniji `UTC ms`, ali prema Megi i dalje salje isti tekstualni `NTP:` format radi kompatibilnosti s [main/time_glob.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp)
+- `ESP` iz odgovora racuna precizniji `UTC ms`, ali prema Megi i dalje salje isti tekstualni `NTP:` format radi kompatibilnosti s [main/time_glob.cpp](../main/time_glob.cpp)
 - `Mega` i dalje ostaje jedini vlasnik `RTC` upisa i poravnanja na `RTC SQW` granicu sekunde
 
 ## 🛡️ Rad uz sigurnosne blokade Mege
@@ -135,5 +135,5 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 
 ## 📄 Datoteke
 
-- [esp_firmware.ino](/C:/Users/Rato/Documents/GitHub/FILA33/esp_firmware/esp_firmware.ino) - glavni firmware za `WiFi`, setup `AP`, UDP `NTP`, dashboard i servisni web/API sloj toranjskog sata
-- [Popis ESP web API ruta toranjskog sata](/C:/Users/Rato/Documents/GitHub/FILA33/docs/esp_web_api_toranjskog_sata.md)
+- [esp_firmware.ino](esp_firmware.ino) - glavni firmware za `WiFi`, setup `AP`, UDP `NTP`, dashboard i servisni web/API sloj toranjskog sata
+- [Popis ESP web API ruta toranjskog sata](../docs/esp_web_api_toranjskog_sata.md)

@@ -25,11 +25,11 @@ Glavna `loop()` petlja je organizirana kao kooperativni scheduler bez blokiranja
 Time se osigurava da nijedan podsustav ne gladuje, a svi rade ciklicki u malim koracima.
 
 ### Arhitektura na visokoj razini
-- **Vrijeme i sinkronizacija**: [main/time_glob.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/time_glob.cpp), [main/esp_serial.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/esp_serial.cpp)
-- **Kretanje mehanike**: [main/kazaljke_sata.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/kazaljke_sata.cpp), [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp)
-- **Udari i zvona**: [main/otkucavanje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/otkucavanje.cpp), [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp), [main/slavljenje_mrtvacko.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/slavljenje_mrtvacko.cpp)
-- **UI i postavke**: [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp), [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp), [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp)
-- **Otpornost i oporavak**: [main/watchdog.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/watchdog.cpp), [main/power_recovery.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp), [main/wear_leveling.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/wear_leveling.cpp), [main/i2c_eeprom.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/i2c_eeprom.cpp)
+- **Vrijeme i sinkronizacija**: [main/time_glob.cpp](../main/time_glob.cpp), [main/esp_serial.cpp](../main/esp_serial.cpp)
+- **Kretanje mehanike**: [main/kazaljke_sata.cpp](../main/kazaljke_sata.cpp), [main/okretna_ploca.cpp](../main/okretna_ploca.cpp), [main/unified_motion_state.cpp](../main/unified_motion_state.cpp)
+- **Udari i zvona**: [main/otkucavanje.cpp](../main/otkucavanje.cpp), [main/zvonjenje.cpp](../main/zvonjenje.cpp), [main/slavljenje_mrtvacko.cpp](../main/slavljenje_mrtvacko.cpp)
+- **UI i postavke**: [main/tipke.cpp](../main/tipke.cpp), [main/menu_system.cpp](../main/menu_system.cpp), [main/postavke.cpp](../main/postavke.cpp)
+- **Otpornost i oporavak**: [main/watchdog.cpp](../main/watchdog.cpp), [main/power_recovery.cpp](../main/power_recovery.cpp), [main/wear_leveling.cpp](../main/wear_leveling.cpp), [main/i2c_eeprom.cpp](../main/i2c_eeprom.cpp)
 
 ---
 
@@ -275,9 +275,9 @@ Firmware sam vodi `CET/CEST` status, sprema ga u EEPROM i automatski primjenjuje
 ## 8. Menu I Sustav Postavki
 
 ### Jasna podjela odgovornosti
-- [main/tipke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/tipke.cpp): fizicko skeniranje tipki i pretvorba u `KeyEvent`
-- [main/menu_system.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/menu_system.cpp): stanje UI-a, ekrani, navigacija i poziv poslovnih funkcija
-- [main/postavke.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/postavke.cpp): trajna pohrana, validacija, fallback na default i zapis u EEPROM
+- [main/tipke.cpp](../main/tipke.cpp): fizicko skeniranje tipki i pretvorba u `KeyEvent`
+- [main/menu_system.cpp](../main/menu_system.cpp): stanje UI-a, ekrani, navigacija i poziv poslovnih funkcija
+- [main/postavke.cpp](../main/postavke.cpp): trajna pohrana, validacija, fallback na default i zapis u EEPROM
 
 Lokalne tipke vise ne koriste matricnu tipkovnicu. Aktivni firmware toranjskog sata sada koristi 6 direktnih `INPUT_PULLUP` ulaza:
 - `GORE`
@@ -353,10 +353,10 @@ Obuhvacene postavke su:
 - `Impuls cekica`
 
 `UPS mod` koristi odvojeni ulaz za nadzor mreznog napona. Kad je ukljucen i `Mega` prijavi da mreza vise nije prisutna, firmware toranjskog sata:
-- blokira zvona kroz [main/zvonjenje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/zvonjenje.cpp)
-- blokira otkucavanje i druge udare cekica kroz [main/otkucavanje.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/otkucavanje.cpp) i [main/slavljenje_mrtvacko.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/slavljenje_mrtvacko.cpp)
-- blokira automatiku kazaljki kroz [main/kazaljke_sata.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/kazaljke_sata.cpp)
-- ostavlja okretnu plocu aktivnom, ali gasi cavao-zvonjenja i posebne nacine u [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp)
+- blokira zvona kroz [main/zvonjenje.cpp](../main/zvonjenje.cpp)
+- blokira otkucavanje i druge udare cekica kroz [main/otkucavanje.cpp](../main/otkucavanje.cpp) i [main/slavljenje_mrtvacko.cpp](../main/slavljenje_mrtvacko.cpp)
+- blokira automatiku kazaljki kroz [main/kazaljke_sata.cpp](../main/kazaljke_sata.cpp)
+- ostavlja okretnu plocu aktivnom, ali gasi cavao-zvonjenja i posebne nacine u [main/okretna_ploca.cpp](../main/okretna_ploca.cpp)
 - pali lampicu tihog rezima i na glavnom LCD prikazu umjesto datuma ispisuje `NEMA STRUJE!`
 
 Kad se mreza vrati, blokade se skidaju i kazaljke nastavljaju redovno automatsko poravnanje prema stvarnom vremenu.
@@ -457,8 +457,8 @@ Time se izbjegava nepotrebna mikrokorekcija usred aktivnog mehanickog ciklusa i 
 
 ## 🛠️ Developer Notes
 
-- [main/wear_leveling.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/wear_leveling.cpp) i dalje postoji za sporije EEPROM segmente, ali glavno stanje kazaljki i ploce vodi [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp)
-- [main/okretna_ploca.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/okretna_ploca.cpp) ocekuje da su pocetak i kraj prozora rada poravnani na `15`-minutne blokove
-- kod promjena layouta obavezno zajedno provjeriti [main/eeprom_konstante.h](C:/Users/Rato/Documents/GitHub/FILA33/main/eeprom_konstante.h), [main/unified_motion_state.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/unified_motion_state.cpp) i [main/power_recovery.cpp](C:/Users/Rato/Documents/GitHub/FILA33/main/power_recovery.cpp)
+- [main/wear_leveling.cpp](../main/wear_leveling.cpp) i dalje postoji za sporije EEPROM segmente, ali glavno stanje kazaljki i ploce vodi [main/unified_motion_state.cpp](../main/unified_motion_state.cpp)
+- [main/okretna_ploca.cpp](../main/okretna_ploca.cpp) ocekuje da su pocetak i kraj prozora rada poravnani na `15`-minutne blokove
+- kod promjena layouta obavezno zajedno provjeriti [main/eeprom_konstante.h](../main/eeprom_konstante.h), [main/unified_motion_state.cpp](../main/unified_motion_state.cpp) i [main/power_recovery.cpp](../main/power_recovery.cpp)
 - rucni override zvona ima prioritet nad automatikom; pri dijagnostici zasto zvono ne staje prvo provjeriti stanje fizickih sklopki i tihi rezim
 - zadnji SRAM tuning prebacio je vecinu fiksnih log stringova na `snprintf_P(..., PSTR(...))`, smanjio velike buffere u `main/esp_serial.cpp` i spustio globalni SRAM otisak na oko `41%` uz oko `4815 B` slobodne rezerve za lokalne buffere i stack

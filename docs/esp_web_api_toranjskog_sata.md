@@ -150,5 +150,5 @@ Napomena:
 - API ne zaobilazi `safe mode` ni recovery odluke iz `main/power_recovery.*`
 - API ne potvrđuje latched fault niti `RTC` upozorenja; to ostaje lokalna funkcija tipki i `LCD`-a toranjskog sata
 - `ESP` ne upravlja izravno relejima `kazaljki`, `okretne ploče`, `zvona` ili `čekića`, nego samo šalje servisni zahtjev `Megi`
-- `TIHI MOD` preko weba ulazi u isti jedinstveni tihi režim kao fizički kip-prekidač u [main/prekidac_tisine.cpp](/C:/Users/Rato/Documents/GitHub/FILA33/main/prekidac_tisine.cpp)
+- `TIHI MOD` preko weba ulazi u isti jedinstveni tihi režim kao fizički kip-prekidač u [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp)
 - ako se fizički kip-prekidač tihog moda promijeni, on postaje autoritet i gasi prethodno webom zadanu virtualnu blokadu
