@@ -9,12 +9,14 @@
 #include "menu_system.h"
 #include "podesavanja_piny.h"
 #include "power_recovery.h"
+#include "watchdog.h"
 
 namespace {
 
 static const uint8_t BROJ_LOGICKIH_TIPKI = 6;
 static const uint8_t DEBOUNCE_TIPKE_MS = 30;
 static const unsigned long DUGI_PRITISAK_SETUP_KOMBINACIJE_MS = 1500UL;
+static const unsigned long DUGI_PRITISAK_RESET_KOMBINACIJE_MS = 5000UL;
 static const unsigned long DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS = 5000UL;
 
 struct DefinicijaTipke {
@@ -42,6 +44,9 @@ static DebounceTipke debounceTipki[BROJ_LOGICKIH_TIPKI];
 static bool setupKombinacijaAktivna = false;
 static bool setupKombinacijaObradena = false;
 static unsigned long setupKombinacijaPocetakMs = 0;
+static bool resetKombinacijaAktivna = false;
+static bool resetKombinacijaObradena = false;
+static unsigned long resetKombinacijaPocetakMs = 0;
 static bool safeModeSelectZadnjeSirovoPritisnuto = false;
 static bool safeModeSelectStabilnoPritisnuto = false;
 static bool safeModeSelectOtkljucavanjeObradeno = false;
@@ -53,6 +58,11 @@ static bool jeTipkaSirovoPritisnuta(uint8_t indeksTipke) {
     return false;
   }
   return (digitalRead(TIPKE[indeksTipke].pin) == LOW);
+}
+
+static bool jeResetKombinacijaSirovoPritisnuta() {
+  return digitalRead(PIN_TIPKA_GORE) == LOW &&
+         digitalRead(PIN_TIPKA_DOLJE) == LOW;
 }
 
 static void inicijalizirajPinoveTipki() {
@@ -70,6 +80,11 @@ static void inicijalizirajDebounceTipki() {
 }
 
 static void obradiPritisakTipke(const DefinicijaTipke& tipka) {
+  if ((tipka.event == KEY_UP || tipka.event == KEY_DOWN) &&
+      jeResetKombinacijaSirovoPritisnuta()) {
+    return;
+  }
+
   if (tipka.event == KEY_SELECT && jeLatchedFaultAktivan()) {
     if (potvrdiLatchedFault()) {
       posaljiPCLog(F("Power Recovery: latched fault potvrdjen tipkom SELECT"));
@@ -156,6 +171,35 @@ static void provjeriSetupKombinacijuLijevoDesno(unsigned long sadaMs) {
   posaljiPCLog(F("Tipke: lijevo+desno (dugo) -> zahtjev za pokretanje setup WiFi mreze"));
 }
 
+static void provjeriResetKombinacijuGoreDolje(unsigned long sadaMs) {
+  const bool gorePritisnuto = jeTipkaStabilnoPritisnuta(KEY_UP);
+  const bool doljePritisnuto = jeTipkaStabilnoPritisnuta(KEY_DOWN);
+
+  if (!gorePritisnuto || !doljePritisnuto) {
+    resetKombinacijaAktivna = false;
+    resetKombinacijaObradena = false;
+    resetKombinacijaPocetakMs = 0;
+    return;
+  }
+
+  if (!resetKombinacijaAktivna) {
+    resetKombinacijaAktivna = true;
+    resetKombinacijaObradena = false;
+    resetKombinacijaPocetakMs = sadaMs;
+    posaljiPCLog(F("Tipke: gore+dolje drzim -> servisni reset ako potraje 5 sekundi"));
+    return;
+  }
+
+  if (resetKombinacijaObradena ||
+      (sadaMs - resetKombinacijaPocetakMs) < DUGI_PRITISAK_RESET_KOMBINACIJE_MS) {
+    return;
+  }
+
+  resetKombinacijaObradena = true;
+  posaljiPCLog(F("Tipke: gore+dolje (dugo) -> pokrecem kontrolirani reset toranjskog sata"));
+  zatraziResetWatchdogom();
+}
+
 }  // namespace
 
 void inicijalizirajTipke() {
@@ -173,38 +217,38 @@ void provjeriTipke() {
   }
 
   provjeriSetupKombinacijuLijevoDesno(sadaMs);
+  provjeriResetKombinacijuGoreDolje(sadaMs);
 }
 
 bool provjeriOtkljucavanjeSafeMode() {
   const unsigned long sadaMs = millis();
-  const bool sirovoSelectPritisnuto = (digitalRead(PIN_TIPKA_DA) == LOW);
+  const bool selectSirovoPritisnuto = (digitalRead(PIN_TIPKA_DA) == LOW);
 
-  if (sirovoSelectPritisnuto != safeModeSelectZadnjeSirovoPritisnuto) {
-    safeModeSelectZadnjeSirovoPritisnuto = sirovoSelectPritisnuto;
+  if (selectSirovoPritisnuto != safeModeSelectZadnjeSirovoPritisnuto) {
+    safeModeSelectZadnjeSirovoPritisnuto = selectSirovoPritisnuto;
     safeModeSelectZadnjaPromjenaMs = sadaMs;
   }
 
-  if ((sadaMs - safeModeSelectZadnjaPromjenaMs) >= DEBOUNCE_TIPKE_MS &&
-      sirovoSelectPritisnuto != safeModeSelectStabilnoPritisnuto) {
-    safeModeSelectStabilnoPritisnuto = sirovoSelectPritisnuto;
+  if ((sadaMs - safeModeSelectZadnjaPromjenaMs) < DEBOUNCE_TIPKE_MS) {
+    return false;
+  }
 
+  if (selectSirovoPritisnuto != safeModeSelectStabilnoPritisnuto) {
+    safeModeSelectStabilnoPritisnuto = selectSirovoPritisnuto;
     if (safeModeSelectStabilnoPritisnuto) {
       safeModeSelectVrijemePritiskaMs = sadaMs;
       safeModeSelectOtkljucavanjeObradeno = false;
     } else {
-      safeModeSelectVrijemePritiskaMs = 0;
       safeModeSelectOtkljucavanjeObradeno = false;
     }
-  }
-
-  if (!safeModeSelectStabilnoPritisnuto ||
-      safeModeSelectOtkljucavanjeObradeno ||
-      safeModeSelectVrijemePritiskaMs == 0) {
     return false;
   }
 
-  if ((sadaMs - safeModeSelectVrijemePritiskaMs) <
-      DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS) {
+  if (!safeModeSelectStabilnoPritisnuto || safeModeSelectOtkljucavanjeObradeno) {
+    return false;
+  }
+
+  if ((sadaMs - safeModeSelectVrijemePritiskaMs) < DUGI_PRITISAK_SAFE_MODE_OTKLJUCAVANJE_MS) {
     return false;
   }
 

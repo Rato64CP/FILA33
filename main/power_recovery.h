@@ -14,7 +14,7 @@ void spremiKriticalnoStanje();
 // Periodicki health-check i latched fault obrada za toranjski sat.
 void osvjeziPowerRecoveryDijagnostiku();
 
-// Provjera zdravlja vanjskog EEPROM-a za recovery toranjskog sata.
+// Provjera zdravlja vanjskog FRAM/EEPROM spremnika za recovery toranjskog sata.
 bool provjeriZdravostEEPROM();
 bool jeLatchedFaultAktivan();
 bool potvrdiLatchedFault();

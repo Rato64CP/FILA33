@@ -12,7 +12,7 @@
 - podrzava opciju `K:0/1` za rad s kocnicom zvona ili bez nje
 - uvodi termalnu zastitu slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - podrzava blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
-- cuva postavke i kriticno stanje u `24C32 EEPROM-u`
+- cuva postavke i kriticno stanje u vanjskom `24C32 EEPROM-u` ili `FM24W256 FRAM-u`
 - vraca sustav u valjano stanje nakon watchdog ili power-loss reseta
 - zakljucava mehaniku u `safe mode` ako se dogodi previse watchdog resetova u kratkom vremenu
 - prati zdravlje `RTC` i `EEPROM` podsustava i prelazi u ograniceni rad kad kvar postane ponovljiv
@@ -36,17 +36,18 @@
 
 ## 🔄 Serijska komunikacija
 
-- Mega koristi `Serial3` za ugradeni `ESP8266` kao jedini aktivni mrezni most
-- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
+- Mega koristi `Serial3` za vanjski `ESP32` kao jedini aktivni mrezni most
+- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za web skupine `SUSTAV`, `STAPICI`, `BAT` i `SUNCE`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
 - `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
 - prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije prve sinkronizacije toranjskog sata
 - stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`
+- `ESP32` sada ima i zasebnu stranicu `/settings`, ali `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje svih web postavki
 
 ## 🧩 Struktura Projekta
 
 - `main/` - glavni firmware toranjskog sata za `Arduino Mega 2560`
-- `esp_firmware/` - pomocni firmware za `ESP8266` i `ESP32`
+- `esp_firmware/` - pomocni firmware za vanjski `ESP32`
 - `main/main.ino` - inicijalizacija i glavna petlja
 - `main/time_glob.*` - RTC, NTP, DST i prioriteti izvora vremena
 - `main/esp_serial.*` - serijska komunikacija s ESP modulom
@@ -61,22 +62,25 @@
 - `main/postavke.*` - citanje, validacija i spremanje postavki
 - `main/unified_motion_state.*` - zajednicko stanje kazaljki i ploce
 - `main/power_recovery.*` i `main/watchdog.*` - oporavak i pouzdanost rada 24/7
-- `main/wear_leveling.*` i `main/i2c_eeprom.*` - trajna pohrana u `24C32`
+- `main/wear_leveling.*` i `main/i2c_eeprom.*` - trajna pohrana u vanjskom `24C32 EEPROM-u` ili `FM24W256 FRAM-u`
 
 ## 📶 Setup WiFi
 
-- `ESP8266` moze pokrenuti privremenu setup mrezu `ZVONKO_setup`
+- `ESP32` moze pokrenuti privremenu setup mrezu `ZVONKO_setup`
 - lozinka setup mreze je `zvonko10`
-- setup AP se aktivira dugim pritiskom tipke na `GPIO14 / D5` prema `GND`
+- setup AP se aktivira dugim pritiskom tipke na `GPIO27` prema `GND`
+- serijska veza `ESP32 <-> Mega` koristi odvojene pinove `GPIO16` kao `RX` i `GPIO17` kao `TX`
 - setup AP se moze aktivirati i dugim istovremenim pritiskom `lijevo + desno` na tipkovnici, ali samo s glavnog prikaza sata
-- status LED koristi `GPIO12 / D6`
+- status LED koristi `GPIO26`
 - setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`
-- nakon spremanja nove mreze `ESP8266` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
+- nakon spremanja nove mreze `ESP32` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
 - servisni dashboard na `ESP` sada koristi glavne tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`, sunceve tipke `JUTRO`, `PODNE`, `VECER` i crveni toggle `TIHI MOD`
+- kroz `/settings` `ESP32` sada moze sigurno uredjivati `Sustav`, `Stapice`, `BAT` i `Sunce`, bez diranja vremena, datuma, kazaljki i okretne ploce
 
 ## 💾 EEPROM I Recovery
 
-- `24C32 EEPROM` cuva postavke, `UnifiedMotionState`, DST status i kriticni backup
+- vanjska `24C32 EEPROM` ili `FM24W256 FRAM` memorija cuva postavke, `UnifiedMotionState`, DST status i kriticni backup
+- iako `FM24W256` ima veci fizicki kapacitet, firmware toranjskog sata namjerno zadrzava postojeci kompatibilni raspored unutar prvih `4096 B`, tako da obje varijante ostaju kompatibilne
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
 - svaki `UnifiedMotionState` slot ima checksum i nevaljan ili polovicno upisan zapis se preskace
 - zapis zadnje sinkronizacije vremena sada ima vlastiti checksum uz kompatibilno citanje starog formata
@@ -86,7 +90,7 @@
 - zdravlje `EEPROM-a` se provjerava i pri bootu i periodicki svakih `6 sati`
 - kvar `EEPROM-a` ostaje latched u memoriji do rucne potvrde operatera
 - kad je `EEPROM` u degradiranom nacinu rada, periodicni backup i pomocni zapisi poput DST i zadnje sinkronizacije se pauziraju
-- `I2C` sabirnica koristi zajednicki `Wire` timeout i reset sabirnice za `LCD`, `DS3231`, `24C32` i servisno skeniranje
+- `I2C` sabirnica koristi zajednicki `Wire` timeout i reset sabirnice za `LCD`, `DS3231`, vanjski `FRAM` spremnik i servisno skeniranje
 - `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan kako pomocni zapisi ne bi nepotrebno gurali toranjski sat prema WDT resetu
 - stari `offset` ploce i MQTT tragovi vise nisu dio aktivnog EEPROM modela
 - kod izmjena koje diraju EEPROM raspored ili recovery logiku obavezno provjeri:
@@ -100,18 +104,32 @@
 - lampica tihog moda svijetli samo kad je stvarno aktivan konacni tihi rezim
 - tihi rezim blokira zvona, cekice, slavljenje i mrtvacko, ali ne zaustavlja kazaljke ni okretnu plocu
 - `UPS mod` pali lampicu tihog moda i na LCD-u prikazuje `NEMA STRUJE!` dok mehanika toranjskog sata radi samo s pomocnog napajanja
-- BAT / tihi sati iz postavki blokiraju samo otkucavanje
+- `BAT od/do` oznacava raspon u kojem je redovno otkucavanje dopusteno
+- izvan `BAT od/do` raspona redovno otkucavanje je blokirano, ali zvona, sunceva automatika i okretna ploca nastavljaju raditi
+- primjer: `BAT od 6` i `BAT do 22` znaci da otkucavanje radi od `06:00` do `22:00`, a izvan toga ne radi
+- za nocni raspon tipa `22-6` `22:00` jos smije otkucati, a nakon toga krece tisi dio noci
 - sunceva automatika i cavli ploce rade i tijekom BAT raspona
 - jutarnje suncevo zvono moze ranije otvoriti otkucavanje prije kraja BAT raspona
 - blagdansko slavljenje ceka stvarni zavrsetak zvona, otkucavanja i inercije prije pokretanja
 
+## 🖥️ LCD Prikaz
+
+- prvi red glavnog LCD prikaza vise ne koristi aktivnosnu zvjezdicu `*` ni oznake `R/N`
+- oznaka izvora vremena `NTP`, `MAN`, `ERR` ili `---` sada je u poljima `11-13` prvog reda
+- polja `15-16` prvog reda prikazuju temperaturu `DS3231 RTC` modula
+- `WiFi` vise nema zasebnu oznaku `W` na LCD-u
+- dvotocke u vremenu trepere u ritmu `1/2 SQW` samo kad toranjski sat nesto radi ili kad `WiFi` nije spojen
+- ako je `WiFi` spojen i mehanika miruje, dvotocke ostaju stalno upaljene
+- dok vrijeme nije potvrdeno, glavni prikaz ostaje u sigurnom `ERR` modu i ne prikazuje neprovjereno `RTC` vrijeme kao da je ispravno
+
 ## ⚠️ Ponašanje Kod Gresaka
 
 - gubitak `WiFi` veze: toranjski sat nastavlja rad preko `RTC`
-- kvar `ESP8266`: nema utjecaja na osnovni rad kazaljki, ploce, zvona i cekica
+- kvar `ESP32`: nema utjecaja na osnovni rad kazaljki, ploce, zvona i cekica
 - reset `Mega 2560`: recovery iz spremljenog stanja
 - nestanak napajanja: nastavak iz zadnjeg valjanog stanja
 - gubitak RTC SQW impulsa: kazaljke i ploca imaju `millis()` fallback za sigurno gasenje aktivne faze
+- gubitak `RTC/I2C` veze: aktivira se izlazni fail-safe i releji za zvona, cekice, kazaljke i plocu ostaju blokirani dok se `DS3231` ne oporavi
 - ponovljeni watchdog resetovi bez power-loss oznake: aktivira se `SUSTAV ZAKLJUCAN / PREVISE RESETA`
 - ponovljena nevaljana RTC ocitanja: aktivira se `RTC OGRANICEN RAD / CEKAM OPORAVAK` i automatika vremena se privremeno blokira
 - kvar `EEPROM-a`: aktivira se latched fault i periodicni EEPROM zapisi i health-checkovi se zaustavljaju do potvrde
@@ -122,9 +140,9 @@
 ## 🔧 Hardver
 
 - `Arduino Mega 2560`
-- `ESP8266`
+- `ESP32`
 - `DS3231 RTC`
-- `24C32 EEPROM`
+- `24C32 EEPROM` ili `FM24W256 FRAM`
 - `LCD 16x2` preko `I2C`
 - dva trofazna elektromotora `Koncar 0.55 kW / 380 V`, po jedan za svako zvono toranjskog sata
 - na straznjoj osovini svakog zvonarskog motora mikroprekidaci za okretanje faza i prijelaz rada zvona
@@ -150,6 +168,6 @@
 
 - glavna petlja mora ostati neblokirajuca
 - `Mega 2560` mora ostati autoritet za stanje toranjskog sata
-- kvar ili restart `ESP8266` ne smije utjecati na osnovni rad sata
-- `I2C` pristup za `LCD`, `RTC` i `24C32` treba ostati na zajednickoj pripremi sabirnice s timeoutom
+- kvar ili restart `ESP32` ne smije utjecati na osnovni rad sata
+- `I2C` pristup za `LCD`, `RTC` i vanjski `FRAM` treba ostati na zajednickoj pripremi sabirnice s timeoutom
 - promjene koje diraju kazaljke, plocu, zvona, sinkronizaciju vremena ili recovery treba provjeriti u odnosu na postojece module u `main/`

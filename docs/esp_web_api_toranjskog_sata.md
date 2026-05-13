@@ -24,11 +24,14 @@ Povezani moduli toranjskog sata:
 | Ruta | Metoda | Auth | Svrha |
 |---|---|---|---|
 | `/` | `GET` | da, osim kad je aktivan setup `AP` | Svedeni dashboard za `MUŠKO`, `ŽENSKO`, `SLAVI`, `BRECA`, `JUTRO`, `PODNE`, `VEČER` i `TIHI MOD` |
+| `/settings` | `GET` | da, osim kad je aktivan setup `AP` | Zasebna stranica za sigurne web postavke `Sustav`, `Stapici`, `BAT` i `Sunce` |
 | `/setup` | `GET` | ne | Prikazuje setup stranicu za novu `WiFi` mrežu toranjskog sata dok je aktivan setup `AP` |
 | `/setup` | `POST` | ne | Sprema novi `SSID` i lozinku te ih šalje Megi radi sinkronizacije mrežnih postavki |
 | `/update` | `GET` | da | Prikazuje skrivenu `OTA` stranicu za upload novog `ESP` firmwarea |
 | `/update` | `POST` | da | Prima `OTA` upload i nakon uspjeha zakazuje restart `ESP` modula |
 | `/api/status` | `GET` | da | Vraća `JSON` status `ESP` veze i stvarnog stanja koje dashboard koristi za boju tipki |
+| `/api/settings/system` | `GET` | da | Vraća `JSON` sigurne `Sustav` postavke koje `Mega` drži u [main/postavke.*](../main/postavke.h) |
+| `/api/settings/system` | `POST` | da | Sprema sigurne `Sustav` postavke slanjem punog paketa prema `Megi` |
 
 ## 📡 JSON status ruta
 
@@ -69,6 +72,66 @@ Dodatno:
 - `GET /api/status?force=1` prisiljava `ESP` da odmah pošalje `STATUS?` prema `Megi`
 - dashboard koristi `force=1` nakon klika kako bi korisnik odmah dobio stvarnu povratnu informaciju
 - dashboard koristi i jedan početni prisilni dohvat nakon otvaranja stranice kako bi se tipke obojile prema stvarnom stanju toranjskog sata
+
+## ⚙️ API sigurnih `Sustav` postavki
+
+### `GET /api/settings/system`
+
+Vraća `JSON` tijelo oblika:
+
+```json
+{
+  "known": true,
+  "lcd_backlight": true,
+  "pc_logging": false,
+  "rs485_enabled": true,
+  "ups_mode": false,
+  "bell_brake": true,
+  "inertia1_seconds": 90,
+  "inertia2_seconds": 90,
+  "hammer_pulse_ms": 150
+}
+```
+
+Polja:
+- `known`: je li `ESP` uspio dohvatiti stvarni paket `SET:SUSTAV|...` s `Mege`
+- `lcd_backlight`: stanje `LCD` pozadinskog osvjetljenja
+- `pc_logging`: stanje servisnog logiranja
+- `rs485_enabled`: stanje `RS485` komunikacije
+- `ups_mode`: stanje `UPS` moda
+- `bell_brake`: stanje rada s `K:0/1`
+- `inertia1_seconds`: `INR1` za prvo zvono
+- `inertia2_seconds`: `INR2` za drugo zvono
+- `hammer_pulse_ms`: trajanje impulsa elektromagnetskih batova
+
+Dodatno:
+- `GET /api/settings/system?force=1` prisiljava `ESP` da odmah pošalje `SETREQ:SUSTAV` prema `Megi`
+- stranica `/settings` taj prisilni dohvat koristi pri prvom otvaranju i nakon spremanja
+
+### `POST /api/settings/system`
+
+Očekuje `application/x-www-form-urlencoded` polja:
+- `lcd`
+- `log`
+- `rs`
+- `ups`
+- `koc`
+- `inr1`
+- `inr2`
+- `imp`
+
+Pravila:
+- toggle polja `lcd`, `log`, `rs`, `ups`, `koc` moraju biti `0` ili `1`
+- `inr1` i `inr2` moraju biti cijeli brojevi `10-180`
+- `imp` mora biti cijeli broj `10-300` u koraku `10`
+- `ESP` šalje cijeli paket prema `Megi` kroz `SETCFG:SUSTAV|...`
+- `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje preko [main/postavke.cpp](../main/postavke.cpp)
+
+Tipični statusi odgovora:
+- `200` `Mega` je spremila sustavske postavke
+- `400` nedostaje jedno ili više obaveznih polja
+- `422` neispravan unos ili je `Mega` odbila paket
+- `504` `Mega` nije odgovorila na zahtjev za spremanje
 
 ## 📶 Setup WiFi API
 
@@ -140,9 +203,11 @@ Napomena:
 - `NTP` sinkronizacija vremena toranjskog sata ne ide kroz `/api/...` rute nego kroz serijski protokol `NTPCFG:` i `NTPREQ:SYNC`
 - `Mega` bira siguran trenutak za `NTPREQ:SYNC`
 - `ESP` koristi UDP `NTP` s `fraction` dijelom i `RTT/2` korekcijom
+- `ESP` prema `Megi` sada salje `NTP:YYYY-MM-DDTHH:MM:SS.mmm;DST=0/1`, pa toranjski sat uz cijelu sekundu dobiva i milisekundni dio uzorka
 - prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta ne šalje se odmah `Megi`
 - prvi uzorak se pamti, a `ESP` odmah traži drugi radi stabilizacije
 - tek potvrđen drugi uzorak postaje autoritet za prvu sinkronizaciju toranjskog sata
+- `Mega` i dalje poravnava primjenu na `RTC SQW` granicu sekunde, ali sada pri tom izboru koristi i milisekundni dio uzorka
 - nakon ručnog unosa vremena na `Megi` `ESP` ne šalje `NTP` odmah, nego tek u prvom sljedećem sigurnom prozoru koji `Mega` odabere
 
 ## 🧠 Napomene za rad toranjskog sata

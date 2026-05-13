@@ -56,7 +56,10 @@ void ugasiRelejeKazaljki() {
 }
 
 bool jeAutomatikaKazaljkiBlokirana() {
-  return rucnaBlokadaKazaljki || jeUPSModAktivan() || !jeVrijemePotvrdjenoZaAutomatiku();
+  return rucnaBlokadaKazaljki ||
+         jeUPSModAktivan() ||
+         jeRtcIzlazniFailSafeAktivan() ||
+         !jeVrijemePotvrdjenoZaAutomatiku();
 }
 
 int izracunajDvanaestSatneMinute(const DateTime& vrijeme) {
@@ -135,6 +138,9 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje) {
   }
   zadnjiObradeniRtcTick = rtcTick;
   const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if (jeRtcIzlazniFailSafeAktivan()) {
+    return;
+  }
   if (!jeVrijemeSvjezeZaRtcTick(rtcTick)) {
     return;
   }
@@ -352,7 +358,7 @@ bool suKazaljkeUSinkronu() {
     return true;
   }
 
-  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (jeRtcIzlazniFailSafeAktivan() || !jeVrijemePotvrdjenoZaAutomatiku()) {
     return false;
   }
 

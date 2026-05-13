@@ -13,7 +13,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - termalna zastita slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
 - blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
 - lokalne postavke preko LCD izbornika i tipki
-- pohrana postavki i stanja u `24C32 EEPROM`
+- pohrana postavki i stanja u vanjski `24C32 EEPROM` ili `FM24W256 FRAM`
 - recovery nakon watchdog i power-loss reseta
 - watchdog `safe mode` i servisno otkljucavanje nakon previse resetova
 - runtime dijagnostika `EEPROM-a` i latched fault potvrda preko LCD-a i tipki
@@ -25,9 +25,10 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 ## 🧭 Podjela poslova Mega / ESP
 
 - `Mega 2560` vodi sve radne odluke toranjskog sata
-- `ESP8266` ili `ESP32` je samo pomocni mrezni sloj
+- vanjski `ESP32` je samo pomocni mrezni sloj
 - vanjski mrezni sloj donosi WiFi, NTP, setup WiFi i bezicni servisni API
-- postavke rada sata vise se ne uredjuju preko ESP weba
+- preko `ESP32` weba sada su dopustene sigurne skupine `Sustav`, `Stapici`, `BAT` i `Sunce`, dok `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje
+- `BAT od/do` iz weba i lokalnog menija tumace se kao raspon u kojem je redovno otkucavanje dopusteno; izvan njega `Mega` blokira samo otkucavanje
 - stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`
 
 ## 🧩 Najvazniji moduli
@@ -56,21 +57,25 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
 - nakon restarta se starost zadnje sinkronizacije rekonstruira iz RTC vremena kako novi boot ne bi lazno izgledao svjez `24 sata`
 - nakon vise uzastopnih nevaljanih RTC ocitanja aktivira se `RTC OGRANICEN RAD` i automatika se drzi na sigurnoj strani dok se RTC ne oporavi
+- gubitak `RTC/I2C` veze sada pali strogi izlazni fail-safe u [main/time_glob.cpp](time_glob.cpp), pa zvona, cekici, kazaljke i okretna ploca ostaju blokirani dok se `DS3231` ponovno ne oporavi
 
 ## 🔄 Serijska komunikacija s ESP-om
 
-- Mega trenutno koristi `Serial3` za ugradeni `ESP8266` na Mega+WiFi R3 plocici
+- Mega trenutno koristi `Serial3` za vanjski `ESP32` mrezni most
 - `Serial1` je aktivni `RS485` transportni sloj, dok komunikacija prema `ESP-u` ostaje na `Serial3`
-- aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:` i `STATUS?`
+- aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za skupine `SUSTAV`, `STAPICI`, `BAT` i `SUNCE`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
 - prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije nego sto ga `Mega` prihvati za toranjski sat
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
 - prihvaceni `NTP` zapis i start redovnog otkucavanja poravnavaju se na `RTC SQW` granicu sekunde kad je dostupna
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT` i `SETREQ:SUNCE` traze trenutno stanje pojedine skupine iz `main/postavke.*`
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...` i `SETCFG:SUNCE|...` salju puni paket pojedine skupine, a `Mega` ga validira i sprema
 
 ## 💾 EEPROM i recovery
 
-- `24C32 EEPROM` cuva postavke i kriticno radno stanje
+- vanjska `24C32 EEPROM` ili `FM24W256 FRAM` memorija cuva postavke i kriticno radno stanje
+- iako je fizicki kapacitet veci, toranjski sat zadrzava postojeci kompatibilni raspored unutar prvih `4096 B`
 - `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
 - svaki zapis `UnifiedMotionState` nosi checksum kako bi se preskocio korumpirani slot nakon prekida napajanja usred upisa
 - zapis zadnje sinkronizacije vremena ima vlastiti checksum i kompatibilan legacy fallback
@@ -80,7 +85,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `power_recovery.*` radi periodicki `EEPROM` health-check svakih `6 sati`
 - latched fault `EEPROM-a` ostaje spremljen do rucne potvrde operatera i pali degradirani nacin rada za `EEPROM`
 - u degradiranom `EEPROM` nacinu rada pauziraju se periodicni backup i pomocni zapisi iz `time_glob.*`
-- `LCD`, `RTC`, `24C32` i servisni `I2C` scan koriste zajednicku pripremu `Wire` sabirnice s timeoutom
+- `LCD`, `RTC`, vanjska `EEPROM/FRAM` memorija i servisni `I2C` scan koriste zajednicku pripremu `Wire` sabirnice s timeoutom
 - `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan
 - `offset` ploce i MQTT tragovi vise nisu dio aktivnog modela
 - pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
@@ -98,7 +103,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - releji za parne i neparne faze kazaljki
 - releji za okretnu plocu
 - izlazi za zvona i cekice
-- DS3231 RTC i 24C32 EEPROM preko I2C
+- DS3231 RTC i vanjska `24C32 EEPROM` ili `FM24W256 FRAM` memorija preko `I2C`
 - LCD 16x2 preko I2C
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
@@ -107,12 +112,15 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - 6 direktnih tipki lokalnog izbornika (`GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`)
 - uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`
 - glavni LCD u `UPS modu` prikazuje `NEMA STRUJE!`, a ponedjeljak skracuje u `PON.` radi urednog prikaza datuma
+- prvi red LCD-a koristi polja `11-13` za `NTP`, `MAN`, `ERR` ili `---`, dok polja `15-16` prikazuju temperaturu `DS3231` modula
+- zvjezdica aktivnosti `*`, oznaka `R/N` i `W` za `WiFi` vise se ne prikazuju na glavnom retku
+- dvotocke trepere u ritmu `1/2 SQW` samo dok [main/zvonjenje.cpp](zvonjenje.cpp), [main/otkucavanje.cpp](otkucavanje.cpp), [main/kazaljke_sata.cpp](kazaljke_sata.cpp) ili [main/okretna_ploca.cpp](okretna_ploca.cpp) trenutno rade, ili kad `WiFi` nije spojen
 
 ## ✅ Smjernice za razvoj
 
 - glavna petlja mora ostati neblokirajuca
 - Mega mora ostati sigurna i bez ovisnosti o stalnoj mrezi
 - kvar ili restart ESP-a ne smije ugroziti osnovni rad sata
-- `I2C` pristup za `LCD`, `RTC` i `24C32` treba ostati na zajednickoj pripremi sabirnice s timeoutom
+- `I2C` pristup za `LCD`, `RTC` i vanjsku `EEPROM/FRAM` memoriju treba ostati na zajednickoj pripremi sabirnice s timeoutom
 - svaka promjena koja dira kazaljke, plocu, zvona ili recovery treba se provjeriti u odnosu na postojece module u `main/`
 - lokalni SRAM tuning zadnje revizije prebacio je vecinu fiksnih log stringova u flash i smanjio velike serijske buffere u `esp_serial.*`

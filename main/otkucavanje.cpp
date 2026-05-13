@@ -444,6 +444,11 @@ void upravljajOtkucavanjem() {
   const uint8_t modOtkucavanja = dohvatiModOtkucavanja();
   const bool tihiRezimAktivan = jePrekidacTisineAktivan();
 
+  if (jeRtcIzlazniFailSafeAktivan()) {
+    postaviGlobalnuBlokaduOtkucavanja(true);
+    return;
+  }
+
   primijeniSigurnosniLimitCekica(sadaUs, sadaMs);
   upravljajSlavljenjemIMrtvackim(sadaMs);
 
@@ -530,7 +535,13 @@ void upravljajOtkucavanjem() {
         } else if (tihiRezimAktivan) {
           posaljiPCLog(F("Satno otkucavanje preskoceno: tihi rezim"));
         } else if (!batAktivan) {
-          posaljiPCLog(F("Satno otkucavanje preskoceno: izvan BAT raspona"));
+          char log[80];
+          snprintf_P(log,
+                     sizeof(log),
+                     PSTR("Satno otkucavanje preskoceno: tihi BAT raspon (%02d:%02d)"),
+                     sada.hour(),
+                     sada.minute());
+          posaljiPCLog(log);
         }
       } else if (sada.minute() == 30) {
         if (otkucavanjeDozvoljenoUSatu && batAktivan && !tihiRezimAktivan) {
@@ -538,7 +549,13 @@ void upravljajOtkucavanjem() {
         } else if (tihiRezimAktivan) {
           posaljiPCLog(F("Polusatno otkucavanje preskoceno: tihi rezim"));
         } else if (!batAktivan) {
-          posaljiPCLog(F("Polusatno otkucavanje preskoceno: izvan BAT raspona"));
+          char log[84];
+          snprintf_P(log,
+                     sizeof(log),
+                     PSTR("Polusatno otkucavanje preskoceno: tihi BAT raspon (%02d:%02d)"),
+                     sada.hour(),
+                     sada.minute());
+          posaljiPCLog(log);
         }
       }
     }

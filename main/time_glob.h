@@ -15,13 +15,17 @@ uint32_t dohvatiRtcSekundniBrojac();
 bool jeVrijemeSvjezeZaRtcTick(uint32_t rtcTick);
 
 void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
+                          uint16_t ntpMilisekunde = 0,
                           bool imaEksplicitanDST = false,
                           bool dstAktivanIzvori = false);
 void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 
 const char* dohvatiOznakuIzvoraVremena();
 bool jeRtcSqwAktivan();
+bool jeRtcSqwPrvaPolovicaSekunde();
 bool jeRtcDegradiraniNacinAktivan();
+bool jeRtcIzlazniFailSafeAktivan();
+bool dohvatiRtcTemperaturu(float& temperaturaC);
 bool jeVrijemePotvrdjenoZaAutomatiku();
 bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
 int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme);

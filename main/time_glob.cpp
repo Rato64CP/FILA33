@@ -55,12 +55,15 @@ static bool rtcSqwAktivan = false;
 static bool rtcSqwGreskaPrijavljena = false;
 static unsigned long rtcSqwZadnjiTickMs = 0;
 static bool rtcDostupanNakonInicijalizacije = false;
+static unsigned long rtcZadnjiPokusajReinicijalizacijeMs = 0;
+static bool rtcIzlazniFailSafeAktivan = false;
 static bool dstAktivan = false;
 static bool dstStatusUcitan = false;
 static bool vrijemePotvrdjenoZaAutomatiku = false;
 static bool rtcDegradiraniNacinAktivan = false;
 static bool ntpSinkronizacijaZakazana = false;
 static DateTime zakazanoNtpVrijeme((uint32_t)0);
+static uint16_t zakazanoNtpMilisekunde = 0;
 static uint32_t zakazaniNtpRtcTick = 0;
 static unsigned long zakazaniNtpMs = 0;
 static bool zakazanoNtpImaEksplicitanDST = false;
@@ -70,6 +73,8 @@ static uint8_t sumnjiviIzvorSinkronizacije = IZ_RTC;
 static DateTime sumnjivoVrijemeSinkronizacije((uint32_t)0);
 static unsigned long sumnjivaSinkronizacijaMs = 0;
 static uint32_t zadnjiRtcTickSaSvjezimVremenom = 0;
+static uint32_t rtcZadnjiProcitaniUnix = 0;
+static uint32_t rtcZadnjiProcitaniTick = 0;
 
 volatile uint32_t rtcSekundniBrojac = 0;
 
@@ -80,6 +85,7 @@ static const uint32_t MAX_RAZLIKA_IZMEDU_DVIJE_POTVRDE_S = 3UL;
 static const unsigned long ROK_SUMNJIVE_SINKRONIZACIJE_MS = 15UL * 60UL * 1000UL;
 static const uint8_t RTC_DEGRADED_PRAG_NEUSPJEHA = 3;
 static const uint8_t RTC_OPORAVAK_PRAG_USPJEHA = 3;
+static const unsigned long RTC_REINICIJALIZACIJA_INTERVAL_MS = 5000UL;
 static uint8_t rtcNeuspjesiZaredom = 0;
 static uint8_t rtcUspjesiZaredom = 0;
 
@@ -111,10 +117,13 @@ static bool primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool imaEksplicitanDST,
                                   bool dstAktivanIzvori);
 static bool osvjeziTrenutnoVrijemeIzRtc();
+static bool osigurajRtcDostupan(bool prisilniPokusaj);
 static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs);
 static void oznaciPovratakNaRTC();
 static void evidentirajRtcUspjeh();
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
+static void postaviRtcIzlazniFailSafe(bool aktivan, const __FlashStringHelper* razlog);
+static void resetirajRtcMonitorNapredovanja();
 
 static bool jeVrijemeURasponuPouzdanosti(const DateTime& vrijeme) {
   return vrijeme.unixtime() != 0 &&
@@ -135,12 +144,23 @@ static uint32_t apsolutnaRazlikaSekundi(const DateTime& a, const DateTime& b) {
   return (unixA >= unixB) ? (unixA - unixB) : (unixB - unixA);
 }
 
+static uint32_t izracunajPomakSekundiZaZakazaniNtp(unsigned long protekloMs,
+                                                   uint16_t milisekundeNtp,
+                                                   uint32_t minimalniPomakSekundi) {
+  const unsigned long ukupnoMs = protekloMs + static_cast<unsigned long>(milisekundeNtp);
+  uint32_t pomakSekundi = ukupnoMs / 1000UL;
+  if (pomakSekundi < minimalniPomakSekundi) {
+    pomakSekundi = minimalniPomakSekundi;
+  }
+  return pomakSekundi;
+}
+
 static bool pokusajUpisatiVrijemeURtc(const DateTime& novoVrijeme,
                                       const __FlashStringHelper* porukaNeuspjeha) {
   // RTC se inicijalizira samo jednom pri bootu toranjskog sata.
   // Kod kasnijeg upisa ne zovemo ponovno rtc.begin(), nego upis
   // odmah provjeravamo citanjem natrag iz RTC-a.
-  if (!rtcDostupanNakonInicijalizacije) {
+  if (!osigurajRtcDostupan(false)) {
     evidentirajRtcNeuspjeh(porukaNeuspjeha);
     signalizirajError_RTC();
     return false;
@@ -160,6 +180,41 @@ static bool pokusajUpisatiVrijemeURtc(const DateTime& novoVrijeme,
   rtcDegradiraniNacinAktivan = false;
   rtcNeuspjesiZaredom = 0;
   rtcUspjesiZaredom = RTC_OPORAVAK_PRAG_USPJEHA;
+  resetirajRtcMonitorNapredovanja();
+  return true;
+}
+
+static bool osigurajRtcDostupan(bool prisilniPokusaj) {
+  if (rtcDostupanNakonInicijalizacije) {
+    return true;
+  }
+
+  const unsigned long sadaMs = millis();
+  if (!prisilniPokusaj &&
+      rtcZadnjiPokusajReinicijalizacijeMs != 0 &&
+      (sadaMs - rtcZadnjiPokusajReinicijalizacijeMs) < RTC_REINICIJALIZACIJA_INTERVAL_MS) {
+    return false;
+  }
+
+  const bool bioRanijeNedostupan = (rtcZadnjiPokusajReinicijalizacijeMs != 0);
+  rtcZadnjiPokusajReinicijalizacijeMs = sadaMs;
+  pripremiI2CSabirnicuSigurno();
+  if (!rtc.begin()) {
+    rtcDostupanNakonInicijalizacije = false;
+    postaviRtcIzlazniFailSafe(
+        true,
+        F("RTC fail-safe: gubitak RTC/I2C veze, odmah blokiram releje toranjskog sata"));
+    return false;
+  }
+
+  rtcDostupanNakonInicijalizacije = true;
+  rtc.writeSqwPinMode(DS3231_SquareWave1Hz);
+  postaviRtcIzlazniFailSafe(
+      false,
+      F("RTC fail-safe: RTC/I2C veza oporavljena, releji toranjskog sata ponovno su dozvoljeni"));
+  if (bioRanijeNedostupan) {
+    posaljiPCLog(F("RTC: DS3231 ponovno dostupan, nastavljam rad toranjskog sata"));
+  }
   return true;
 }
 
@@ -252,6 +307,7 @@ static RezultatProvjereSinkronizacije potvrdiIliOdbijSumnjivuSinkronizaciju(
 static void otkaziZakazanuNtpSinkronizaciju() {
   ntpSinkronizacijaZakazana = false;
   zakazanoNtpVrijeme = DateTime((uint32_t)0);
+  zakazanoNtpMilisekunde = 0;
   zakazaniNtpRtcTick = 0;
   zakazaniNtpMs = 0;
   zakazanoNtpImaEksplicitanDST = false;
@@ -531,10 +587,8 @@ static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs) {
     return false;
   }
 
-  uint32_t protekliRtcTickovi = protekloMs / 1000UL;
-  if (protekliRtcTickovi == 0) {
-    protekliRtcTickovi = 1;
-  }
+  const uint32_t protekliRtcTickovi =
+      izracunajPomakSekundiZaZakazaniNtp(protekloMs, zakazanoNtpMilisekunde, 1U);
 
   const DateTime vrijemeZaPrimjenu(
       zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
@@ -549,6 +603,13 @@ static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs) {
 }
 
 static bool osvjeziTrenutnoVrijemeIzRtc() {
+  if (!osigurajRtcDostupan(false)) {
+    evidentirajRtcNeuspjeh(
+        F("RTC: DS3231 nije dostupan tijekom osvjezavanja, ostajem u degradiranom nacinu rada"));
+    signalizirajError_RTC();
+    return false;
+  }
+
   const DateTime rtcVrijeme = rtc.now();
   if (!jeVrijemeURasponuPouzdanosti(rtcVrijeme)) {
     evidentirajRtcNeuspjeh(
@@ -557,8 +618,25 @@ static bool osvjeziTrenutnoVrijemeIzRtc() {
     return false;
   }
 
+  const uint32_t rtcVrijemeUnix = rtcVrijeme.unixtime();
+  const uint32_t lokalniRtcTick = dohvatiRtcSekundniBrojac();
+  if (rtcSqwAktivan &&
+      rtcZadnjiProcitaniTick != 0 &&
+      lokalniRtcTick != rtcZadnjiProcitaniTick) {
+    if (rtcVrijemeUnix <= rtcZadnjiProcitaniUnix) {
+      postaviRtcIzlazniFailSafe(
+          true,
+          F("RTC fail-safe: SQW radi, ali RTC vrijeme ne napreduje; blokiram releje toranjskog sata"));
+      evidentirajRtcNeuspjeh(
+          F("RTC: SQW impulsi postoje, ali se procitano RTC vrijeme ne mijenja"));
+      signalizirajError_RTC();
+      return false;
+    }
+  }
+
   trenutnoVrijeme = rtcVrijeme;
-  rtcBaterijaOk = true;
+  rtcZadnjiProcitaniUnix = rtcVrijemeUnix;
+  rtcZadnjiProcitaniTick = lokalniRtcTick;
   evidentirajRtcUspjeh();
   return true;
 }
@@ -574,8 +652,27 @@ static void postaviVrijemePotvrdjenoZaAutomatiku(bool potvrdeno, const __FlashSt
   }
 }
 
+static void resetirajRtcMonitorNapredovanja() {
+  rtcZadnjiProcitaniUnix = 0;
+  rtcZadnjiProcitaniTick = 0;
+}
+
+static void postaviRtcIzlazniFailSafe(bool aktivan, const __FlashStringHelper* razlog) {
+  if (rtcIzlazniFailSafeAktivan == aktivan) {
+    return;
+  }
+
+  rtcIzlazniFailSafeAktivan = aktivan;
+  if (razlog != nullptr) {
+    posaljiPCLog(razlog);
+  }
+}
+
 static void evidentirajRtcUspjeh() {
   rtcNeuspjesiZaredom = 0;
+  postaviRtcIzlazniFailSafe(
+      false,
+      F("RTC fail-safe: valjano RTC ocitanje vraceno, releji toranjskog sata ponovno su dozvoljeni"));
   if (rtcUspjesiZaredom < 255U) {
     ++rtcUspjesiZaredom;
   }
@@ -596,6 +693,9 @@ static void evidentirajRtcUspjeh() {
 
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog) {
   rtcUspjesiZaredom = 0;
+  postaviRtcIzlazniFailSafe(
+      true,
+      F("RTC fail-safe: nevaljano RTC ocitanje, odmah blokiram releje toranjskog sata"));
   if (rtcNeuspjesiZaredom < 255U) {
     ++rtcNeuspjesiZaredom;
   }
@@ -635,7 +735,8 @@ static DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
 
 void inicijalizirajRTC() {
   pripremiI2CSabirnicuSigurno();
-  if (!rtc.begin()) {
+  rtcZadnjiPokusajReinicijalizacijeMs = 0;
+  if (!osigurajRtcDostupan(true)) {
     rtcDostupanNakonInicijalizacije = false;
     rtcDegradiraniNacinAktivan = true;
     rtcNeuspjesiZaredom = RTC_DEGRADED_PRAG_NEUSPJEHA;
@@ -655,19 +756,24 @@ void inicijalizirajRTC() {
     if (rtc.lostPower()) {
       posaljiPCLog(F("RTC: baterija je prazna, vrijeme nije pouzdano"));
       rtcBaterijaOk = false;
-        postaviVrijemePotvrdjenoZaAutomatiku(
-            false,
-            F("Vrijeme: cekam NTP ili rucnu potvrdu prije aktivacije automatike"));
+      postaviVrijemePotvrdjenoZaAutomatiku(
+          false,
+          F("Vrijeme: cekam NTP ili rucnu potvrdu prije aktivacije automatike"));
       signalizirajUpozorenjeRtcBaterije();
-      // Postavi minimalnu vrijednost
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      posaljiPCLog(F("RTC: ne prepisujem vrijeme dok ga ne potvrdi NTP ili rucni unos"));
     } else {
       rtcBaterijaOk = true;
-      postaviVrijemePotvrdjenoZaAutomatiku(true, nullptr);
       posaljiPCLog(F("RTC: baterija OK, vrijeme je pouzdano"));
     }
-    osvjeziTrenutnoVrijemeIzRtc();
-    rtc.writeSqwPinMode(DS3231_SquareWave1Hz);
+    if (osvjeziTrenutnoVrijemeIzRtc()) {
+      if (rtcBaterijaOk) {
+        postaviVrijemePotvrdjenoZaAutomatiku(true, nullptr);
+      }
+    } else if (rtcBaterijaOk) {
+      postaviVrijemePotvrdjenoZaAutomatiku(
+          false,
+          F("RTC: pocetno ocitanje nije uspjelo, cekam novu potvrdu vremena"));
+    }
   }
   pinMode(PIN_RTC_SQW, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_RTC_SQW), rtcSqwPrekid, FALLING);
@@ -706,12 +812,14 @@ DateTime dohvatiTrenutnoVrijeme() {
     bool ntpPrimijenjenNaOvomTicku = false;
     if (ntpSinkronizacijaZakazana) {
       uint32_t protekliRtcTickovi = 1;
+      unsigned long protekloOdZakazanogMs = 0;
       bool ntpSpremanZaPrimjenu = false;
       // NTP sinkronizacija mora cekati stvarno sljedeci RTC SQW tik.
       // Ako bismo prihvatili i isti rtcTick na kojem je sinkronizacija zakazana,
       // toranjski sat bi u rubnom slucaju mogao zavrsiti jednu sekundu unaprijed.
       if (zakazaniNtpRtcTick != 0 && lokalniRtcTick > zakazaniNtpRtcTick) {
         protekliRtcTickovi = lokalniRtcTick - zakazaniNtpRtcTick;
+        protekloOdZakazanogMs = sadaMs - zakazaniNtpMs;
         if (protekliRtcTickovi == 0) {
           protekliRtcTickovi = 1;
         }
@@ -719,7 +827,8 @@ DateTime dohvatiTrenutnoVrijeme() {
       } else if (zakazaniNtpRtcTick == 0 &&
                  zakazaniNtpMs != 0 &&
                  (sadaMs - zakazaniNtpMs) >= 1000UL) {
-        protekliRtcTickovi = (sadaMs - zakazaniNtpMs) / 1000UL;
+        protekloOdZakazanogMs = sadaMs - zakazaniNtpMs;
+        protekliRtcTickovi = protekloOdZakazanogMs / 1000UL;
         if (protekliRtcTickovi == 0) {
           protekliRtcTickovi = 1;
         }
@@ -727,8 +836,15 @@ DateTime dohvatiTrenutnoVrijeme() {
       }
 
       if (ntpSpremanZaPrimjenu) {
+        const uint32_t minimalniPomakSekundi =
+            (protekliRtcTickovi > 0U) ? (protekliRtcTickovi - 1U) : 0U;
+        const uint32_t precizniPomakSekundi =
+            izracunajPomakSekundiZaZakazaniNtp(
+                protekloOdZakazanogMs,
+                zakazanoNtpMilisekunde,
+                minimalniPomakSekundi);
         const DateTime vrijemeZaPrimjenu(
-            zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
+            zakazanoNtpVrijeme.unixtime() + precizniPomakSekundi);
         if (primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
                                   zakazanoNtpImaEksplicitanDST,
                                   zakazanoNtpDstAktivan)) {
@@ -819,6 +935,7 @@ static bool primijeniVrijemeIzNTP(DateTime ntpVrijeme,
 }
 
 void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
+                          uint16_t ntpMilisekunde,
                           bool imaEksplicitanDST,
                           bool dstAktivanIzvori) {
   // Provjera validnosti NTP vremena
@@ -835,6 +952,7 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
   // Za precizniji trenutak sinkronizacije NTP se poravnava na iduci RTC SQW tik.
   if (rtcSqwAktivan) {
     zakazanoNtpVrijeme = ntpVrijeme;
+    zakazanoNtpMilisekunde = ntpMilisekunde;
     ntpSinkronizacijaZakazana = true;
     zakazaniNtpRtcTick = dohvatiRtcSekundniBrojac();
     zakazaniNtpMs = millis();
@@ -901,8 +1019,29 @@ bool jeRtcSqwAktivan() {
   return rtcSqwAktivan;
 }
 
+bool jeRtcSqwPrvaPolovicaSekunde() {
+  if (!rtcSqwAktivan) {
+    return ((millis() / 500UL) % 2UL) == 0UL;
+  }
+
+  return (millis() - rtcSqwZadnjiTickMs) < 500UL;
+}
+
+bool dohvatiRtcTemperaturu(float& temperaturaC) {
+  if (!osigurajRtcDostupan(false)) {
+    return false;
+  }
+
+  temperaturaC = rtc.getTemperature();
+  return true;
+}
+
 bool jeRtcDegradiraniNacinAktivan() {
   return rtcDegradiraniNacinAktivan;
+}
+
+bool jeRtcIzlazniFailSafeAktivan() {
+  return rtcIzlazniFailSafeAktivan;
 }
 
 bool jeVrijemePotvrdjenoZaAutomatiku() {

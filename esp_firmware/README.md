@@ -1,6 +1,6 @@
 # 🔧 ZVONKO v. 1.0 - ESP firmware
 
-Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni modul toranjskog sata. `ESP` serijski suraduje s `Arduino Megom 2560` kroz [main/esp_serial.cpp](../main/esp_serial.cpp), ali ne preuzima vlasnistvo nad `RTC`-om, zvonima, cekicima, kazaljkama ni okretnom plocom.
+Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj toranjskog sata. `ESP` serijski suraduje s `Arduino Megom 2560` kroz [main/esp_serial.cpp](../main/esp_serial.cpp), ali ne preuzima vlasnistvo nad `RTC`-om, zvonima, cekicima, kazaljkama ni okretnom plocom.
 
 ## ✨ Uloga ESP modula
 
@@ -17,9 +17,14 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 ## 🌐 Aktivne web rute
 
 - `/` - jedina glavna stranica dashboarda
+- `/settings` - zasebna stranica za sigurne web postavke `Sustav`, `Stapici`, `BAT` i `Sunce`
 - `/setup` - setup stranica za unos nove `WiFi` mreze dok je aktivan privremeni `AP`
 - `/update` - skrivena `OTA` stranica za upload novog `ESP` firmwarea
 - `/api/status` - `JSON` status `WiFi` veze i stvarnog stanja koje dashboard boja prikazuje
+- `/api/settings/system` - `JSON` dohvat i spremanje skupine `Sustav`
+- `/api/settings/stapici` - `JSON` dohvat i spremanje skupine `Stapici`
+- `/api/settings/bat` - `JSON` dohvat i spremanje skupine `BAT`
+- `/api/settings/sunce` - `JSON` dohvat i spremanje skupine `Sunce`
 - `/api/...` - servisne naredbe prema Megi
 
 ## 🧭 Dashboard
@@ -28,9 +33,26 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - gornje tipke su naglasene i tamnije plave kad su ukljucene
 - donji blok koristi tipke `JUTRO`, `PODNE`, `VECER`
 - ispod suncevih tipki postoji crveni toggle `TIHI MOD`
+- pri dnu dashboarda postoji i servisni link `POSTAVKE`
 - `TIHI MOD` preko weba ulazi u isti jedinstveni tihi rezim kao [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp)
 - ako korisnik promijeni stanje fizickim kip-prekidacem tihog moda, dashboard nakon sljedezeg `STATUS:` osvjezavanja prikazuje stvarno stanje iz Mege
 - dashboard pri prvom otvaranju odmah radi jedan prisilni dohvat `STATUS?` kako bi se tipke obojile prema stvarnom stanju toranjskog sata
+
+## ⚙️ Web postavke
+
+- stranica `/settings` namjerno uredjuje samo sigurne postavke koje ne pomicu kazaljke, ne diraju okretajnu plocu i ne mijenjaju vrijeme
+- trenutno podrzava skupine:
+- `Sustav`
+- `Stapici`
+- `BAT`
+- `Sunce`
+- `Sustav` ukljucuje `LCD svjetlo`, `Logiranje`, `RS485`, `UPS mod`, `Kocnicu zvona`, `INR1`, `INR2` i `Impuls cekica`
+- `Stapici` ukljucuju trajanja `TR`, `TN`, `TS` i odgodu slavljenja `S`
+- `BAT` ukljucuje sate `od/do` i modove `OTK`, `S` i `M`
+- `BAT od/do` na webu znaci raspon u kojem je redovno otkucavanje dopusteno; izvan tog raspona `Mega` blokira samo otkucavanje kroz [main/postavke.cpp](../main/postavke.cpp) i [main/otkucavanje.cpp](../main/otkucavanje.cpp)
+- `Sunce` ukljucuje `Jutro`, `Podne`, `Vecer`, odabir zvona, jutarnje/vecernje odgode i `Nocnu rasvjetu`
+- `Mega` ostaje jedini autoritet za validaciju i spremanje kroz [main/postavke.cpp](../main/postavke.cpp)
+- `ESP32` samo prikazuje formu, salje cijeli paket i nakon potvrde ponovno cita stvarno stanje s `Mege`
 
 ## 🔐 Autentikacija
 
@@ -42,7 +64,7 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 ## 📡 OTA nadogradnja
 
 - `OTA` je izveden kao skrivena web ruta `/update`
-- koristi se upload kompajlirane `.bin` datoteke za `ESP8266` ili `ESP32`
+- koristi se upload kompajlirane `.bin` datoteke za `ESP32`
 - tijekom upisa firmwarea `ESP` privremeno zaustavlja redovni `NTP` i ostale web/serijske poslove koji nisu potrebni za upload
 - nakon uspjesne nadogradnje `ESP` sam zakazuje kratki restart i vraca se u normalan rad
 - dashboard ne prikazuje link prema `/update`; ruta se otvara rucnim upisom adrese u pregledniku
@@ -56,15 +78,21 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - `WIFISTATUS?` trazi trenutno `WiFi` stanje mreznog mosta
 - `NTPCFG:<server>` postavlja `NTP` server
 - `NTPREQ:SYNC` trazi trenutno `NTP` vrijeme u trenutku koji odabere `Mega`
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT` i `SETREQ:SUNCE` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
 
 ### `ESP -> Mega`
 
 - `CFGREQ` trazi pocetnu konfiguraciju nakon boota
 - `WIFI:CONNECTED`, `WIFI:DISCONNECTED`, `WIFI:LOCAL_IP:...`, `WIFI:MAC:...` prijavljuju stanje veze
-- `NTP:YYYY-MM-DDTHH:MM:SS;DST=0/1` salje lokalno vrijeme toranjskog sata
+- `NTP:YYYY-MM-DDTHH:MM:SS.mmm;DST=0/1` salje lokalno vrijeme toranjskog sata s milisekundama
 - `SETUPWIFI:<ssid>|<lozinka>` prosljeduje novu mrezu koju je korisnik upisao kroz setup `AP`
 - `CMD:<naredba>` prenosi servisne naredbe prema [main/esp_serial.cpp](../main/esp_serial.cpp)
 - `STATUS:` vraca objedinjeni status koji dashboard koristi za boju tipki
+- `SET:SUSTAV|lcd=...|log=...|rs=...|ups=...|koc=...|inr1=...|inr2=...|imp=...` vraca trenutne `Sustav` postavke
+- `SET:STAPICI|tr=...|tn=...|ts=...|odg=...` vraca postavke stapica
+- `SET:BAT|od=...|do=...|otk=...|sl=...|mr=...` vraca `BAT` postavke
+- `SET:SUNCE|ju=...|jb=...|jo=...|pu=...|pb=...|vu=...|vb=...|vo=...|nr=...` vraca sunceve postavke
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...` i `SETCFG:SUNCE|...` salju novi puni paket odgovarajuce skupine prema `Megi`
 - `ACK:*`, `ERR:*` i `NTPLOG:*` linije sluze za potvrde i dijagnostiku mreznog mosta
 
 ## ⏱️ UDP NTP tok
@@ -75,8 +103,8 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta ne salje se odmah Megi
 - prvi uzorak se pamti, a `ESP` odmah trazi drugi uzorak radi stabilizacije
 - tek potvrden drugi uzorak postaje autoritet za prvu `NTP` sinkronizaciju toranjskog sata
-- `ESP` iz odgovora racuna precizniji `UTC ms`, ali prema Megi i dalje salje isti tekstualni `NTP:` format radi kompatibilnosti s [main/time_glob.cpp](../main/time_glob.cpp)
-- `Mega` i dalje ostaje jedini vlasnik `RTC` upisa i poravnanja na `RTC SQW` granicu sekunde
+- `ESP` iz odgovora racuna precizniji `UTC ms`, a prema Megi sada salje i milisekundni dio `NTP:` zapisa
+- `Mega` i dalje ostaje jedini vlasnik `RTC` upisa i poravnanja na `RTC SQW` granicu sekunde, ali pri odluci o pomaku koristi i milisekundni dio uzorka
 
 ## 🛡️ Rad uz sigurnosne blokade Mege
 
@@ -91,7 +119,8 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - nema `ESP` rasporeda za mise, blagdane ni posebnu zvonjavu
 - nema `TIME?` fallbacka prema Megi
 - nema ruta `/detalji`, `/clock-config`, `/hand-service`, `/plate-service` ni `/password`
-- nema web uredjivanja trajnih postavki toranjskog sata
+- nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce toranjskog sata
+- nema web uredjivanja vremena, datuma, kazaljki, okretne ploce ni slozenih blagdanskih servisnih grupa izvan skupina `Sustav`, `Stapici`, `BAT` i `Sunce`
 - nema aktivnog `WEBCFG` toka prema Megi
 - ako netko ipak posalje `WEBCFG?` ili `WEBCFGSET:...`, `Mega` vraca `ERR:WEBCFGDISABLED`
 
@@ -99,10 +128,9 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 
 - setup `AP` ima `SSID` `ZVONKO_setup`
 - lozinka setup `AP`-a je `zvonko10`
-- na `ESP8266` `AP` se pali dugim pritiskom tipke na `GPIO14 / D5`
 - setup `AP` se moze pokrenuti i dugim istovremenim pritiskom `lijevo + desno` na Mega tipkovnici, ali samo s glavnog prikaza sata
-- na `ESP8266` status `LED` koristi `GPIO12 / D6`
 - na `ESP32` zadano se koristi tipka na `GPIO27` i status `LED` na `GPIO26`
+- serijska veza prema `Megi` koristi odvojene pinove `GPIO16` kao `RX` i `GPIO17` kao `TX`
 - dok je setup `AP` aktivan, i root ruta `http://192.168.4.1/` i `http://192.168.4.1/setup` otvaraju setup stranicu
 - nakon spremanja mreze `ESP` prosljeduje novu konfiguraciju Megi preko `SETUPWIFI:`
 
@@ -110,10 +138,13 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 
 1. Otvori `esp_firmware.ino` u `Arduino IDE`-u ili `PlatformIO` okruzenju.
 2. Odaberi odgovarajucu plocicu.
-- `NodeMCU 1.0 (ESP-12E Module)` ili slicno za `ESP8266`
 - `ESP32 Dev Module` ili odgovarajuci `ESP32` profil za `ESP32`
-3. Za `ESP32` spoji `Mega TX1 (pin 18)` na `ESP RX GPIO16` preko djelitelja napona te `ESP TX GPIO17` na `Mega RX1 (pin 19)`.
+3. Za `ESP32` spoji `Mega TX3 (pin 14)` na `ESP RX GPIO16` preko djelitelja napona te `ESP TX GPIO17` na `Mega RX3 (pin 15)`.
 4. Prenesi firmware i provjeri da su `GND` vodovi zajednicki.
+
+Napomena:
+- `OTA` nadogradnja ne trazi `GPIO1/GPIO3`; toranjski sat sigurnije radi kad je serijska veza prema `Megi` odvojena na `GPIO16/GPIO17`.
+- mnoge `ESP32` plocice imaju `GPIO1/GPIO3` oznacene kao `TX/RX`, ali te pinove ovdje namjerno ne koristimo za radni most prema `Megi`.
 
 ### OTA upload preko mreze
 
@@ -129,6 +160,11 @@ Ova podmapa sadrzi firmware za `ESP8266` i `ESP32` koji radi kao vanjski mrezni 
 - prvi `NTP` nakon restarta treba u `NTPLOG:` prikazati spremanje prvog uzorka i potvrdu drugim uzorkom
 - `ESP` vise ne treba sam slati `NTP:` po spajanju; `NTP` prema Megi ide tek nakon `NTPREQ:SYNC`
 - `http://<ip-esp>/api/status` treba vratiti `JSON` sa stanjem `WiFi` veze, glavnih tipki, suncevih tipki i `TIHOG MODA`
+- `http://<ip-esp>/settings` treba otvoriti stranicu sa skupinama `Sustav`, `Stapici`, `BAT` i `Sunce` te pri ulazu povuci stvarno stanje s `Mege`
+- `http://<ip-esp>/api/settings/system?force=1` treba vratiti `JSON` sa stanjem `Sustav` postavki
+- `http://<ip-esp>/api/settings/stapici?force=1` treba vratiti `JSON` sa stanjem `Stapica`
+- `http://<ip-esp>/api/settings/bat?force=1` treba vratiti `JSON` sa stanjem `BAT` postavki
+- `http://<ip-esp>/api/settings/sunce?force=1` treba vratiti `JSON` sa stanjem `Sunce` postavki
 - pocetna stranica treba prikazati samo glavne tipke, sunceve tipke i crveni `TIHI MOD`
 - API pozivi poput `http://<ip-esp>/api/bell1/on` i `http://<ip-esp>/api/quiet/on` trebaju poslati odgovarajuci `CMD:` prema Megi
 - `http://<ip-esp>/update` treba otvoriti `OTA` upload stranicu i nakon uspjesnog slanja firmwarea izazvati restart `ESP` modula

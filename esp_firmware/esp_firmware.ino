@@ -1,15 +1,10 @@
-#if defined(ESP8266)
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <Updater.h>
-using ToranjWebServer = ESP8266WebServer;
-#elif defined(ESP32)
+#if defined(ESP32)
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>
 using ToranjWebServer = WebServer;
 #else
-#error "Ovaj firmware podrzava samo ESP8266 ili ESP32."
+#error "Ovaj firmware podrzava samo ESP32."
 #endif
 
 #include <WiFiUdp.h>
@@ -26,19 +21,13 @@ char zadaniGateway[16] = "192.168.1.1";
 bool primljenaWifiKonfiguracija = false;
 bool wifiOmogucen = true;
 
-// Vrijednosti za privremenu setup mrezu toranjskog sata.
-// Pinovi ovise o odabranom ESP modulu.
+// Vrijednosti za privremenu setup mrezu toranjskog sata na vanjskom ESP32 modulu.
 static const char WIFI_SETUP_AP_SSID[] = "ZVONKO_setup";
 static const char WIFI_SETUP_AP_LOZINKA[] = "zvonko10";
-#if defined(ESP8266)
-static const uint8_t WIFI_SETUP_PIN = 14;       // GPIO14 / NodeMCU D5
-static const uint8_t WIFI_STATUS_LED_PIN = 12;  // GPIO12 / NodeMCU D6
-#elif defined(ESP32)
 static const uint8_t WIFI_SETUP_PIN = 27;       // Predlozeni tipkalo prema GND
 static const uint8_t WIFI_STATUS_LED_PIN = 26;  // Predlozena status LED
-static const int ESP_MEGA_RX_PIN = 16;          // ESP32 RX prema Mega TX1 preko djelitelja
-static const int ESP_MEGA_TX_PIN = 17;          // ESP32 TX prema Mega RX1
-#endif
+static const int ESP_MEGA_RX_PIN = 16;          // ESP32 RX prema Mega TX3 preko djelitelja
+static const int ESP_MEGA_TX_PIN = 17;          // ESP32 TX prema Mega RX3
 static const unsigned long WIFI_SETUP_DRZANJE_MS = 4000UL;
 static const unsigned long WIFI_SETUP_TRAJANJE_MS = 300000UL;
 static const unsigned long WIFI_SETUP_GASENJE_NAKON_SPREMANJA_MS = 15000UL;
@@ -86,6 +75,59 @@ enum CmdOdgovorMegai {
   CMD_ODGOVOR_TIMEOUT
 };
 
+enum PostavkeOdgovorMegai {
+  POSTAVKE_ODGOVOR_CEKA = 0,
+  POSTAVKE_ODGOVOR_OK,
+  POSTAVKE_ODGOVOR_ERR,
+  POSTAVKE_ODGOVOR_TIMEOUT
+};
+
+struct MegaSustavskePostavke {
+  bool poznate;
+  bool lcdPozadinskoOsvjetljenje;
+  bool logiranje;
+  bool rs485;
+  bool upsMod;
+  bool kocnicaZvona;
+  uint8_t inercijaZvona1Sekunde;
+  uint8_t inercijaZvona2Sekunde;
+  unsigned int impulsCekicaMs;
+  unsigned long serijskiBroj;
+};
+
+struct MegaPostavkeStapica {
+  bool poznate;
+  uint8_t trajanjeRadniMin;
+  uint8_t trajanjeNedjeljaMin;
+  uint8_t trajanjeSlavljenjaMin;
+  uint8_t odgodaSlavljenjaSekunde;
+  unsigned long serijskiBroj;
+};
+
+struct MegaBATPostavke {
+  bool poznate;
+  uint8_t satOd;
+  uint8_t satDo;
+  uint8_t modOtkucavanja;
+  uint8_t modSlavljenja;
+  uint8_t modMrtvackog;
+  unsigned long serijskiBroj;
+};
+
+struct MegaSuncevePostavke {
+  bool poznate;
+  bool jutroOmoguceno;
+  uint8_t jutroZvono;
+  int8_t jutroOdgodaMin;
+  bool podneOmoguceno;
+  uint8_t podneZvono;
+  bool vecerOmoguceno;
+  uint8_t vecerZvono;
+  int8_t vecerOdgodaMin;
+  bool nocnaRasvjeta;
+  unsigned long serijskiBroj;
+};
+
 // Statusne zastavice za faze rada.
 bool ntpIkadPostavljen = false;
 bool ntpUdpPokrenut = false;
@@ -96,6 +138,7 @@ unsigned long ntpZadnjiUspjehMs = 0;
 unsigned long ntpZadnjiPokusajMs = 0;
 unsigned long ntpZahtjevPoslanMs = 0;
 unsigned long ntpBazniMillis = 0;
+unsigned long ntpPrviUzorakPrimljenMs = 0;
 uint64_t ntpBazniUtcMs = 0;
 uint64_t ntpPrviUzorakUtcMs = 0ULL;
 unsigned long wifiSpojenOdMs = 0;
@@ -136,6 +179,53 @@ bool otaAzuriranjeUTijeku = false;
 bool otaRestartZakazan = false;
 unsigned long otaRestartZakazanMs = 0;
 bool otaUspjesanZadnjiPut = false;
+PostavkeOdgovorMegai zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+MegaSustavskePostavke megaSustavskePostavke = {
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  0,
+  0,
+  0U,
+  0UL,
+  0UL
+};
+MegaPostavkeStapica megaPostavkeStapica = {
+  false,
+  0U,
+  0U,
+  0U,
+  0U,
+  0UL,
+  0UL
+};
+MegaBATPostavke megaBATPostavke = {
+  false,
+  0U,
+  0U,
+  0U,
+  0U,
+  0U,
+  0UL,
+  0UL
+};
+MegaSuncevePostavke megaSuncevePostavke = {
+  false,
+  false,
+  0U,
+  0,
+  false,
+  0U,
+  false,
+  0U,
+  0,
+  false,
+  0UL,
+  0UL
+};
 
 static const unsigned long OTA_RESTART_ODGODA_MS = 1200UL;
 
@@ -183,6 +273,48 @@ void primijeniWiFiOmogucenost(bool omogucen);
 bool obradiStatusMegai(const char* payload);
 bool osvjeziStatusMegai(bool prisilno);
 void posaljiJsonStatus(bool prisilno = false);
+bool obradiSustavskePostavkeMegai(char* payload);
+bool osvjeziSustavskePostavkeMegai(bool prisilno);
+void posaljiJsonSustavskihPostavki(bool prisilno = false);
+bool obradiPostavkeStapicaMegai(char* payload);
+bool osvjeziPostavkeStapicaMegai(bool prisilno);
+void posaljiJsonPostavkiStapica(bool prisilno = false);
+bool obradiBATPostavkeMegai(char* payload);
+bool osvjeziBATPostavkeMegai(bool prisilno);
+void posaljiJsonBATPostavki(bool prisilno = false);
+bool obradiSuncevePostavkeMegai(char* payload);
+bool osvjeziSuncevePostavkeMegai(bool prisilno);
+void posaljiJsonSuncevihPostavki(bool prisilno = false);
+PostavkeOdgovorMegai posaljiSustavskePostavkeMegai(bool lcdPozadinskoOsvjetljenje,
+                                                   bool logiranje,
+                                                   bool rs485,
+                                                   bool upsMod,
+                                                   bool kocnicaZvona,
+                                                   unsigned int inercijaZvona1Sekunde,
+                                                   unsigned int inercijaZvona2Sekunde,
+                                                   unsigned int impulsCekicaMs,
+                                                   unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiPostavkeStapicaMegai(unsigned int trajanjeRadniMin,
+                                                 unsigned int trajanjeNedjeljaMin,
+                                                 unsigned int trajanjeSlavljenjaMin,
+                                                 unsigned int odgodaSlavljenjaSekunde,
+                                                 unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiBATPostavkeMegai(unsigned int satOd,
+                                             unsigned int satDo,
+                                             unsigned int modOtkucavanja,
+                                             unsigned int modSlavljenja,
+                                             unsigned int modMrtvackog,
+                                             unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiSuncevePostavkeMegai(bool jutroOmoguceno,
+                                                 unsigned int jutroZvono,
+                                                 int jutroOdgodaMin,
+                                                 bool podneOmoguceno,
+                                                 unsigned int podneZvono,
+                                                 bool vecerOmoguceno,
+                                                 unsigned int vecerZvono,
+                                                 int vecerOdgodaMin,
+                                                 bool nocnaRasvjeta,
+                                                 unsigned long timeoutMs);
 void ucitajWebAutentikaciju();
 bool osigurajWebAutorizaciju();
 void posaljiApiKomanduMegai(const char* naredba, const char* odgovor);
@@ -191,6 +323,7 @@ void zakaziRestartNakonOta();
 void obradiZakazaniRestartNakonOta();
 CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long timeoutMs);
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs);
+bool jeDecimalniBrojString(const String& vrijednost);
 void pokreniSetupPristupnuTocku();
 void zaustaviSetupPristupnuTocku(bool zbogTimeouta);
 void odrzavajSetupTipku();
@@ -215,6 +348,7 @@ static void resetirajNtpStanje() {
   ntpZadnjiPokusajMs = 0;
   ntpZahtjevPoslanMs = 0;
   ntpBazniMillis = 0;
+  ntpPrviUzorakPrimljenMs = 0;
   ntpBazniUtcMs = 0;
   ntpPrviUzorakUtcMs = 0ULL;
 }
@@ -232,23 +366,15 @@ static void oznaciWiFiKaoSpojen(unsigned long sadaMs) {
 }
 
 static void inicijalizirajSerijskiPortPremaMegi() {
-#if defined(ESP8266)
-  Serial.begin(9600);
-#elif defined(ESP32)
   // Na ESP32 runtime preusmjeravamo Serial na zasebne UART pinove prema Megi.
   // Time USB ostaje koristan za upload, a komunikacija toranjskog sata ide preko 16/17.
   Serial.begin(9600, SERIAL_8N1, ESP_MEGA_RX_PIN, ESP_MEGA_TX_PIN);
-#endif
   delay(200);
 }
 
 static void postaviDhcpKonfiguraciju() {
-#if defined(ESP8266)
-  WiFi.config(0U, 0U, 0U);
-#elif defined(ESP32)
   const IPAddress praznaAdresa(0U, 0U, 0U, 0U);
   WiFi.config(praznaAdresa, praznaAdresa, praznaAdresa);
-#endif
 }
 
 void setup() {
@@ -509,10 +635,14 @@ static bool prihvatiNtpUzorakZaToranjskiSat(uint64_t utcMs) {
   if (!ntpPrviUzorakZapamcen) {
     ntpPrviUzorakZapamcen = true;
     ntpPrviUzorakUtcMs = utcMs;
+    ntpPrviUzorakPrimljenMs = millis();
     Serial.println("NTPLOG: prvi NTP uzorak nakon restarta spremljen, cekam potvrdu drugim uzorkom");
     return false;
   }
 
+  const unsigned long sadaMs = millis();
+  const unsigned long ocekivaniProtekMs =
+      (ntpPrviUzorakPrimljenMs != 0UL) ? (sadaMs - ntpPrviUzorakPrimljenMs) : 0UL;
   uint64_t razlikaMs = 0ULL;
   if (utcMs >= ntpPrviUzorakUtcMs) {
     razlikaMs = utcMs - ntpPrviUzorakUtcMs;
@@ -520,15 +650,24 @@ static bool prihvatiNtpUzorakZaToranjskiSat(uint64_t utcMs) {
     razlikaMs = ntpPrviUzorakUtcMs - utcMs;
   }
 
-  if (razlikaMs > NTP_MAKS_DOPUSTENO_ODSTUPANJE_PRVA_DVA_UZORKA_MS) {
+  uint64_t odstupanjeOdOcekivanogMs = 0ULL;
+  if (razlikaMs >= static_cast<uint64_t>(ocekivaniProtekMs)) {
+    odstupanjeOdOcekivanogMs = razlikaMs - static_cast<uint64_t>(ocekivaniProtekMs);
+  } else {
+    odstupanjeOdOcekivanogMs = static_cast<uint64_t>(ocekivaniProtekMs) - razlikaMs;
+  }
+
+  if (odstupanjeOdOcekivanogMs > NTP_MAKS_DOPUSTENO_ODSTUPANJE_PRVA_DVA_UZORKA_MS) {
     ntpPrviUzorakUtcMs = utcMs;
-    Serial.print("NTPLOG: drugi NTP uzorak previse odstupa od prvog, ponavljam potvrdu, razlika_ms=");
-    Serial.println(static_cast<unsigned long>(razlikaMs));
+    ntpPrviUzorakPrimljenMs = sadaMs;
+    Serial.print("NTPLOG: drugi NTP uzorak previse odstupa od ocekivanog protoka, ponavljam potvrdu, odstupanje_ms=");
+    Serial.println(static_cast<unsigned long>(odstupanjeOdOcekivanogMs));
     return false;
   }
 
   ntpPrviUzorakTrebaPotvrdu = false;
   ntpPrviUzorakZapamcen = false;
+  ntpPrviUzorakPrimljenMs = 0;
   ntpPrviUzorakUtcMs = 0ULL;
   postaviNtpBaznoVrijemeUtcMs(utcMs);
   ntpIkadPostavljen = true;
@@ -631,7 +770,9 @@ void posaljiNTPPremaMegai() {
     return;
   }
 
-  uint32_t utcEpoch = dohvatiNtpUnixVrijeme();
+  const uint64_t utcMs = dohvatiNtpUtcMs();
+  const uint32_t utcEpoch = static_cast<uint32_t>(utcMs / 1000ULL);
+  const uint16_t lokalneMilisekunde = static_cast<uint16_t>(utcMs % 1000ULL);
   uint32_t lokalniEpoch = konvertirajUTCuLokalnoVrijeme(utcEpoch);
   bool dstAktivan = jeLjetnoVrijemeEU(utcEpoch);
   RastavljenoVrijeme lokalnoVrijeme{};
@@ -640,8 +781,14 @@ void posaljiNTPPremaMegai() {
     return;
   }
 
-  char isoBuffer[25];
-  formatirajIsoDatumIVrijeme(lokalnoVrijeme, isoBuffer, sizeof(isoBuffer));
+  char isoBuffer[29];
+  char osnovniIsoBuffer[25];
+  formatirajIsoDatumIVrijeme(lokalnoVrijeme, osnovniIsoBuffer, sizeof(osnovniIsoBuffer));
+  snprintf(isoBuffer,
+           sizeof(isoBuffer),
+           "%s.%03u",
+           osnovniIsoBuffer,
+           static_cast<unsigned>(lokalneMilisekunde));
 
   Serial.print("SLANJE: NTP linija prema Megi: ");
   Serial.println(isoBuffer);
@@ -712,6 +859,20 @@ void kopirajOcisceniBuffer(const char* ulaz, char* izlaz, size_t velicina) {
   trimJednolinijskiBuffer(izlaz);
 }
 
+bool jeDecimalniBrojString(const String& vrijednost) {
+  if (vrijednost.length() == 0) {
+    return false;
+  }
+
+  for (size_t i = 0; i < vrijednost.length(); ++i) {
+    if (!isDigit(vrijednost.charAt(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs) {
   odgovorSetupWiFiPrimljen = false;
   setupWiFiNeuspjeh = false;
@@ -770,6 +931,115 @@ static bool procitajStatusZastavicu(const char* payload, const char* oznaka, boo
   return false;
 }
 
+static const char* pronadiVrijednostPolja(const char* payload, const char* oznaka) {
+  if (payload == nullptr || oznaka == nullptr) {
+    return nullptr;
+  }
+
+  const size_t duljinaOznake = strlen(oznaka);
+  const char* pokazivac = payload;
+  while (pokazivac != nullptr && *pokazivac != '\0') {
+    if ((pokazivac == payload || pokazivac[-1] == '|') &&
+        strncmp(pokazivac, oznaka, duljinaOznake) == 0) {
+      return pokazivac + duljinaOznake;
+    }
+
+    pokazivac = strchr(pokazivac, '|');
+    if (pokazivac != nullptr) {
+      ++pokazivac;
+    }
+  }
+
+  return nullptr;
+}
+
+static bool procitajBoolPolje(const char* payload, const char* oznaka, bool* izlaz) {
+  if (izlaz == nullptr) {
+    return false;
+  }
+
+  const char* vrijednost = pronadiVrijednostPolja(payload, oznaka);
+  if (vrijednost == nullptr) {
+    return false;
+  }
+
+  if (vrijednost[0] == '1' && (vrijednost[1] == '\0' || vrijednost[1] == '|')) {
+    *izlaz = true;
+    return true;
+  }
+
+  if (vrijednost[0] == '0' && (vrijednost[1] == '\0' || vrijednost[1] == '|')) {
+    *izlaz = false;
+    return true;
+  }
+
+  return false;
+}
+
+static bool procitajUIntPolje(const char* payload, const char* oznaka, unsigned int* izlaz) {
+  if (izlaz == nullptr) {
+    return false;
+  }
+
+  const char* vrijednost = pronadiVrijednostPolja(payload, oznaka);
+  if (vrijednost == nullptr || *vrijednost == '\0') {
+    return false;
+  }
+
+  unsigned long akumulator = 0UL;
+  const char* pokazivac = vrijednost;
+  while (*pokazivac != '\0' && *pokazivac != '|') {
+    if (!isDigit(*pokazivac)) {
+      return false;
+    }
+    akumulator = akumulator * 10UL + static_cast<unsigned long>(*pokazivac - '0');
+    if (akumulator > 60000UL) {
+      return false;
+    }
+    ++pokazivac;
+  }
+
+  *izlaz = static_cast<unsigned int>(akumulator);
+  return true;
+}
+
+static bool procitajIntPolje(const char* payload, const char* oznaka, int* izlaz) {
+  if (izlaz == nullptr) {
+    return false;
+  }
+
+  const char* vrijednost = pronadiVrijednostPolja(payload, oznaka);
+  if (vrijednost == nullptr || *vrijednost == '\0') {
+    return false;
+  }
+
+  bool negativan = false;
+  const char* pokazivac = vrijednost;
+  if (*pokazivac == '-') {
+    negativan = true;
+    ++pokazivac;
+  }
+
+  if (*pokazivac == '\0') {
+    return false;
+  }
+
+  long akumulator = 0L;
+  while (*pokazivac != '\0' && *pokazivac != '|') {
+    if (!isDigit(*pokazivac)) {
+      return false;
+    }
+    akumulator = akumulator * 10L + static_cast<long>(*pokazivac - '0');
+    if (akumulator > 60000L) {
+      return false;
+    }
+    ++pokazivac;
+  }
+
+  *izlaz = static_cast<int>(negativan ? -akumulator : akumulator);
+  return true;
+}
+
 bool obradiStatusMegai(const char* payload) {
   bool zvono1Aktivno = false;
   bool zvono2Aktivno = false;
@@ -805,6 +1075,127 @@ bool obradiStatusMegai(const char* payload) {
   return true;
 }
 
+bool obradiSustavskePostavkeMegai(char* payload) {
+  bool lcdPozadinskoOsvjetljenje = false;
+  bool logiranje = false;
+  bool rs485 = false;
+  bool upsMod = false;
+  bool kocnicaZvona = false;
+  unsigned int inercijaZvona1Sekunde = 0;
+  unsigned int inercijaZvona2Sekunde = 0;
+  unsigned int impulsCekicaMs = 0;
+
+  if (!procitajBoolPolje(payload, "lcd=", &lcdPozadinskoOsvjetljenje) ||
+      !procitajBoolPolje(payload, "log=", &logiranje) ||
+      !procitajBoolPolje(payload, "rs=", &rs485) ||
+      !procitajBoolPolje(payload, "ups=", &upsMod) ||
+      !procitajBoolPolje(payload, "koc=", &kocnicaZvona) ||
+      !procitajUIntPolje(payload, "inr1=", &inercijaZvona1Sekunde) ||
+      !procitajUIntPolje(payload, "inr2=", &inercijaZvona2Sekunde) ||
+      !procitajUIntPolje(payload, "imp=", &impulsCekicaMs)) {
+    return false;
+  }
+
+  megaSustavskePostavke.poznate = true;
+  megaSustavskePostavke.lcdPozadinskoOsvjetljenje = lcdPozadinskoOsvjetljenje;
+  megaSustavskePostavke.logiranje = logiranje;
+  megaSustavskePostavke.rs485 = rs485;
+  megaSustavskePostavke.upsMod = upsMod;
+  megaSustavskePostavke.kocnicaZvona = kocnicaZvona;
+  megaSustavskePostavke.inercijaZvona1Sekunde =
+      static_cast<uint8_t>(inercijaZvona1Sekunde);
+  megaSustavskePostavke.inercijaZvona2Sekunde =
+      static_cast<uint8_t>(inercijaZvona2Sekunde);
+  megaSustavskePostavke.impulsCekicaMs = impulsCekicaMs;
+  ++megaSustavskePostavke.serijskiBroj;
+  return true;
+}
+
+bool obradiPostavkeStapicaMegai(char* payload) {
+  unsigned int trajanjeRadniMin = 0;
+  unsigned int trajanjeNedjeljaMin = 0;
+  unsigned int trajanjeSlavljenjaMin = 0;
+  unsigned int odgodaSlavljenjaSekunde = 0;
+
+  if (!procitajUIntPolje(payload, "tr=", &trajanjeRadniMin) ||
+      !procitajUIntPolje(payload, "tn=", &trajanjeNedjeljaMin) ||
+      !procitajUIntPolje(payload, "ts=", &trajanjeSlavljenjaMin) ||
+      !procitajUIntPolje(payload, "odg=", &odgodaSlavljenjaSekunde)) {
+    return false;
+  }
+
+  megaPostavkeStapica.poznate = true;
+  megaPostavkeStapica.trajanjeRadniMin = static_cast<uint8_t>(trajanjeRadniMin);
+  megaPostavkeStapica.trajanjeNedjeljaMin = static_cast<uint8_t>(trajanjeNedjeljaMin);
+  megaPostavkeStapica.trajanjeSlavljenjaMin = static_cast<uint8_t>(trajanjeSlavljenjaMin);
+  megaPostavkeStapica.odgodaSlavljenjaSekunde =
+      static_cast<uint8_t>(odgodaSlavljenjaSekunde);
+  ++megaPostavkeStapica.serijskiBroj;
+  return true;
+}
+
+bool obradiBATPostavkeMegai(char* payload) {
+  unsigned int satOd = 0;
+  unsigned int satDo = 0;
+  unsigned int modOtkucavanja = 0;
+  unsigned int modSlavljenja = 0;
+  unsigned int modMrtvackog = 0;
+
+  if (!procitajUIntPolje(payload, "od=", &satOd) ||
+      !procitajUIntPolje(payload, "do=", &satDo) ||
+      !procitajUIntPolje(payload, "otk=", &modOtkucavanja) ||
+      !procitajUIntPolje(payload, "sl=", &modSlavljenja) ||
+      !procitajUIntPolje(payload, "mr=", &modMrtvackog)) {
+    return false;
+  }
+
+  megaBATPostavke.poznate = true;
+  megaBATPostavke.satOd = static_cast<uint8_t>(satOd);
+  megaBATPostavke.satDo = static_cast<uint8_t>(satDo);
+  megaBATPostavke.modOtkucavanja = static_cast<uint8_t>(modOtkucavanja);
+  megaBATPostavke.modSlavljenja = static_cast<uint8_t>(modSlavljenja);
+  megaBATPostavke.modMrtvackog = static_cast<uint8_t>(modMrtvackog);
+  ++megaBATPostavke.serijskiBroj;
+  return true;
+}
+
+bool obradiSuncevePostavkeMegai(char* payload) {
+  bool jutroOmoguceno = false;
+  bool podneOmoguceno = false;
+  bool vecerOmoguceno = false;
+  bool nocnaRasvjeta = false;
+  unsigned int jutroZvono = 0;
+  unsigned int podneZvono = 0;
+  unsigned int vecerZvono = 0;
+  int jutroOdgodaMin = 0;
+  int vecerOdgodaMin = 0;
+
+  if (!procitajBoolPolje(payload, "ju=", &jutroOmoguceno) ||
+      !procitajUIntPolje(payload, "jb=", &jutroZvono) ||
+      !procitajIntPolje(payload, "jo=", &jutroOdgodaMin) ||
+      !procitajBoolPolje(payload, "pu=", &podneOmoguceno) ||
+      !procitajUIntPolje(payload, "pb=", &podneZvono) ||
+      !procitajBoolPolje(payload, "vu=", &vecerOmoguceno) ||
+      !procitajUIntPolje(payload, "vb=", &vecerZvono) ||
+      !procitajIntPolje(payload, "vo=", &vecerOdgodaMin) ||
+      !procitajBoolPolje(payload, "nr=", &nocnaRasvjeta)) {
+    return false;
+  }
+
+  megaSuncevePostavke.poznate = true;
+  megaSuncevePostavke.jutroOmoguceno = jutroOmoguceno;
+  megaSuncevePostavke.jutroZvono = static_cast<uint8_t>(jutroZvono);
+  megaSuncevePostavke.jutroOdgodaMin = static_cast<int8_t>(jutroOdgodaMin);
+  megaSuncevePostavke.podneOmoguceno = podneOmoguceno;
+  megaSuncevePostavke.podneZvono = static_cast<uint8_t>(podneZvono);
+  megaSuncevePostavke.vecerOmoguceno = vecerOmoguceno;
+  megaSuncevePostavke.vecerZvono = static_cast<uint8_t>(vecerZvono);
+  megaSuncevePostavke.vecerOdgodaMin = static_cast<int8_t>(vecerOdgodaMin);
+  megaSuncevePostavke.nocnaRasvjeta = nocnaRasvjeta;
+  ++megaSuncevePostavke.serijskiBroj;
+  return true;
+}
+
 bool osvjeziStatusMegai(bool prisilno) {
   const unsigned long sadaMs = millis();
   if (!prisilno) {
@@ -834,6 +1225,90 @@ bool osvjeziStatusMegai(bool prisilno) {
   return megaStatusPoznat;
 }
 
+bool osvjeziSustavskePostavkeMegai(bool prisilno) {
+  if (!prisilno) {
+    return megaSustavskePostavke.poznate;
+  }
+
+  const unsigned long pocetniBroj = megaSustavskePostavke.serijskiBroj;
+  Serial.println("SETREQ:SUSTAV");
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < STATUS_CEKANJE_NA_MEGU_MS) {
+    obradiSerijskiUlaz();
+    if (megaSustavskePostavke.serijskiBroj != pocetniBroj) {
+      return megaSustavskePostavke.poznate;
+    }
+    delay(1);
+    yield();
+  }
+
+  return megaSustavskePostavke.poznate;
+}
+
+bool osvjeziPostavkeStapicaMegai(bool prisilno) {
+  if (!prisilno) {
+    return megaPostavkeStapica.poznate;
+  }
+
+  const unsigned long pocetniBroj = megaPostavkeStapica.serijskiBroj;
+  Serial.println("SETREQ:STAPICI");
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < STATUS_CEKANJE_NA_MEGU_MS) {
+    obradiSerijskiUlaz();
+    if (megaPostavkeStapica.serijskiBroj != pocetniBroj) {
+      return megaPostavkeStapica.poznate;
+    }
+    delay(1);
+    yield();
+  }
+
+  return megaPostavkeStapica.poznate;
+}
+
+bool osvjeziBATPostavkeMegai(bool prisilno) {
+  if (!prisilno) {
+    return megaBATPostavke.poznate;
+  }
+
+  const unsigned long pocetniBroj = megaBATPostavke.serijskiBroj;
+  Serial.println("SETREQ:BAT");
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < STATUS_CEKANJE_NA_MEGU_MS) {
+    obradiSerijskiUlaz();
+    if (megaBATPostavke.serijskiBroj != pocetniBroj) {
+      return megaBATPostavke.poznate;
+    }
+    delay(1);
+    yield();
+  }
+
+  return megaBATPostavke.poznate;
+}
+
+bool osvjeziSuncevePostavkeMegai(bool prisilno) {
+  if (!prisilno) {
+    return megaSuncevePostavke.poznate;
+  }
+
+  const unsigned long pocetniBroj = megaSuncevePostavke.serijskiBroj;
+  Serial.println("SETREQ:SUNCE");
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < STATUS_CEKANJE_NA_MEGU_MS) {
+    obradiSerijskiUlaz();
+    if (megaSuncevePostavke.serijskiBroj != pocetniBroj) {
+      return megaSuncevePostavke.poznate;
+    }
+    delay(1);
+    yield();
+  }
+
+  return megaSuncevePostavke.poznate;
+}
+
 void obradiSerijskiUlaz() {
   static char prijemniBuffer[SERIJSKI_BUFFER_MAX + 1] = {0};
   static size_t prijemnaDuljina = 0;
@@ -851,6 +1326,10 @@ void obradiSerijskiUlaz() {
         if (strcmp(linija, "ACK:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = false;
+        } else if (strcmp(linija, "ACK:SETCFG") == 0) {
+          zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_OK;
+        } else if (strcmp(linija, "ERR:SETCFG") == 0) {
+          zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_ERR;
         } else if (strcmp(linija, "ACK:CMD_OK") == 0) {
           zadnjiCmdOdgovorMega = CMD_ODGOVOR_OK;
         } else if (strcmp(linija, "ERR:CMD_BUSY") == 0) {
@@ -860,6 +1339,14 @@ void obradiSerijskiUlaz() {
         } else if (strcmp(linija, "ERR:SETUPWIFI") == 0) {
           odgovorSetupWiFiPrimljen = true;
           setupWiFiNeuspjeh = true;
+        } else if (strncmp(linija, "SET:SUSTAV|", 11) == 0) {
+          obradiSustavskePostavkeMegai(linija + 11);
+        } else if (strncmp(linija, "SET:STAPICI|", 12) == 0) {
+          obradiPostavkeStapicaMegai(linija + 12);
+        } else if (strncmp(linija, "SET:BAT|", 8) == 0) {
+          obradiBATPostavkeMegai(linija + 8);
+        } else if (strncmp(linija, "SET:SUNCE|", 10) == 0) {
+          obradiSuncevePostavkeMegai(linija + 10);
         } else if (strncmp(linija, "STATUS:", 7) == 0) {
           obradiStatusMegai(linija + 7);
         } else if (strcmp(linija, "WIFISTATUS?") == 0) {
@@ -1569,6 +2056,216 @@ void posaljiJsonStatus(bool prisilno) {
   webPosluzitelj.send(200, "application/json", tijelo);
 }
 
+PostavkeOdgovorMegai posaljiSustavskePostavkeMegai(bool lcdPozadinskoOsvjetljenje,
+                                                   bool logiranje,
+                                                   bool rs485,
+                                                   bool upsMod,
+                                                   bool kocnicaZvona,
+                                                   unsigned int inercijaZvona1Sekunde,
+                                                   unsigned int inercijaZvona2Sekunde,
+                                                   unsigned int impulsCekicaMs,
+                                                   unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  char naredba[112];
+  snprintf(naredba,
+           sizeof(naredba),
+           "SETCFG:SUSTAV|lcd=%d|log=%d|rs=%d|ups=%d|koc=%d|inr1=%u|inr2=%u|imp=%u",
+           lcdPozadinskoOsvjetljenje ? 1 : 0,
+           logiranje ? 1 : 0,
+           rs485 ? 1 : 0,
+           upsMod ? 1 : 0,
+           kocnicaZvona ? 1 : 0,
+           inercijaZvona1Sekunde,
+           inercijaZvona2Sekunde,
+           impulsCekicaMs);
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+PostavkeOdgovorMegai posaljiPostavkeStapicaMegai(unsigned int trajanjeRadniMin,
+                                                 unsigned int trajanjeNedjeljaMin,
+                                                 unsigned int trajanjeSlavljenjaMin,
+                                                 unsigned int odgodaSlavljenjaSekunde,
+                                                 unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  char naredba[80];
+  snprintf(naredba,
+           sizeof(naredba),
+           "SETCFG:STAPICI|tr=%u|tn=%u|ts=%u|odg=%u",
+           trajanjeRadniMin,
+           trajanjeNedjeljaMin,
+           trajanjeSlavljenjaMin,
+           odgodaSlavljenjaSekunde);
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+PostavkeOdgovorMegai posaljiBATPostavkeMegai(unsigned int satOd,
+                                             unsigned int satDo,
+                                             unsigned int modOtkucavanja,
+                                             unsigned int modSlavljenja,
+                                             unsigned int modMrtvackog,
+                                             unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  char naredba[80];
+  snprintf(naredba,
+           sizeof(naredba),
+           "SETCFG:BAT|od=%u|do=%u|otk=%u|sl=%u|mr=%u",
+           satOd,
+           satDo,
+           modOtkucavanja,
+           modSlavljenja,
+           modMrtvackog);
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+PostavkeOdgovorMegai posaljiSuncevePostavkeMegai(bool jutroOmoguceno,
+                                                 unsigned int jutroZvono,
+                                                 int jutroOdgodaMin,
+                                                 bool podneOmoguceno,
+                                                 unsigned int podneZvono,
+                                                 bool vecerOmoguceno,
+                                                 unsigned int vecerZvono,
+                                                 int vecerOdgodaMin,
+                                                 bool nocnaRasvjeta,
+                                                 unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  char naredba[128];
+  snprintf(naredba,
+           sizeof(naredba),
+           "SETCFG:SUNCE|ju=%d|jb=%u|jo=%d|pu=%d|pb=%u|vu=%d|vb=%u|vo=%d|nr=%d",
+           jutroOmoguceno ? 1 : 0,
+           jutroZvono,
+           jutroOdgodaMin,
+           podneOmoguceno ? 1 : 0,
+           podneZvono,
+           vecerOmoguceno ? 1 : 0,
+           vecerZvono,
+           vecerOdgodaMin,
+           nocnaRasvjeta ? 1 : 0);
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+void posaljiJsonSustavskihPostavki(bool prisilno) {
+  osvjeziSustavskePostavkeMegai(prisilno);
+
+  char tijelo[320];
+  snprintf_P(tijelo,
+             sizeof(tijelo),
+             PSTR("{\"known\":%s,\"lcd_backlight\":%s,\"pc_logging\":%s,\"rs485_enabled\":%s,\"ups_mode\":%s,\"bell_brake\":%s,\"inertia1_seconds\":%u,\"inertia2_seconds\":%u,\"hammer_pulse_ms\":%u}"),
+             megaSustavskePostavke.poznate ? "true" : "false",
+             (megaSustavskePostavke.poznate && megaSustavskePostavke.lcdPozadinskoOsvjetljenje) ? "true" : "false",
+             (megaSustavskePostavke.poznate && megaSustavskePostavke.logiranje) ? "true" : "false",
+             (megaSustavskePostavke.poznate && megaSustavskePostavke.rs485) ? "true" : "false",
+             (megaSustavskePostavke.poznate && megaSustavskePostavke.upsMod) ? "true" : "false",
+             (megaSustavskePostavke.poznate && megaSustavskePostavke.kocnicaZvona) ? "true" : "false",
+             static_cast<unsigned>(megaSustavskePostavke.poznate ? megaSustavskePostavke.inercijaZvona1Sekunde : 0U),
+             static_cast<unsigned>(megaSustavskePostavke.poznate ? megaSustavskePostavke.inercijaZvona2Sekunde : 0U),
+             static_cast<unsigned>(megaSustavskePostavke.poznate ? megaSustavskePostavke.impulsCekicaMs : 0U));
+  webPosluzitelj.send(200, "application/json", tijelo);
+}
+
+void posaljiJsonPostavkiStapica(bool prisilno) {
+  osvjeziPostavkeStapicaMegai(prisilno);
+
+  char tijelo[240];
+  snprintf_P(tijelo,
+             sizeof(tijelo),
+             PSTR("{\"known\":%s,\"radni_minutes\":%u,\"nedjelja_minutes\":%u,\"slavljenje_minutes\":%u,\"slavljenje_delay_seconds\":%u}"),
+             megaPostavkeStapica.poznate ? "true" : "false",
+             static_cast<unsigned>(megaPostavkeStapica.poznate ? megaPostavkeStapica.trajanjeRadniMin : 0U),
+             static_cast<unsigned>(megaPostavkeStapica.poznate ? megaPostavkeStapica.trajanjeNedjeljaMin : 0U),
+             static_cast<unsigned>(megaPostavkeStapica.poznate ? megaPostavkeStapica.trajanjeSlavljenjaMin : 0U),
+             static_cast<unsigned>(megaPostavkeStapica.poznate ? megaPostavkeStapica.odgodaSlavljenjaSekunde : 0U));
+  webPosluzitelj.send(200, "application/json", tijelo);
+}
+
+void posaljiJsonBATPostavki(bool prisilno) {
+  osvjeziBATPostavkeMegai(prisilno);
+
+  char tijelo[240];
+  snprintf_P(tijelo,
+             sizeof(tijelo),
+             PSTR("{\"known\":%s,\"sat_od\":%u,\"sat_do\":%u,\"otkucavanje_mode\":%u,\"slavljenje_mode\":%u,\"mrtvacko_mode\":%u}"),
+             megaBATPostavke.poznate ? "true" : "false",
+             static_cast<unsigned>(megaBATPostavke.poznate ? megaBATPostavke.satOd : 0U),
+             static_cast<unsigned>(megaBATPostavke.poznate ? megaBATPostavke.satDo : 0U),
+             static_cast<unsigned>(megaBATPostavke.poznate ? megaBATPostavke.modOtkucavanja : 0U),
+             static_cast<unsigned>(megaBATPostavke.poznate ? megaBATPostavke.modSlavljenja : 0U),
+             static_cast<unsigned>(megaBATPostavke.poznate ? megaBATPostavke.modMrtvackog : 0U));
+  webPosluzitelj.send(200, "application/json", tijelo);
+}
+
+void posaljiJsonSuncevihPostavki(bool prisilno) {
+  osvjeziSuncevePostavkeMegai(prisilno);
+
+  char tijelo[400];
+  snprintf_P(tijelo,
+             sizeof(tijelo),
+             PSTR("{\"known\":%s,\"jutro_enabled\":%s,\"jutro_bell\":%u,\"jutro_offset_minutes\":%d,\"podne_enabled\":%s,\"podne_bell\":%u,\"vecer_enabled\":%s,\"vecer_bell\":%u,\"vecer_offset_minutes\":%d,\"night_light\":%s}"),
+             megaSuncevePostavke.poznate ? "true" : "false",
+             (megaSuncevePostavke.poznate && megaSuncevePostavke.jutroOmoguceno) ? "true" : "false",
+             static_cast<unsigned>(megaSuncevePostavke.poznate ? megaSuncevePostavke.jutroZvono : 0U),
+             static_cast<int>(megaSuncevePostavke.poznate ? megaSuncevePostavke.jutroOdgodaMin : 0),
+             (megaSuncevePostavke.poznate && megaSuncevePostavke.podneOmoguceno) ? "true" : "false",
+             static_cast<unsigned>(megaSuncevePostavke.poznate ? megaSuncevePostavke.podneZvono : 0U),
+             (megaSuncevePostavke.poznate && megaSuncevePostavke.vecerOmoguceno) ? "true" : "false",
+             static_cast<unsigned>(megaSuncevePostavke.poznate ? megaSuncevePostavke.vecerZvono : 0U),
+             static_cast<int>(megaSuncevePostavke.poznate ? megaSuncevePostavke.vecerOdgodaMin : 0),
+             (megaSuncevePostavke.poznate && megaSuncevePostavke.nocnaRasvjeta) ? "true" : "false");
+  webPosluzitelj.send(200, "application/json", tijelo);
+}
+
 void posaljiHtmlStranicuIzProgMema(PGM_P stranica) {
   if (stranica == nullptr) {
     webPosluzitelj.send(500, "text/plain", "HTML stranica nije dostupna");
@@ -1732,6 +2429,25 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
     .log-panel {
       padding:14px 16px;
     }
+    .service-links {
+      margin-top:14px;
+      display:flex;
+      justify-content:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .service-link {
+      display:inline-block;
+      padding:10px 14px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:#f2f6fb;
+      color:var(--text);
+      text-decoration:none;
+      font-size:14px;
+      font-weight:700;
+      letter-spacing:0.03em;
+    }
     .log-text {
       min-height:24px;
       white-space:pre-wrap;
@@ -1789,6 +2505,9 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
 
     <section class="log-panel">
       <div id="odgovor" class="log-text">Dashboard je spreman.</div>
+      <div class="service-links">
+        <a class="service-link" href="/settings">POSTAVKE</a>
+      </div>
     </section>
   </div>
   <script>
@@ -2049,6 +2768,703 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
 </html>
 )HTML";
 
+static const char WEB_POSTAVKE_STRANICA[] PROGMEM = R"HTML(
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZVONKO postavke</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg:#e6edf5;
+      --panel:#f9fbff;
+      --line:#bcc7d6;
+      --text:#223246;
+      --muted:#5d6f84;
+      --accent:#3f78bd;
+      --accent-soft:#dcecff;
+      --shadow:0 10px 24px rgba(63,82,110,0.12);
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family: Arial, sans-serif;
+      background:linear-gradient(180deg,#dfe7f1,#f5f8fc);
+      color:var(--text);
+    }
+    .wrap {
+      max-width:880px;
+      margin:0 auto;
+      padding:18px 12px 28px;
+    }
+    .panel {
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    h1 {
+      margin:0 0 8px;
+      font-size:28px;
+      text-align:center;
+      letter-spacing:0.02em;
+    }
+    h2 {
+      margin:0 0 10px;
+      font-size:22px;
+    }
+    .intro {
+      margin:0 0 16px;
+      color:var(--muted);
+      line-height:1.5;
+      text-align:center;
+      font-size:14px;
+    }
+    .section {
+      margin-top:18px;
+      padding-top:18px;
+      border-top:1px solid var(--line);
+    }
+    .grid {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    .field {
+      display:grid;
+      gap:8px;
+      padding:14px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#fff;
+    }
+    .field label {
+      font-size:14px;
+      font-weight:700;
+    }
+    .field small {
+      color:var(--muted);
+      line-height:1.4;
+    }
+    .toggle-row {
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .toggle-chip {
+      padding:10px 14px;
+      border-radius:12px;
+      border:2px solid #97a8bb;
+      background:#edf2f7;
+      color:#435567;
+      font-weight:700;
+      min-width:124px;
+      cursor:pointer;
+    }
+    .toggle-chip.active {
+      background:var(--accent-soft);
+      border-color:var(--accent);
+      color:#184a86;
+    }
+    input[type=number], select {
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:12px 10px;
+      font:inherit;
+      color:var(--text);
+      background:#fff;
+    }
+    .actions {
+      margin-top:16px;
+      display:flex;
+      gap:12px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
+    .actions button,
+    .actions a {
+      display:inline-block;
+      padding:12px 18px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      font:inherit;
+      font-weight:700;
+      text-decoration:none;
+      cursor:pointer;
+    }
+    .primary {
+      background:var(--accent);
+      color:#fff;
+      border-color:var(--accent);
+    }
+    .secondary {
+      background:#f2f6fb;
+      color:var(--text);
+    }
+    .log {
+      margin-top:16px;
+      min-height:24px;
+      white-space:pre-wrap;
+      line-height:1.45;
+      font-size:14px;
+      color:var(--muted);
+    }
+    @media (max-width:700px) {
+      .grid {
+        grid-template-columns:1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Postavke toranjskog sata</h1>
+      <p class="intro">Vrijeme, datum, kazaljke i okretna ploca ostaju na Megi i LCD meniju. Ovdje se uredjuju samo sigurne servisne i automaticke postavke.</p>
+
+      <div class="section" style="margin-top:0;padding-top:0;border-top:none;">
+        <h2>Sustav</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="lcdBacklight">LCD svjetlo</label>
+            <div class="toggle-row">
+              <small>Pozadinsko osvjetljenje LCD-a toranjskog sata.</small>
+              <button id="lcdBacklight" type="button" class="toggle-chip" onclick="prebaciToggle('lcdBacklight')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="pcLogging">Logiranje</label>
+            <div class="toggle-row">
+              <small>Servisni logovi prema dijagnostickom izlazu.</small>
+              <button id="pcLogging" type="button" class="toggle-chip" onclick="prebaciToggle('pcLogging')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="rs485Enabled">RS485</label>
+            <div class="toggle-row">
+              <small>Omogucuje vanjsku RS485 komunikaciju tornjskog sata.</small>
+              <button id="rs485Enabled" type="button" class="toggle-chip" onclick="prebaciToggle('rs485Enabled')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="upsMode">UPS mod</label>
+            <div class="toggle-row">
+              <small>Ponasanje sustava pri radu preko rezervnog napajanja.</small>
+              <button id="upsMode" type="button" class="toggle-chip" onclick="prebaciToggle('upsMode')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="bellBrake">Kocnica zvona</label>
+            <div class="toggle-row">
+              <small>Koordinira zaustavljanje zvona i rad mehanike.</small>
+              <button id="bellBrake" type="button" class="toggle-chip" onclick="prebaciToggle('bellBrake')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="inertia1">INR1 (sekunde)</label>
+            <small>Inercija prvog zvona nakon zaustavljanja motora.</small>
+            <input id="inertia1" type="number" min="10" max="180" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="inertia2">INR2 (sekunde)</label>
+            <small>Inercija drugog zvona nakon zaustavljanja motora.</small>
+            <input id="inertia2" type="number" min="10" max="180" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="hammerPulse">Impuls cekica (ms)</label>
+            <small>Trajanje impulsa elektromagnetskih batova u koraku od 10 ms.</small>
+            <input id="hammerPulse" type="number" min="10" max="300" step="10" inputmode="numeric">
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" onclick="spremiSustav()">Spremi sustav</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Stapici</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="stapiciRadni">Trajanje radni dan (min)</label>
+            <small>Koliko minuta traje zvonjenje stapica radnim danom.</small>
+            <select id="stapiciRadni">
+              <option value="2">2 minute</option>
+              <option value="3">3 minute</option>
+              <option value="4">4 minute</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="stapiciNedjelja">Trajanje nedjelja (min)</label>
+            <small>Koliko minuta traje zvonjenje stapica nedjeljom.</small>
+            <select id="stapiciNedjelja">
+              <option value="2">2 minute</option>
+              <option value="3">3 minute</option>
+              <option value="4">4 minute</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="stapiciSlavljenje">Trajanje slavljenja (min)</label>
+            <small>Koliko minuta traje slavljenje kad je aktivno.</small>
+            <select id="stapiciSlavljenje">
+              <option value="2">2 minute</option>
+              <option value="3">3 minute</option>
+              <option value="4">4 minute</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="stapiciOdgoda">Odgoda slavljenja (s)</label>
+            <small>Pomak slavljenja prije pocetka zvonjenja stapica.</small>
+            <select id="stapiciOdgoda">
+              <option value="15">15 sekundi</option>
+              <option value="30">30 sekundi</option>
+              <option value="45">45 sekundi</option>
+              <option value="60">60 sekundi</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" onclick="spremiStapici()">Spremi stapice</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Tihi sati / BAT</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="batSatOd">BAT od (sat)</label>
+            <small>Pocetak tihog razdoblja za otkucavanje i posebne nacine.</small>
+            <input id="batSatOd" type="number" min="0" max="23" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="batSatDo">BAT do (sat)</label>
+            <small>Zavrsetak tihog razdoblja.</small>
+            <input id="batSatDo" type="number" min="0" max="23" step="1" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label for="batOtkucavanjeMode">Mod otkucavanja</label>
+            <small>Ponasanje satnih otkucaja unutar BAT razdoblja.</small>
+            <select id="batOtkucavanjeMode">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="batSlavljenjeMode">Mod slavljenja</label>
+            <small>Ponasanje slavljenja unutar BAT razdoblja.</small>
+            <select id="batSlavljenjeMode">
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="batMrtvackoMode">Mod mrtvackog</label>
+            <small>Ponasanje mrtvackog unutar BAT razdoblja.</small>
+            <select id="batMrtvackoMode">
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" onclick="spremiBat()">Spremi BAT</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Sunce</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="jutroEnabled">Jutro</label>
+            <div class="toggle-row">
+              <small>Automatika jutarnje zdravomarije prema izlasku sunca.</small>
+              <button id="jutroEnabled" type="button" class="toggle-chip" onclick="prebaciToggle('jutroEnabled')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="jutroBell">Jutro zvono</label>
+            <small>Odabir zvona za jutarnji dogadaj.</small>
+            <select id="jutroBell">
+              <option value="1">Zvono 1</option>
+              <option value="2">Zvono 2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="jutroOffset">Jutro odgoda (min)</label>
+            <small>Pomak jutarnjeg dogadaja u odnosu na sunce.</small>
+            <select id="jutroOffset">
+              <option value="-30">-30</option>
+              <option value="-20">-20</option>
+              <option value="-10">-10</option>
+              <option value="0">0</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="podneEnabled">Podne</label>
+            <div class="toggle-row">
+              <small>Automatika podnevne zdravomarije u 12:00.</small>
+              <button id="podneEnabled" type="button" class="toggle-chip" onclick="prebaciToggle('podneEnabled')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="podneBell">Podne zvono</label>
+            <small>Odabir zvona za podnevni dogadaj.</small>
+            <select id="podneBell">
+              <option value="1">Zvono 1</option>
+              <option value="2">Zvono 2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="vecerEnabled">Vecer</label>
+            <div class="toggle-row">
+              <small>Automatika vecernje zdravomarije prema zalasku sunca.</small>
+              <button id="vecerEnabled" type="button" class="toggle-chip" onclick="prebaciToggle('vecerEnabled')">ISKLJUCENO</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="vecerBell">Vecer zvono</label>
+            <small>Odabir zvona za vecernji dogadaj.</small>
+            <select id="vecerBell">
+              <option value="1">Zvono 1</option>
+              <option value="2">Zvono 2</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="vecerOffset">Vecer odgoda (min)</label>
+            <small>Pomak vecernjeg dogadaja u odnosu na sunce.</small>
+            <select id="vecerOffset">
+              <option value="-30">-30</option>
+              <option value="-20">-20</option>
+              <option value="-10">-10</option>
+              <option value="0">0</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="nightLight">Nocna rasvjeta</label>
+            <div class="toggle-row">
+              <small>Automatsko paljenje nocne rasvjete uz sunceve dogadaje.</small>
+              <button id="nightLight" type="button" class="toggle-chip" onclick="prebaciToggle('nightLight')">ISKLJUCENO</button>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="button" onclick="spremiSunce()">Spremi sunce</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="secondary" type="button" onclick="ucitajSvePostavke(true)">Osvjezi sve s Mege</button>
+        <a class="secondary" href="/">Natrag na dashboard</a>
+      </div>
+
+      <div id="odgovor" class="log">Stranica je spremna za citanje web postavki toranjskog sata.</div>
+    </div>
+  </div>
+  <script>
+    const stanje = {
+      lcdBacklight: false,
+      pcLogging: false,
+      rs485Enabled: false,
+      upsMode: false,
+      bellBrake: false,
+      jutroEnabled: false,
+      podneEnabled: false,
+      vecerEnabled: false,
+      nightLight: false
+    };
+
+    function postaviLog(poruka) {
+      document.getElementById('odgovor').textContent = poruka;
+    }
+
+    function osvjeziToggleGumb(id) {
+      const gumb = document.getElementById(id);
+      const aktivno = !!stanje[id];
+      gumb.classList.toggle('active', aktivno);
+      gumb.textContent = aktivno ? 'UKLJUCENO' : 'ISKLJUCENO';
+      gumb.setAttribute('aria-pressed', aktivno ? 'true' : 'false');
+    }
+
+    function prebaciToggle(id) {
+      stanje[id] = !stanje[id];
+      osvjeziToggleGumb(id);
+    }
+
+    function postaviSelect(id, vrijednost) {
+      const polje = document.getElementById(id);
+      polje.value = String(vrijednost);
+    }
+
+    function popuniSustav(podaci) {
+      stanje.lcdBacklight = !!podaci.lcd_backlight;
+      stanje.pcLogging = !!podaci.pc_logging;
+      stanje.rs485Enabled = !!podaci.rs485_enabled;
+      stanje.upsMode = !!podaci.ups_mode;
+      stanje.bellBrake = !!podaci.bell_brake;
+      osvjeziToggleGumb('lcdBacklight');
+      osvjeziToggleGumb('pcLogging');
+      osvjeziToggleGumb('rs485Enabled');
+      osvjeziToggleGumb('upsMode');
+      osvjeziToggleGumb('bellBrake');
+      document.getElementById('inertia1').value = podaci.inertia1_seconds ?? '';
+      document.getElementById('inertia2').value = podaci.inertia2_seconds ?? '';
+      document.getElementById('hammerPulse').value = podaci.hammer_pulse_ms ?? '';
+    }
+
+    function popuniStapici(podaci) {
+      postaviSelect('stapiciRadni', podaci.radni_minutes ?? 2);
+      postaviSelect('stapiciNedjelja', podaci.nedjelja_minutes ?? 3);
+      postaviSelect('stapiciSlavljenje', podaci.slavljenje_minutes ?? 2);
+      postaviSelect('stapiciOdgoda', podaci.slavljenje_delay_seconds ?? 15);
+    }
+
+    function popuniBat(podaci) {
+      document.getElementById('batSatOd').value = podaci.sat_od ?? '';
+      document.getElementById('batSatDo').value = podaci.sat_do ?? '';
+      postaviSelect('batOtkucavanjeMode', podaci.otkucavanje_mode ?? 0);
+      postaviSelect('batSlavljenjeMode', podaci.slavljenje_mode ?? 1);
+      postaviSelect('batMrtvackoMode', podaci.mrtvacko_mode ?? 1);
+    }
+
+    function popuniSunce(podaci) {
+      stanje.jutroEnabled = !!podaci.jutro_enabled;
+      stanje.podneEnabled = !!podaci.podne_enabled;
+      stanje.vecerEnabled = !!podaci.vecer_enabled;
+      stanje.nightLight = !!podaci.night_light;
+      osvjeziToggleGumb('jutroEnabled');
+      osvjeziToggleGumb('podneEnabled');
+      osvjeziToggleGumb('vecerEnabled');
+      osvjeziToggleGumb('nightLight');
+      postaviSelect('jutroBell', podaci.jutro_bell ?? 1);
+      postaviSelect('jutroOffset', podaci.jutro_offset_minutes ?? 0);
+      postaviSelect('podneBell', podaci.podne_bell ?? 1);
+      postaviSelect('vecerBell', podaci.vecer_bell ?? 1);
+      postaviSelect('vecerOffset', podaci.vecer_offset_minutes ?? 0);
+    }
+
+    async function dohvatiJson(putanja) {
+      const odgovor = await fetch(putanja, { cache: 'no-store' });
+      if (!odgovor.ok) {
+        throw new Error('status');
+      }
+      return odgovor.json();
+    }
+
+    async function ucitajSvePostavke(prisilno = false) {
+      postaviLog('Dohvacam web postavke s Mege...');
+      try {
+        const sufiks = prisilno ? '?force=1' : '';
+        const [sustav, stapici, bat, sunce] = await Promise.all([
+          dohvatiJson('/api/settings/system' + sufiks),
+          dohvatiJson('/api/settings/stapici' + sufiks),
+          dohvatiJson('/api/settings/bat' + sufiks),
+          dohvatiJson('/api/settings/sunce' + sufiks)
+        ]);
+
+        if (!sustav.known || !stapici.known || !bat.known || !sunce.known) {
+          postaviLog('Mega jos nije vratila sve web postavke. Pokusaj ponovno za trenutak.');
+          return;
+        }
+
+        popuniSustav(sustav);
+        popuniStapici(stapici);
+        popuniBat(bat);
+        popuniSunce(sunce);
+        postaviLog('Sve web postavke su ucitane s Mege.');
+      } catch (greska) {
+        postaviLog('Ucitanje web postavki nije uspjelo.');
+      }
+    }
+
+    function procitajBroj(id, min, max, korak) {
+      const polje = document.getElementById(id);
+      const vrijednost = Number(polje.value);
+      if (!Number.isFinite(vrijednost) || vrijednost < min || vrijednost > max || (vrijednost % korak) !== 0) {
+        throw new Error(id);
+      }
+      return vrijednost;
+    }
+
+    function procitajOdabraniBroj(id, dopustene) {
+      const vrijednost = Number(document.getElementById(id).value);
+      if (!dopustene.includes(vrijednost)) {
+        throw new Error(id);
+      }
+      return vrijednost;
+    }
+
+    async function spremiSustav() {
+      let inertia1;
+      let inertia2;
+      let hammerPulse;
+      try {
+        inertia1 = procitajBroj('inertia1', 10, 180, 1);
+        inertia2 = procitajBroj('inertia2', 10, 180, 1);
+        hammerPulse = procitajBroj('hammerPulse', 10, 300, 10);
+      } catch (greska) {
+        postaviLog('Provjeri granice: INR1 i INR2 moraju biti 10-180 s, a impuls cekica 10-300 ms u koraku 10 ms.');
+        return;
+      }
+
+      const tijelo = new URLSearchParams({
+        lcd: stanje.lcdBacklight ? '1' : '0',
+        log: stanje.pcLogging ? '1' : '0',
+        rs: stanje.rs485Enabled ? '1' : '0',
+        ups: stanje.upsMode ? '1' : '0',
+        koc: stanje.bellBrake ? '1' : '0',
+        inr1: String(inertia1),
+        inr2: String(inertia2),
+        imp: String(hammerPulse)
+      });
+
+      postaviLog('Saljem sustavske postavke prema Megi...');
+      try {
+        const odgovor = await fetch('/api/settings/system', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: tijelo,
+          cache: 'no-store'
+        });
+        const tekst = await odgovor.text();
+        postaviLog(tekst);
+        if (odgovor.ok) {
+          await ucitajSvePostavke(true);
+        }
+      } catch (greska) {
+        postaviLog('Spremanje sustavskih postavki nije uspjelo.');
+      }
+    }
+
+    async function spremiStapici() {
+      let tr, tn, ts, odg;
+      try {
+        tr = procitajOdabraniBroj('stapiciRadni', [2, 3, 4]);
+        tn = procitajOdabraniBroj('stapiciNedjelja', [2, 3, 4]);
+        ts = procitajOdabraniBroj('stapiciSlavljenje', [2, 3, 4]);
+        odg = procitajOdabraniBroj('stapiciOdgoda', [15, 30, 45, 60]);
+      } catch (greska) {
+        postaviLog('Provjeri stapice: trajanja moraju biti 2-4 minute, a odgoda 15/30/45/60 s.');
+        return;
+      }
+
+      postaviLog('Saljem postavke stapica prema Megi...');
+      try {
+        const odgovor = await fetch('/api/settings/stapici', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            tr: String(tr),
+            tn: String(tn),
+            ts: String(ts),
+            odg: String(odg)
+          }),
+          cache: 'no-store'
+        });
+        const tekst = await odgovor.text();
+        postaviLog(tekst);
+        if (odgovor.ok) {
+          await ucitajSvePostavke(true);
+        }
+      } catch (greska) {
+        postaviLog('Spremanje postavki stapica nije uspjelo.');
+      }
+    }
+
+    async function spremiBat() {
+      let satOd, satDo, otk, sl, mr;
+      try {
+        satOd = procitajBroj('batSatOd', 0, 23, 1);
+        satDo = procitajBroj('batSatDo', 0, 23, 1);
+        otk = procitajOdabraniBroj('batOtkucavanjeMode', [0, 1, 2]);
+        sl = procitajOdabraniBroj('batSlavljenjeMode', [1, 2]);
+        mr = procitajOdabraniBroj('batMrtvackoMode', [1, 2]);
+      } catch (greska) {
+        postaviLog('Provjeri BAT postavke: sati moraju biti 0-23, OTK 0-2, a S i M 1-2.');
+        return;
+      }
+
+      postaviLog('Saljem BAT postavke prema Megi...');
+      try {
+        const odgovor = await fetch('/api/settings/bat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            od: String(satOd),
+            do: String(satDo),
+            otk: String(otk),
+            sl: String(sl),
+            mr: String(mr)
+          }),
+          cache: 'no-store'
+        });
+        const tekst = await odgovor.text();
+        postaviLog(tekst);
+        if (odgovor.ok) {
+          await ucitajSvePostavke(true);
+        }
+      } catch (greska) {
+        postaviLog('Spremanje BAT postavki nije uspjelo.');
+      }
+    }
+
+    async function spremiSunce() {
+      let jb, jo, pb, vb, vo;
+      try {
+        jb = procitajOdabraniBroj('jutroBell', [1, 2]);
+        jo = procitajOdabraniBroj('jutroOffset', [-30, -20, -10, 0, 10, 20, 30]);
+        pb = procitajOdabraniBroj('podneBell', [1, 2]);
+        vb = procitajOdabraniBroj('vecerBell', [1, 2]);
+        vo = procitajOdabraniBroj('vecerOffset', [-30, -20, -10, 0, 10, 20, 30]);
+      } catch (greska) {
+        postaviLog('Provjeri sunceve postavke: zvono mora biti 1 ili 2, a odgode u koraku od 10 min od -30 do +30.');
+        return;
+      }
+
+      postaviLog('Saljem sunceve postavke prema Megi...');
+      try {
+        const odgovor = await fetch('/api/settings/sunce', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            ju: stanje.jutroEnabled ? '1' : '0',
+            jb: String(jb),
+            jo: String(jo),
+            pu: stanje.podneEnabled ? '1' : '0',
+            pb: String(pb),
+            vu: stanje.vecerEnabled ? '1' : '0',
+            vb: String(vb),
+            vo: String(vo),
+            nr: stanje.nightLight ? '1' : '0'
+          }),
+          cache: 'no-store'
+        });
+        const tekst = await odgovor.text();
+        postaviLog(tekst);
+        if (odgovor.ok) {
+          await ucitajSvePostavke(true);
+        }
+      } catch (greska) {
+        postaviLog('Spremanje suncevih postavki nije uspjelo.');
+      }
+    }
+
+    ucitajSvePostavke(true);
+  </script>
+</body>
+</html>
+)HTML";
+
 static const char WEB_SETUP_STRANICA[] PROGMEM = R"HTML(
 <!doctype html>
 <html lang="hr">
@@ -2228,17 +3644,9 @@ void obradiOtaUpload() {
       resetirajNtpStanje();
       Serial.printf("OTA: pocetak nadogradnje %s\n", upload.filename.c_str());
 
-#if defined(ESP8266)
-      const uint32_t maksimalnaVelicina =
-          (ESP.getFreeSketchSpace() - 0x1000U) & 0xFFFFF000U;
-      if (!Update.begin(maksimalnaVelicina)) {
-        Update.printError(Serial);
-      }
-#elif defined(ESP32)
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
         Update.printError(Serial);
       }
-#endif
       break;
     }
 
@@ -2260,9 +3668,7 @@ void obradiOtaUpload() {
       break;
 
     case UPLOAD_FILE_ABORTED:
-#if defined(ESP32)
       Update.abort();
-#endif
       otaAzuriranjeUTijeku = false;
       otaUspjesanZadnjiPut = false;
       Serial.println("OTA: upload prekinut");
@@ -2284,6 +3690,18 @@ void konfigurirajWebPosluzitelj() {
       return;
     }
     posaljiHtmlStranicuIzProgMema(WEB_POCETNA_STRANICA);
+  });
+
+  Serial.println("WEB: Registriram /settings rutu");
+  webPosluzitelj.on("/settings", HTTP_GET, []() {
+    if (setupApAktivan) {
+      posaljiHtmlStranicuIzProgMema(WEB_SETUP_STRANICA);
+      return;
+    }
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiHtmlStranicuIzProgMema(WEB_POSTAVKE_STRANICA);
   });
 
   Serial.println("WEB: Registriram /setup rutu");
@@ -2359,6 +3777,323 @@ void konfigurirajWebPosluzitelj() {
         webPosluzitelj.hasArg("force") &&
         webPosluzitelj.arg("force") == "1";
     posaljiJsonStatus(prisilno);
+  });
+
+  Serial.println("WEB: Registriram /api/settings/system rutu");
+  webPosluzitelj.on("/api/settings/system", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonSustavskihPostavki(prisilno);
+  });
+  webPosluzitelj.on("/api/settings/system", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    const char* obaveznaPolja[] = {"lcd", "log", "rs", "ups", "koc", "inr1", "inr2", "imp"};
+    for (size_t i = 0; i < (sizeof(obaveznaPolja) / sizeof(obaveznaPolja[0])); ++i) {
+      if (!webPosluzitelj.hasArg(obaveznaPolja[i])) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja sustavskih postavki");
+        return;
+      }
+    }
+
+    const String lcdArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("lcd"), 1);
+    const String logArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("log"), 1);
+    const String rsArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("rs"), 1);
+    const String upsArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("ups"), 1);
+    const String kocArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("koc"), 1);
+    const String inr1Arg = ocistiJednolinijskiTekst(webPosluzitelj.arg("inr1"), 3);
+    const String inr2Arg = ocistiJednolinijskiTekst(webPosluzitelj.arg("inr2"), 3);
+    const String impArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("imp"), 3);
+
+    if (!((lcdArg == "0" || lcdArg == "1") &&
+          (logArg == "0" || logArg == "1") &&
+          (rsArg == "0" || rsArg == "1") &&
+          (upsArg == "0" || upsArg == "1") &&
+          (kocArg == "0" || kocArg == "1") &&
+          jeDecimalniBrojString(inr1Arg) &&
+          jeDecimalniBrojString(inr2Arg) &&
+          jeDecimalniBrojString(impArg))) {
+      webPosluzitelj.send(422, "text/plain", "Toggle polja moraju biti 0 ili 1, a brojcana polja cijeli brojevi");
+      return;
+    }
+
+    const long inr1 = inr1Arg.toInt();
+    const long inr2 = inr2Arg.toInt();
+    const long impuls = impArg.toInt();
+    if (inr1 < 10L || inr1 > 180L || inr2 < 10L || inr2 > 180L ||
+        impuls < 10L || impuls > 300L || (impuls % 10L) != 0L) {
+      webPosluzitelj.send(422,
+                          "text/plain",
+                          "INR1 i INR2 moraju biti 10-180 s, a impuls cekica 10-300 ms u koraku 10 ms");
+      return;
+    }
+
+    const PostavkeOdgovorMegai status = posaljiSustavskePostavkeMegai(
+        lcdArg == "1",
+        logArg == "1",
+        rsArg == "1",
+        upsArg == "1",
+        kocArg == "1",
+        static_cast<unsigned int>(inr1),
+        static_cast<unsigned int>(inr2),
+        static_cast<unsigned int>(impuls),
+        CMD_CEKANJE_NA_MEGU_MS);
+
+    if (status == POSTAVKE_ODGOVOR_OK) {
+      osvjeziSustavskePostavkeMegai(true);
+      webPosluzitelj.send(200, "text/plain", "Sustavske postavke su spremljene na Megi.");
+      return;
+    }
+
+    if (status == POSTAVKE_ODGOVOR_ERR) {
+      webPosluzitelj.send(422, "text/plain", "Mega je odbila sustavske postavke.");
+      return;
+    }
+
+    webPosluzitelj.send(504, "text/plain", "Mega nije potvrdila spremanje sustavskih postavki.");
+  });
+
+  Serial.println("WEB: Registriram /api/settings/stapici rutu");
+  webPosluzitelj.on("/api/settings/stapici", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonPostavkiStapica(prisilno);
+  });
+  webPosluzitelj.on("/api/settings/stapici", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    const char* obaveznaPolja[] = {"tr", "tn", "ts", "odg"};
+    for (size_t i = 0; i < (sizeof(obaveznaPolja) / sizeof(obaveznaPolja[0])); ++i) {
+      if (!webPosluzitelj.hasArg(obaveznaPolja[i])) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja postavki stapica");
+        return;
+      }
+    }
+
+    const String trArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("tr"), 1);
+    const String tnArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("tn"), 1);
+    const String tsArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("ts"), 1);
+    const String odgArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("odg"), 2);
+
+    if (!(jeDecimalniBrojString(trArg) &&
+          jeDecimalniBrojString(tnArg) &&
+          jeDecimalniBrojString(tsArg) &&
+          jeDecimalniBrojString(odgArg))) {
+      webPosluzitelj.send(422, "text/plain", "Postavke stapica moraju biti cijeli brojevi");
+      return;
+    }
+
+    const long tr = trArg.toInt();
+    const long tn = tnArg.toInt();
+    const long ts = tsArg.toInt();
+    const long odg = odgArg.toInt();
+    if (!((tr >= 2L && tr <= 4L) &&
+          (tn >= 2L && tn <= 4L) &&
+          (ts >= 2L && ts <= 4L) &&
+          (odg == 15L || odg == 30L || odg == 45L || odg == 60L))) {
+      webPosluzitelj.send(422, "text/plain", "Stapici podrzavaju trajanja 2-4 minute i odgodu 15/30/45/60 sekundi");
+      return;
+    }
+
+    const PostavkeOdgovorMegai status = posaljiPostavkeStapicaMegai(
+        static_cast<unsigned int>(tr),
+        static_cast<unsigned int>(tn),
+        static_cast<unsigned int>(ts),
+        static_cast<unsigned int>(odg),
+        CMD_CEKANJE_NA_MEGU_MS);
+
+    if (status == POSTAVKE_ODGOVOR_OK) {
+      osvjeziPostavkeStapicaMegai(true);
+      webPosluzitelj.send(200, "text/plain", "Postavke stapica su spremljene na Megi.");
+      return;
+    }
+
+    if (status == POSTAVKE_ODGOVOR_ERR) {
+      webPosluzitelj.send(422, "text/plain", "Mega je odbila postavke stapica.");
+      return;
+    }
+
+    webPosluzitelj.send(504, "text/plain", "Mega nije potvrdila spremanje postavki stapica.");
+  });
+
+  Serial.println("WEB: Registriram /api/settings/bat rutu");
+  webPosluzitelj.on("/api/settings/bat", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonBATPostavki(prisilno);
+  });
+  webPosluzitelj.on("/api/settings/bat", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    const char* obaveznaPolja[] = {"od", "do", "otk", "sl", "mr"};
+    for (size_t i = 0; i < (sizeof(obaveznaPolja) / sizeof(obaveznaPolja[0])); ++i) {
+      if (!webPosluzitelj.hasArg(obaveznaPolja[i])) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja BAT postavki");
+        return;
+      }
+    }
+
+    const String odArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("od"), 2);
+    const String doArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("do"), 2);
+    const String otkArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("otk"), 1);
+    const String slArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("sl"), 1);
+    const String mrArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("mr"), 1);
+
+    if (!(jeDecimalniBrojString(odArg) &&
+          jeDecimalniBrojString(doArg) &&
+          jeDecimalniBrojString(otkArg) &&
+          jeDecimalniBrojString(slArg) &&
+          jeDecimalniBrojString(mrArg))) {
+      webPosluzitelj.send(422, "text/plain", "BAT postavke moraju biti cijeli brojevi");
+      return;
+    }
+
+    const long satOd = odArg.toInt();
+    const long satDo = doArg.toInt();
+    const long otk = otkArg.toInt();
+    const long sl = slArg.toInt();
+    const long mr = mrArg.toInt();
+    if (satOd < 0L || satOd > 23L || satDo < 0L || satDo > 23L ||
+        otk < 0L || otk > 2L ||
+        (sl != 1L && sl != 2L) ||
+        (mr != 1L && mr != 2L)) {
+      webPosluzitelj.send(422, "text/plain", "BAT podrzava sate 0-23, OTK 0-2 te modove S i M 1-2");
+      return;
+    }
+
+    const PostavkeOdgovorMegai status = posaljiBATPostavkeMegai(
+        static_cast<unsigned int>(satOd),
+        static_cast<unsigned int>(satDo),
+        static_cast<unsigned int>(otk),
+        static_cast<unsigned int>(sl),
+        static_cast<unsigned int>(mr),
+        CMD_CEKANJE_NA_MEGU_MS);
+
+    if (status == POSTAVKE_ODGOVOR_OK) {
+      osvjeziBATPostavkeMegai(true);
+      webPosluzitelj.send(200, "text/plain", "BAT postavke su spremljene na Megi.");
+      return;
+    }
+
+    if (status == POSTAVKE_ODGOVOR_ERR) {
+      webPosluzitelj.send(422, "text/plain", "Mega je odbila BAT postavke.");
+      return;
+    }
+
+    webPosluzitelj.send(504, "text/plain", "Mega nije potvrdila spremanje BAT postavki.");
+  });
+
+  Serial.println("WEB: Registriram /api/settings/sunce rutu");
+  webPosluzitelj.on("/api/settings/sunce", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonSuncevihPostavki(prisilno);
+  });
+  webPosluzitelj.on("/api/settings/sunce", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    const char* obaveznaPolja[] = {"ju", "jb", "jo", "pu", "pb", "vu", "vb", "vo", "nr"};
+    for (size_t i = 0; i < (sizeof(obaveznaPolja) / sizeof(obaveznaPolja[0])); ++i) {
+      if (!webPosluzitelj.hasArg(obaveznaPolja[i])) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja suncevih postavki");
+        return;
+      }
+    }
+
+    const String juArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("ju"), 1);
+    const String jbArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("jb"), 1);
+    const String joArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("jo"), 3);
+    const String puArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("pu"), 1);
+    const String pbArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("pb"), 1);
+    const String vuArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("vu"), 1);
+    const String vbArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("vb"), 1);
+    const String voArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("vo"), 3);
+    const String nrArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("nr"), 1);
+
+    const bool boolPoljaValjana =
+        ((juArg == "0" || juArg == "1") &&
+         (puArg == "0" || puArg == "1") &&
+         (vuArg == "0" || vuArg == "1") &&
+         (nrArg == "0" || nrArg == "1"));
+    const bool brojPoljaValjana =
+        jeDecimalniBrojString(jbArg) &&
+        jeDecimalniBrojString(pbArg) &&
+        jeDecimalniBrojString(vbArg) &&
+        jeDecimalniBrojString(joArg.startsWith("-") ? joArg.substring(1) : joArg) &&
+        jeDecimalniBrojString(voArg.startsWith("-") ? voArg.substring(1) : voArg);
+
+    if (!(boolPoljaValjana && brojPoljaValjana)) {
+      webPosluzitelj.send(422, "text/plain", "Sunceve postavke moraju imati valjane toggle i brojcane vrijednosti");
+      return;
+    }
+
+    const long jb = jbArg.toInt();
+    const long jo = joArg.toInt();
+    const long pb = pbArg.toInt();
+    const long vb = vbArg.toInt();
+    const long vo = voArg.toInt();
+    const bool odgodaJutroValjana =
+        (jo == -30L || jo == -20L || jo == -10L || jo == 0L || jo == 10L || jo == 20L || jo == 30L);
+    const bool odgodaVecerValjana =
+        (vo == -30L || vo == -20L || vo == -10L || vo == 0L || vo == 10L || vo == 20L || vo == 30L);
+
+    if (!((jb == 1L || jb == 2L) &&
+          (pb == 1L || pb == 2L) &&
+          (vb == 1L || vb == 2L) &&
+          odgodaJutroValjana &&
+          odgodaVecerValjana)) {
+      webPosluzitelj.send(422, "text/plain", "Sunce podrzava zvono 1 ili 2 te odgode od -30 do +30 minuta u koraku 10");
+      return;
+    }
+
+    const PostavkeOdgovorMegai status = posaljiSuncevePostavkeMegai(
+        juArg == "1",
+        static_cast<unsigned int>(jb),
+        static_cast<int>(jo),
+        puArg == "1",
+        static_cast<unsigned int>(pb),
+        vuArg == "1",
+        static_cast<unsigned int>(vb),
+        static_cast<int>(vo),
+        nrArg == "1",
+        CMD_CEKANJE_NA_MEGU_MS);
+
+    if (status == POSTAVKE_ODGOVOR_OK) {
+      osvjeziSuncevePostavkeMegai(true);
+      webPosluzitelj.send(200, "text/plain", "Sunceve postavke su spremljene na Megi.");
+      return;
+    }
+
+    if (status == POSTAVKE_ODGOVOR_ERR) {
+      webPosluzitelj.send(422, "text/plain", "Mega je odbila sunceve postavke.");
+      return;
+    }
+
+    webPosluzitelj.send(504, "text/plain", "Mega nije potvrdila spremanje suncevih postavki.");
   });
 
   Serial.println("WEB: Registriram API rute");

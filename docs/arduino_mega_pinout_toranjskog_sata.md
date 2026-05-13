@@ -16,12 +16,15 @@ Ovi pinovi su izlazi iz `Arduino Mega 2560` prema relejima, cekicima i signalnim
 | `27` | Zvono 2 | Relej | `HIGH` | Zvono 2, ukljucuje se preko automatike ili rucne sklopke |
 | `28` | Cekic 1 - muski | Relej/izlaz cekica | `HIGH` | Satno otkucavanje, slavljenje i mrtvacko |
 | `29` | Cekic 2 - zenski | Relej/izlaz cekica | `HIGH` | Polusatno otkucavanje, slavljenje i mrtvacko |
+| `35` | RS485 DE/RE smjer | Digitalni upravljacki izlaz | `HIGH=TX`, `LOW=RX` | Upravlja smjerom `RS485` transceivera toranjskog sata |
 | `36` | Lampica Zvono 1 | LED izlaz | `HIGH` | Svijetli dok je stvarno ukljuceno zvono 1 |
 | `37` | Lampica Zvono 2 | LED izlaz | `HIGH` | Svijetli dok je stvarno ukljuceno zvono 2 |
 | `38` | Lampica Slavljenje | LED izlaz | `HIGH` / treptanje | Svijetli dok slavljenje radi, trepce dok ceka kraj inercije |
 | `39` | Lampica Mrtvacko | LED izlaz | `HIGH` / treptanje | Svijetli dok mrtvacko radi, trepce dok ceka kraj inercije |
 | `46` | Lampica tihog rezima | LED izlaz | `HIGH` | Svijetli kad je aktivan rucni ili uskrsni tihi rezim |
 | `47` | Relej nocne rasvjete | Relej | `HIGH` | Ukljucen nocu prema suncevoj automatici |
+| `A10` | Lampica sunce vece | LED izlaz | `HIGH` | Svijetli kad je ukljucena vecernja sunceva automatika |
+| `A12` | Lampica sunce jutro | LED izlaz | `HIGH` | Svijetli kad je ukljucena jutarnja sunceva automatika |
 
 ## Releji kazaljki
 
@@ -169,7 +172,7 @@ Napomena:
 |---|---|---|
 | `Serial` | USB | PC log i dijagnostika (`115200`) |
 | `Serial1` | `RX1=19`, `TX1=18` | Aktivni `RS485` transport toranjskog sata (`9600`) |
-| `Serial3` | `RX3=15`, `TX3=14` | Ugradeni `ESP8266` (`9600`) |
+| `Serial3` | `RX3=15`, `TX3=14` | Vanjski `ESP32` mrezni most (`9600`) |
 
 Aktualna postavka firmwarea:
 - `ESP_SERIJSKI_PORT = Serial3`
@@ -179,7 +182,7 @@ Aktualna postavka firmwarea:
 - `2` -> `RTC SQW`
 - `3` -> `433 MHz` `SRX882 DATA`
 - `7-12` -> 6 direktnih tipki lokalnog izbornika
-- `14-15` -> `Serial3` prema `ESP8266`
+- `14-15` -> `Serial3` prema vanjskom `ESP32`
 - `5`, `16`, `17` -> slobodni
 - `18-19` -> `Serial1` za aktivni `RS485`
 - `20-21` -> `I2C`

@@ -60,6 +60,17 @@ void osvjeziWatchdogAkoJeAktivan() {
   wdt_reset();
 }
 
+void zatraziResetWatchdogom() {
+  posaljiPCLog(F("WDT: trazen kontrolirani servisni reset toranjskog sata"));
+  delay(20);
+  cli();
+  wdt_disable();
+  wdt_enable(WDTO_15MS);
+  while (true) {
+    // Cekamo da watchdog odradi kontrolirani reset.
+  }
+}
+
 uint8_t dohvatiResetFlags() {
   return zadnje_reset_zastavice;
 }

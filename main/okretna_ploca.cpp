@@ -129,7 +129,7 @@ bool izracunajVrijemeZaPoziciju(int pozicija, int& sat24, int& minuta) {
 }
 
 void aktivirajRelejePoFazi(const EepromLayout::UnifiedMotionState& stanje) {
-  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (jeRtcIzlazniFailSafeAktivan() || !jeVrijemePotvrdjenoZaAutomatiku()) {
     digitalWrite(PIN_RELEJ_PARNE_PLOCE, LOW);
     digitalWrite(PIN_RELEJ_NEPARNE_PLOCE, LOW);
     return;
@@ -189,6 +189,9 @@ void pokreniKorakAkoTreba(EepromLayout::UnifiedMotionState& stanje) {
   }
   zadnjiObradeniRtcTick = rtcTick;
   const DateTime rtcVrijeme = dohvatiTrenutnoVrijeme();
+  if (jeRtcIzlazniFailSafeAktivan()) {
+    return;
+  }
   if (!jeVrijemeSvjezeZaRtcTick(rtcTick)) {
     return;
   }
@@ -594,7 +597,7 @@ void upravljajPlocom() {
   static bool prethodniTihiRezimAktivan = false;
   static bool prethodniUPSModAktivan = false;
 
-  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (jeRtcIzlazniFailSafeAktivan() || !jeVrijemePotvrdjenoZaAutomatiku()) {
     EepromLayout::UnifiedMotionState stanje = UnifiedMotionStateStore::dohvatiIliMigriraj();
     if (stanje.plate_phase != FAZA_STABILNO) {
       stanje.plate_phase = FAZA_STABILNO;
@@ -711,7 +714,7 @@ int dohvatiPozicijuPloce() {
 }
 
 bool jePlocaUSinkronu() {
-  if (!jeVrijemePotvrdjenoZaAutomatiku()) {
+  if (jeRtcIzlazniFailSafeAktivan() || !jeVrijemePotvrdjenoZaAutomatiku()) {
     return false;
   }
 

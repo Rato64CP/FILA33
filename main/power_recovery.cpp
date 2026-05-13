@@ -1,9 +1,9 @@
 // power_recovery.cpp - Boot recovery, kontrolirano gasenje i watchdog integracija
 // Pouzdanost toranjskog sata 24/7 ostvaruje se ovako:
-// - EEPROM pamti stanje kroz rotirajuce wear-leveling slotove
+// - vanjski memorijski spremnik pamti stanje kroz rotirajuce wear-leveling slotove
 // - nakon gubitka napajanja sustav pokusava automatski recovery
 // - podrzano je kontrolirano gasenje uz vanjsku dojavu nestanka napajanja
-// - provjera valjanosti stanja i osnovne provjere zdravlja EEPROM-a
+// - provjera valjanosti stanja i osnovne provjere zdravlja memorijskog spremnika
 
 #include <Arduino.h>
 #include <avr/pgmspace.h>

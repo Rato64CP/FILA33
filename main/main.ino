@@ -119,6 +119,9 @@ void loop() {
   provjeriTipke();
   osvjeziPrekidacTisine();
   osvjeziUPSNadzor();
+  dohvatiTrenutnoVrijeme();
+  postaviGlobalnuBlokaduZvona(jeRtcIzlazniFailSafeAktivan());
+  postaviGlobalnuBlokaduOtkucavanja(jeRtcIzlazniFailSafeAktivan());
   postaviBlokaduOtkucavanja(!jeVrijemePotvrdjenoZaAutomatiku());
   obradiDaljinski433();
 

@@ -207,9 +207,14 @@ Mrtvacko koristi dvoznamenkasti `BCD` thumbwheel `00-99`:
 - ako se vrijednost promijeni tijekom aktivnog mrtvackog, nova vrijednost odmah postaje autoritet i restartira lokalno odbrojavanje
 
 ### BAT i tihi sati
-`BAT / tihi sati` iz postavki blokiraju samo redovno otkucavanje. Ne blokiraju:
+`BAT od/do` u postavkama oznacava raspon u kojem je redovno otkucavanje dopusteno. Izvan tog raspona firmware toranjskog sata blokira samo redovno otkucavanje. Ne blokiraju:
 - suncevu automatiku
 - cavao-zvonjenja s ploce
+
+Primjer:
+- `BAT od 6`, `BAT do 22` znaci da otkucavanje radi od `06:00` do `22:00`
+- izvan tog raspona sat i dalje vodi vrijeme, cita cavle ploce i moze zvoniti po suncevoj ili rucnoj logici, ali ne radi redovno otkucavanje
+- za nocni raspon tipa `22-6` prijelaz je namjerno blag, pa `22:00` jos moze otkucati, a tisina krece nakon toga
 
 Ako je jutarnje suncevo zvono odradeno, ono moze otvoriti otkucavanje i prije regularnog kraja `BAT` raspona.
 
@@ -374,6 +379,12 @@ Kad se mreza vrati, blokade se skidaju i kazaljke nastavljaju redovno automatsko
 ### LCD detalji glavnog prikaza
 Glavni LCD prikaz je takoder uskladen s novijim ponasanjem firmwarea:
 - oznaka izvora vremena prikazuje `---` umjesto starog `RTC`
+- oznake `NTP`, `MAN`, `ERR` i `---` nalaze se u poljima `11-13` prvog retka
+- zadnja dva polja prvog retka prikazuju temperaturu `DS3231` modula kao kratki dvoznamenkasti zapis
+- zvjezdica aktivnosti `*`, oznaka `R/N` i oznaka `W` za `WiFi` vise se ne prikazuju
+- dvotocke u vremenu trepere u ritmu `1/2 SQW` samo kad [main/zvonjenje.cpp](../main/zvonjenje.cpp), [main/otkucavanje.cpp](../main/otkucavanje.cpp), [main/kazaljke_sata.cpp](../main/kazaljke_sata.cpp) ili [main/okretna_ploca.cpp](../main/okretna_ploca.cpp) trenutno rade, ili kad `WiFi` nije spojen
+- ako je `WiFi` spojen i mehanika toranjskog sata miruje, dvotocke ostaju stalno upaljene
+- dok vrijeme nije potvrdeno, prvi red ostaje u sigurnom `ERR` prikazu i ne pokazuje neprovjereno `RTC` vrijeme kao da je ispravno
 - tijekom `UPS moda` bez mreze donji red umjesto datuma prikazuje `NEMA STRUJE!`
 - nazivi dana prikazuju se velikim slovima
 - ponedjeljak se skracuje na `PON.` kako bi datum uredno stao u `16x2`

@@ -448,8 +448,8 @@ static void otkrijI2CAdrese() {
         opis = " (LCD I2C)";
       } else if (adresa == 0x68) {
         opis = " (DS3231 RTC)";
-      } else if (adresa == 0x57) {
-        opis = " (24C32 EEPROM)";
+      } else if (adresa >= 0x50 && adresa <= 0x57) {
+        opis = " (24C32 / FM24W256 memorija)";
       }
 
       snprintf_P(log, sizeof(log), PSTR("I2C uredjaj na adresi: 0x%X%s"), adresa, opis);

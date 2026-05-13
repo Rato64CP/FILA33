@@ -15,6 +15,10 @@ void inicijalizirajWatchdog();
 void osvjeziWatchdog();
 void osvjeziWatchdogAkoJeAktivan();
 
+// Namjerno izaziva brzi watchdog reset za servisne kombinacije tipki
+// i druge kontrolirane restartove toranjskog sata.
+void zatraziResetWatchdogom();
+
 // Dohvati sirove MCU reset zastavice (MCUSR) očitane pri bootu.
 uint8_t dohvatiResetFlags();
 

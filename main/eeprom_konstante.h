@@ -1,7 +1,8 @@
 // eeprom_konstante.h - CONSOLIDATED EEPROM ADDRESS DEFINITIONS
 // SINGLE SOURCE OF TRUTH for all EEPROM address assignments
-// 24C32 external EEPROM (4096 bytes total)
-// Wear-leveling: broj slotova ovisi o segmentu kako bi se produzio vijek 24C32
+// FM24W256 FRAM na RTC plocici nudi veci fizicki kapacitet, ali toranjski sat
+// namjerno zadrzava postojeci kompatibilni raspored unutar prvih 4096 bajtova.
+// Tako recovery logika, slotovi i stare postavke ostaju nepromijenjeni.
 
 #ifndef EEPROM_KONSTANTE_H
 #define EEPROM_KONSTANTE_H
@@ -10,9 +11,11 @@
 
 namespace EepromLayout {
 
+constexpr int LOGICKI_KAPACITET_KOMPATIBILNOG_RASPOREDA = 4096;
+
 // ==================== HAND POSITION (K-MINUTA) ====================
 // Software position 0-719 for 12-hour cycle (0-720 minutes)
-// Stored in external EEPROM for power-loss recovery
+// Stored in external FRAM/EEPROM kompatibilnom prostoru za power-loss recovery
 
 constexpr int BAZA_KAZALJKE = 0;
 constexpr int SLOTOVI_KAZALJKE = 6;
@@ -159,7 +162,8 @@ constexpr uint8_t UNIFIED_STANJE_VERZIJA = 3;
 constexpr int BAZA_UNIFIED_STANJE =
   BAZA_BOOT_FLAGS + (SLOTOVI_BOOT_FLAGS * SLOT_SIZE_BOOT_FLAGS);
 // Testna revizija toranjskog sata koristi 24 slota kako bi zajednicko
-// stanje kazaljki i okretne ploce ravnomjernije trosilo 24C32 EEPROM.
+// stanje kazaljki i okretne ploce ravnomjernije rasporedilo zapise po
+// kompatibilnom memorijskom prostoru.
 constexpr int SLOTOVI_UNIFIED_STANJE = 24;
 constexpr int SLOT_SIZE_UNIFIED_STANJE = sizeof(UnifiedMotionState);
 
@@ -182,7 +186,7 @@ constexpr int SLOTOVI_DST_STATUS = 4;
 constexpr int SLOT_SIZE_DST_STATUS = sizeof(DSTStatus);
 
 // ==================== EEPROM DIJAGNOSTIKA ====================
-// Zasebna adresa za provjeru zdravlja 24C32 EEPROM-a toranjskog sata.
+// Zasebna adresa za provjeru zdravlja vanjskog FRAM/EEPROM spremnika toranjskog sata.
 // Namjerno je odvojena od recovery i wear-leveling slotova kako health-check
 // ne bi mogao prepisati stanje kazaljki, ploce ili backup nakon restarta.
 
@@ -213,7 +217,7 @@ constexpr int SLOT_SIZE_SUNCEVI_DOGADAJI = sizeof(SunceviDogadajiSpremnik);
 
 // ==================== VALIDATION MACROS ====================
 
-// Zadnji dio 24C32 rezerviran je za metapodatke wear-levelinga.
+// Zadnji dio kompatibilnog 4 KB rasporeda rezerviran je za metapodatke wear-levelinga.
 constexpr int BAZA_WEAR_LEVELING_META = 3968;
 
 // ==================== WATCHDOG SAFE MODE ====================
@@ -266,8 +270,9 @@ static_assert(
 );
 
 static_assert(
-  (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <= 4096,
-  "EEPROM layout exceeds 24C32 capacity (4096 bytes)"
+  (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <=
+      LOGICKI_KAPACITET_KOMPATIBILNOG_RASPOREDA,
+  "EEPROM/FRAM layout exceeds the kept 4096-byte compatibility window"
 );
 
 }  // namespace EepromLayout

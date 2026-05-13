@@ -258,6 +258,31 @@ static uint8_t sanitizirajMaskuBlagdanskihRazdoblja(uint8_t maska) {
   return maska & MASKA_BLAGDANSKIH_RAZDOBLJA;
 }
 
+static bool jeUnutarTihihSati(int sat, int minuta) {
+  sat = constrain(sat, 0, 23);
+  minuta = constrain(minuta, 0, 59);
+
+  if (postavke.tihiSatiOd == postavke.tihiSatiDo) {
+    return false;
+  }
+
+  const int minuteUDanu = sat * 60 + minuta;
+  const int tihiOdMinute = postavke.tihiSatiOd * 60;
+  const int tihiDoMinute = postavke.tihiSatiDo * 60;
+
+  // Puni sat na pocetku tihog raspona jos smije otkucati.
+  // Primjer: za 22-6, trenutak 22:00 je jos dozvoljen, a tisina krece nakon toga.
+  if (minuteUDanu == tihiOdMinute) {
+    return false;
+  }
+
+  if (tihiOdMinute < tihiDoMinute) {
+    return minuteUDanu >= tihiOdMinute && minuteUDanu < tihiDoMinute;
+  }
+
+  return minuteUDanu >= tihiOdMinute || minuteUDanu < tihiDoMinute;
+}
+
 static bool procitajUPSModIzMaskeRazdoblja(uint8_t maska) {
   return (maska & ZASTAVICA_UPS_MODA) != 0;
 }
@@ -1113,22 +1138,7 @@ bool jeDozvoljenoOtkucavanjeUSatu(int sat) {
 }
 
 bool jeBATPeriodAktivanZaSatneOtkucaje(int sat, int minuta) {
-  sat = constrain(sat, 0, 23);
-  minuta = constrain(minuta, 0, 59);
-
-  if (postavke.tihiSatiOd == postavke.tihiSatiDo) {
-    return true;
-  }
-
-  const int minuteUDanu = sat * 60 + minuta;
-  const int batOdMinute = postavke.tihiSatiDo * 60;
-  const int batDoMinute = postavke.tihiSatiOd * 60;
-
-  if (batOdMinute < batDoMinute) {
-    return minuteUDanu >= batOdMinute && minuteUDanu <= batDoMinute;
-  }
-
-  return minuteUDanu >= batOdMinute || minuteUDanu <= batDoMinute;
+  return !jeUnutarTihihSati(sat, minuta);
 }
 
 int dohvatiBATPeriodOdSata() {
@@ -1146,6 +1156,8 @@ void postaviKompaktnePostavkeOtkucavanja(int satOd,
                                          uint8_t modMrtvackog) {
   satOd = constrain(satOd, 0, 23);
   satDo = constrain(satDo, 0, 23);
+  const int tihiPocetak = satDo;
+  const int tihiZavrsetak = satOd;
   if (modOtkucavanja > 2) {
     modOtkucavanja = 2;
   }
@@ -1156,16 +1168,16 @@ void postaviKompaktnePostavkeOtkucavanja(int satOd,
     modMrtvackog = 1;
   }
 
-  if (postavke.tihiSatiOd == satOd &&
-      postavke.tihiSatiDo == satDo &&
+  if (postavke.tihiSatiOd == tihiPocetak &&
+      postavke.tihiSatiDo == tihiZavrsetak &&
       postavke.modOtkucavanja == modOtkucavanja &&
       postavke.modSlavljenja == modSlavljenja &&
       postavke.modMrtvackog == modMrtvackog) {
     return;
   }
 
-  postavke.tihiSatiOd = satOd;
-  postavke.tihiSatiDo = satDo;
+  postavke.tihiSatiOd = tihiPocetak;
+  postavke.tihiSatiDo = tihiZavrsetak;
   postavke.modOtkucavanja = modOtkucavanja;
   postavke.modSlavljenja = modSlavljenja;
   postavke.modMrtvackog = modMrtvackog;
@@ -1179,8 +1191,8 @@ void postaviKompaktnePostavkeOtkucavanja(int satOd,
   snprintf_P(log,
              sizeof(log),
              PSTR("Postavke otkucavanja: BAT %d-%d, OTK=%u, S=%u, M=%u"),
-             postavke.tihiSatiDo,
-             postavke.tihiSatiOd,
+             satOd,
+             satDo,
              static_cast<unsigned>(postavke.modOtkucavanja),
              static_cast<unsigned>(postavke.modSlavljenja),
              static_cast<unsigned>(postavke.modMrtvackog));

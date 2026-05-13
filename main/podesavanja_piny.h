@@ -40,7 +40,7 @@
 #define PIN_RTC_SQW                   2   // DS3231 SQW 1 Hz takt za precizno okidanje
 
 // ==================== I2C BUS ====================
-// I2C communication for RTC (DS3231) and external EEPROM (24C32)
+// I2C communication for RTC (DS3231) and vanjski FRAM/EEPROM spremnik
 // Arduino Mega I2C: SDA=20, SCL=21 (fixed pins)
 
 #define PIN_SDA                       20  // I2C SDA - serial data
@@ -116,21 +116,21 @@
 // Dvije BCD znamenke za trajanje mrtvackog zvona.
 // Pretpostavka: thumbwheel zatvara prema GND pa koristimo INPUT_PULLUP.
 
-#define PIN_MRTVACKO_TIMER_DESETICE_BIT0  A1  // BCD 1
+#define PIN_MRTVACKO_TIMER_DESETICE_BIT0  A0  // BCD 1
 #define PIN_MRTVACKO_TIMER_DESETICE_BIT1  A2  // BCD 2
 #define PIN_MRTVACKO_TIMER_DESETICE_BIT2  A3  // BCD 4
 #define PIN_MRTVACKO_TIMER_DESETICE_BIT3  A4  // BCD 8
-#define PIN_MRTVACKO_TIMER_JEDINICE_BIT0  A5  // BCD 1
-#define PIN_MRTVACKO_TIMER_JEDINICE_BIT1  A6  // BCD 2
-#define PIN_MRTVACKO_TIMER_JEDINICE_BIT2  A7  // BCD 4
-#define PIN_MRTVACKO_TIMER_JEDINICE_BIT3  A8  // BCD 8
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT0  A8  // BCD 1
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT1  A7  // BCD 2
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT2  A6  // BCD 4
+#define PIN_MRTVACKO_TIMER_JEDINICE_BIT3  A5  // BCD 8
 
 // ==================== SERIAL COMMUNICATION ====================
 // Arduino Mega provides 4 hardware serial ports (Serial, Serial1-3)
 
 // Serial0 (USB):  115200 baud - PC debugging/logging
 // Serial1:        aktivni RS485 transport toranjskog sata (Rx1=pin19, Tx1=pin18)
-// Serial3:        9600 baud   - ugradeni ESP8266 na Mega+WiFi R3 plocici (Rx3=pin15, Tx3=pin14)
+// Serial3:        9600 baud   - vanjski ESP32 mrezni most (Rx3=pin15, Tx3=pin14)
 
 // RS485 ostaje dodatni transportni sloj za toranjski sat. Postojeci relejni
 // izlazi ostaju aktivni, a RS485 se uvodi nerazorno za kasnije slanje naredbi.

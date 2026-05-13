@@ -1,6 +1,6 @@
 // lcd_display.cpp - Dinamicki 2-retni LCD prikaz toranjskog sata
-// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (---/NTP/MAN) + oznaka dana za cavle (R/N)
-// + zvjezdica aktivnosti i WiFi oznaka na zadnjim mjestima.
+// Redak 1: vrijeme (HH:MM:SS) + izvor vremena (---/NTP/MAN) + temperatura RTC-a.
+// Dvotocke trepere samo kad toranjski sat nesto radi ili kad WiFi nije spojen.
 // Redak 2: datum ili aktivnost podsustava toranjskog sata (zvona, cekici, recovery),
 // a po potrebi i kratki WiFi sazetak iz mreznog mosta.
 
@@ -32,8 +32,12 @@ static char line1_buffer[17];
 static char zadnje_ispisani_redak1[17];
 static unsigned long last_line1_refresh = 0;
 static uint32_t last_line1_rtc_tick = 0xFFFFFFFFUL;
+static bool lcd_temperatura_poznata = false;
+static int8_t lcd_temperatura_cijeli_c = 0;
+static unsigned long lcd_zadnje_ocitanje_temperature_ms = 0;
+static const unsigned long LCD_TEMPERATURA_INTERVAL_MS = 30000UL;
 
-static char wifi_status = ' ';
+static bool wifi_povezan = false;
 
 static char line2_buffer[17];
 static char zadnje_ispisani_redak2[17];
@@ -350,8 +354,45 @@ static bool jeSustavAktivanNaLCD() {
          jeMrtvackoUTijeku();
 }
 
-static char dohvatiOznakuDanaZaCavle(const DateTime& vrijeme) {
-  return (vrijeme.dayOfTheWeek() == 0) ? 'N' : 'R';
+static bool trebajuDvotockeTreperitiNaLCD() {
+  return jeSustavAktivanNaLCD() || !wifi_povezan;
+}
+
+static void osvjeziRtcTemperaturuZaLCD() {
+  const unsigned long sadaMs = millis();
+  if (lcd_zadnje_ocitanje_temperature_ms != 0 &&
+      (sadaMs - lcd_zadnje_ocitanje_temperature_ms) < LCD_TEMPERATURA_INTERVAL_MS) {
+    return;
+  }
+
+  float temperaturaC = 0.0f;
+  lcd_zadnje_ocitanje_temperature_ms = sadaMs;
+  if (!dohvatiRtcTemperaturu(temperaturaC)) {
+    return;
+  }
+
+  const float zaokruzenaTemperatura =
+      (temperaturaC >= 0.0f) ? (temperaturaC + 0.5f) : (temperaturaC - 0.5f);
+  int temperaturaInt = static_cast<int>(zaokruzenaTemperatura);
+  if (temperaturaInt > 99) {
+    temperaturaInt = 99;
+  } else if (temperaturaInt < -9) {
+    temperaturaInt = -9;
+  }
+
+  lcd_temperatura_cijeli_c = static_cast<int8_t>(temperaturaInt);
+  lcd_temperatura_poznata = true;
+}
+
+static void formatirajRtcTemperaturuZaLCD(char* odrediste) {
+  if (!lcd_temperatura_poznata) {
+    odrediste[0] = ' ';
+    odrediste[1] = ' ';
+    odrediste[2] = '\0';
+    return;
+  }
+
+  snprintf_P(odrediste, 3, PSTR("%2d"), lcd_temperatura_cijeli_c);
 }
 
 static bool jeLCDUNocnomRezimu(const DateTime& vrijeme) {
@@ -418,15 +459,26 @@ void inicijalizirajLCD() {
   lcd_zadnja_i2c_dostupnost = true;
   lcd_reinit_pokusaji_preostali = 0;
   lcd_zadnji_reinit_ms = 0;
+  lcd_temperatura_poznata = false;
+  lcd_temperatura_cijeli_c = 0;
+  lcd_zadnje_ocitanje_temperature_ms = 0;
   ocistiWireTimeoutZaLCD();
 }
 
 static void build_line1() {
   DateTime now = dohvatiTrenutnoVrijeme();
   char source_str[4];
+  char temperatura_str[3];
+  osvjeziRtcTemperaturuZaLCD();
+  formatirajRtcTemperaturuZaLCD(temperatura_str);
+
   if (!jeVrijemePotvrdjenoZaAutomatiku()) {
     strncpy(source_str, "ERR", sizeof(source_str) - 1);
     source_str[sizeof(source_str) - 1] = '\0';
+    snprintf_P(line1_buffer, sizeof(line1_buffer),
+               PSTR("--:--:--  %s %s"),
+               source_str,
+               temperatura_str);
   } else {
     strncpy(source_str, dohvatiOznakuIzvoraVremena(), sizeof(source_str) - 1);
     source_str[sizeof(source_str) - 1] = '\0';
@@ -434,18 +486,18 @@ static void build_line1() {
       strncpy(source_str, "---", sizeof(source_str) - 1);
       source_str[sizeof(source_str) - 1] = '\0';
     }
+
+    const bool dvotockeVidljive =
+        trebajuDvotockeTreperitiNaLCD() ? jeRtcSqwPrvaPolovicaSekunde() : true;
+    const char separator_sati_minute = dvotockeVidljive ? ':' : ' ';
+    const char separator_minute_sekunde = dvotockeVidljive ? ':' : ' ';
+
+    snprintf_P(line1_buffer, sizeof(line1_buffer),
+               PSTR("%02d%c%02d%c%02d  %s %s"),
+               now.hour(), separator_sati_minute, now.minute(), separator_minute_sekunde, now.second(),
+               source_str,
+               temperatura_str);
   }
-
-  const char oznaka_dana = dohvatiOznakuDanaZaCavle(now);
-  const char oznaka_aktivnosti = jeSustavAktivanNaLCD() ? '*' : ' ';
-
-  snprintf_P(line1_buffer, sizeof(line1_buffer),
-             PSTR("%02d:%02d:%02d %s %c%c%c"),
-             now.hour(), now.minute(), now.second(),
-             source_str,
-             oznaka_dana,
-             oznaka_aktivnosti,
-             wifi_status);
   line1_buffer[16] = '\0';
 }
 
@@ -780,8 +832,15 @@ void prikaziSat() {
 
   const unsigned long now_ms = millis();
   const uint32_t rtcTick = dohvatiRtcSekundniBrojac();
+  static bool zadnjeStanjeDvotocakaVidljivo = true;
+  static bool zadnjeTreptanjeDvotocakaAktivno = false;
 
   bool trebaOsvjezitiRedak1 = false;
+  const bool vrijemePotvrdjeno = jeVrijemePotvrdjenoZaAutomatiku();
+  const bool treptanjeDvotocakaAktivno =
+      vrijemePotvrdjeno ? trebajuDvotockeTreperitiNaLCD() : false;
+  const bool dvotockeVidljive =
+      (vrijemePotvrdjeno && treptanjeDvotocakaAktivno) ? jeRtcSqwPrvaPolovicaSekunde() : true;
   if (jeRtcSqwAktivan()) {
     if (rtcTick != last_line1_rtc_tick) {
       last_line1_rtc_tick = rtcTick;
@@ -794,7 +853,20 @@ void prikaziSat() {
     trebaOsvjezitiRedak1 = true;
   }
 
+  if (vrijemePotvrdjeno &&
+      treptanjeDvotocakaAktivno &&
+      dvotockeVidljive != zadnjeStanjeDvotocakaVidljivo) {
+    trebaOsvjezitiRedak1 = true;
+  }
+
+  if (treptanjeDvotocakaAktivno != zadnjeTreptanjeDvotocakaAktivno) {
+    trebaOsvjezitiRedak1 = true;
+  }
+
   if (trebaOsvjezitiRedak1) {
+    zadnjeStanjeDvotocakaVidljivo = dvotockeVidljive;
+    zadnjeTreptanjeDvotocakaAktivno = treptanjeDvotocakaAktivno;
+    last_line1_refresh = now_ms;
     build_line1();
     upisiRedakNaLCD(0, line1_buffer, zadnje_ispisani_redak1);
     osvjeziWatchdog();
@@ -893,9 +965,9 @@ void prikaziZakljucaniSustav() {
 }
 
 void postaviWiFiStatus(bool aktivan) {
-  wifi_status = aktivan ? 'W' : ' ';
-  // WiFi oznaka sada zivi na kraju prvog retka i mora se odmah osvjeziti,
-  // bez cekanja RTC ticka ili redovnog sekundnog ciklusa.
+  wifi_povezan = aktivan;
+  // Promjena WiFi stanja utjece na treperenje dvotocaka na prvom retku,
+  // pa prikaz mora reagirati odmah bez cekanja sljedece sekunde.
   last_line1_refresh = 0;
   last_line1_rtc_tick = 0xFFFFFFFFUL;
 }

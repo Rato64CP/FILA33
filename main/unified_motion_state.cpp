@@ -245,7 +245,7 @@ void spremiAkoPromjena(const EepromLayout::UnifiedMotionState& stanje) {
   // svih konfiguriranih slotova pri citanju. Checksum dodatno stiti
   // kazaljke i okretnu plocu od djelomicnog zapisa pri nestanku napajanja,
   // pa ovdje namjerno i dalje ne koristimo zajednicki wear-leveling meta-zapis.
-  // Time cuvamo 24C32 od pregrijavanja istog meta bloka bez promjene
+  // Time cuvamo kompatibilni memorijski raspored od nepotrebnog trosenja istog meta bloka bez promjene
   // recovery logike toranjskog sata.
   const int sljedeciSlot =
       (trenutniSlot >= 0) ? ((trenutniSlot + 1) % EepromLayout::SLOTOVI_UNIFIED_STANJE) : 0;
