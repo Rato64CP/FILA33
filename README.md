@@ -37,12 +37,12 @@
 ## 🔄 Serijska komunikacija
 
 - Mega koristi `Serial3` za vanjski `ESP32` kao jedini aktivni mrezni most
-- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za web skupine `SUSTAV`, `STAPICI`, `BAT` i `SUNCE`
+- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za web skupine `SUSTAV`, `STAPICI`, `BAT`, `SUNCE` i `BLAGDANI`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
 - `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
 - prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije prve sinkronizacije toranjskog sata
 - stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`
-- `ESP32` sada ima i zasebnu stranicu `/settings`, ali `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje svih web postavki
+- `ESP32` sada ima zasebne stranice `/settings` i `/blagdani`, ali `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje svih web postavki
 
 ## 🧩 Struktura Projekta
 
@@ -50,6 +50,7 @@
 - `esp_firmware/` - pomocni firmware za vanjski `ESP32`
 - `main/main.ino` - inicijalizacija i glavna petlja
 - `main/time_glob.*` - RTC, NTP, DST i prioriteti izvora vremena
+- `main/mise_automatika.*` - redovite dnevne/nedjeljne mise i posebne blagdanske mise
 - `main/esp_serial.*` - serijska komunikacija s ESP modulom
 - `main/kazaljke_sata.*` - logika kazaljki i korekcije
 - `main/okretna_ploca.*` - upravljanje polozajem, fazama i cavlima
@@ -75,7 +76,11 @@
 - setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`
 - nakon spremanja nove mreze `ESP32` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
 - servisni dashboard na `ESP` sada koristi glavne tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`, sunceve tipke `JUTRO`, `PODNE`, `VECER` i crveni toggle `TIHI MOD`
-- kroz `/settings` `ESP32` sada moze sigurno uredjivati `Sustav`, `Stapice`, `BAT` i `Sunce`, bez diranja vremena, datuma, kazaljki i okretne ploce
+- kroz `/settings` i `/blagdani` `ESP32` sada moze sigurno uredjivati `Sustav`, `Stapice`, `BAT`, `Sunce`, redovite mise i unaprijed zadane blagdanske mise, bez diranja vremena, datuma, kazaljki i okretne ploce
+- dnevna misa pokrece samo `MUSKO` zvono `30 min` prije upisanog vremena mise `HH:MM`
+- nedjeljna i blagdanska misa pokrecu nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije upisanog vremena mise `HH:MM`, bez dodatnog `slavljenja`
+- prazno polje vremena na webu znaci da su odgovarajuca redovita misa ili blagdan iskljuceni, bez obzira na stanje kvacice
+- sva misna zvonjenja startaju u `25.` sekundi minute, sinkronizirano s citanjem cavala u [main/okretna_ploca.cpp](main/okretna_ploca.cpp)
 
 ## 💾 EEPROM I Recovery
 

@@ -32,6 +32,58 @@ constexpr uint8_t ZASTAVICA_RAD_BEZ_KOCNICE_ZVONA = 0x40;
 constexpr uint8_t ZASTAVICA_UPS_MODA = 0x80;
 constexpr uint8_t SVI_SVETI_ZADANI_POCETAK_SAT = 15;
 constexpr uint8_t SVI_SVETI_ZADANI_ZAVRSETAK_SAT = 8;
+constexpr int8_t POMICNI_BLAGDAN_MIN_POMAK_OD_USKRSA = -120;
+constexpr int8_t POMICNI_BLAGDAN_MAX_POMAK_OD_USKRSA = 120;
+constexpr uint8_t ZADANA_MINUTA_BLAGDANSKE_MISE = 0;
+
+struct ZadaniNepomicniBlagdanInfo {
+  uint8_t mjesec;
+  uint8_t dan;
+};
+
+struct ZadaniPomicniBlagdanInfo {
+  int8_t pomakOdUskrsaDana;
+};
+
+struct NepomicniBlagdanRadno {
+  bool omogucen;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct PomicniBlagdanRadno {
+  bool omogucen;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+constexpr ZadaniNepomicniBlagdanInfo ZADANI_NEPOMICNI_BLAGDANI[BROJ_NEPOMICNIH_BLAGDANA] = {
+  {1, 1},   // Nova Godina
+  {1, 6},   // Bogojavljenje
+  {2, 2},   // Svjecnica
+  {2, 10},  // Alojzije Stepinac
+  {3, 19},  // Sveti Josip
+  {3, 25},  // Blagovijest
+  {6, 13},  // Sveti Ante
+  {6, 29},  // Sveti Petar
+  {8, 15},  // Velika Gospa
+  {11, 1},  // Svi Sveti
+  {11, 2},  // Dusni dan
+  {12, 24}, // Badnjak
+  {12, 25}, // Bozic
+  {12, 26}, // Sveti Stjepan
+  {12, 27}  // Sveti Ivan
+};
+
+constexpr ZadaniPomicniBlagdanInfo ZADANI_POMICNI_BLAGDANI[BROJ_POMICNIH_BLAGDANA] = {
+  {-46}, // Pepelnica
+  {-3},  // Veliki cetvrtak
+  {0},   // Uskrs
+  {1},   // Uskrsni ponedjeljak
+  {39},  // Uzasasce
+  {60},  // Tijelovo
+  {68}   // Srce Isusovo
+};
 
 struct RadnePostavke {
   int satOd;
@@ -71,6 +123,14 @@ struct RadnePostavke {
   bool nocnaRasvjetaOmogucena;
   uint8_t zvonaSuncevihDogadaja[SUNCEVI_DOGADAJ_BROJ];
   int16_t odgodeSuncevihDogadajaMin[SUNCEVI_DOGADAJ_BROJ];
+  NepomicniBlagdanRadno nepomicniBlagdani[BROJ_NEPOMICNIH_BLAGDANA];
+  PomicniBlagdanRadno pomicniBlagdani[BROJ_POMICNIH_BLAGDANA];
+  bool dnevnaMisaOmogucena;
+  uint8_t dnevnaSatMise;
+  uint8_t dnevnaMinutaMise;
+  bool nedjeljnaMisaOmogucena;
+  uint8_t nedjeljnaSatMise;
+  uint8_t nedjeljnaMinutaMise;
 };
 
 enum AktivnaMreznaSekcija {
@@ -140,6 +200,43 @@ static EepromLayout::SunceviDogadajiSpremnik napraviZadaneSunceveDogadaje() {
     0
   };
   return zadani;
+}
+
+static EepromLayout::BlagdaniSpremnik napraviZadaneBlagdane() {
+  EepromLayout::BlagdaniSpremnik zadani = {};
+  zadani.potpis = EepromLayout::BLAGDANI_POTPIS;
+  zadani.verzija = EepromLayout::BLAGDANI_VERZIJA;
+  zadani.reserved = 0;
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    zadani.nepomicni[i].omogucen = 0;
+    zadani.nepomicni[i].mjesec = ZADANI_NEPOMICNI_BLAGDANI[i].mjesec;
+    zadani.nepomicni[i].dan = ZADANI_NEPOMICNI_BLAGDANI[i].dan;
+    zadani.nepomicni[i].satMise = 0;
+    zadani.nepomicni[i].minutaMise = ZADANA_MINUTA_BLAGDANSKE_MISE;
+  }
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    zadani.pomicni[i].omogucen = 0;
+    zadani.pomicni[i].pomakOdUskrsaDana = ZADANI_POMICNI_BLAGDANI[i].pomakOdUskrsaDana;
+    zadani.pomicni[i].satMise = 0;
+    zadani.pomicni[i].minutaMise = ZADANA_MINUTA_BLAGDANSKE_MISE;
+  }
+  return zadani;
+}
+
+static EepromLayout::MiseSpremnik napraviZadaneMise() {
+  EepromLayout::MiseSpremnik zadane = {};
+  zadane.potpis = EepromLayout::MISE_POTPIS;
+  zadane.verzija = EepromLayout::MISE_VERZIJA;
+  zadane.reserved = 0;
+  zadane.dnevna.omogucena = 0;
+  zadane.dnevna.satMise = 10;
+  zadane.dnevna.minutaMise = 0;
+  zadane.dnevna.reserved = 0;
+  zadane.nedjeljna.omogucena = 0;
+  zadane.nedjeljna.satMise = 10;
+  zadane.nedjeljna.minutaMise = 0;
+  zadane.nedjeljna.reserved = 0;
+  return zadane;
 }
 
 static RadnePostavke postavke = {};
@@ -320,6 +417,97 @@ static uint8_t ograniceniSviSvetiZavrsetakSat(uint8_t sat) {
   return (sat >= 6 && sat <= 23) ? sat : SVI_SVETI_ZADANI_ZAVRSETAK_SAT;
 }
 
+static uint8_t brojDanaUMjesecuBezPrijestupneGodine(uint8_t mjesec) {
+  switch (mjesec) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return 29;
+    default:
+      return 31;
+  }
+}
+
+static uint8_t ograniceniSatBlagdanskeMise(uint8_t sat) {
+  return static_cast<uint8_t>(constrain(static_cast<int>(sat), 0, 23));
+}
+
+static uint8_t ogranicenaMinutaBlagdanskeMise(uint8_t minuta) {
+  return static_cast<uint8_t>(constrain(static_cast<int>(minuta), 0, 59));
+}
+
+static void sanitizirajRedovituMisuPostavku(bool& omogucena, uint8_t& satMise, uint8_t& minutaMise) {
+  if (!omogucena) {
+    satMise = 0;
+    minutaMise = 0;
+    return;
+  }
+
+  satMise = ograniceniSatBlagdanskeMise(satMise);
+  minutaMise = ogranicenaMinutaBlagdanskeMise(minutaMise);
+}
+
+static void postaviZadaniNepomicniBlagdan(uint8_t indeks, NepomicniBlagdanPostavka& blagdan) {
+  if (indeks >= BROJ_NEPOMICNIH_BLAGDANA) {
+    blagdan.omogucen = false;
+    blagdan.mjesec = 0;
+    blagdan.dan = 0;
+    blagdan.satMise = 0;
+    blagdan.minutaMise = 0;
+    return;
+  }
+
+  blagdan.mjesec = ZADANI_NEPOMICNI_BLAGDANI[indeks].mjesec;
+  blagdan.dan = ZADANI_NEPOMICNI_BLAGDANI[indeks].dan;
+}
+
+static void postaviZadaniPomicniBlagdan(uint8_t indeks, PomicniBlagdanPostavka& blagdan) {
+  if (indeks >= BROJ_POMICNIH_BLAGDANA) {
+    blagdan.omogucen = false;
+    blagdan.pomakOdUskrsaDana = 0;
+    blagdan.satMise = 0;
+    blagdan.minutaMise = 0;
+    return;
+  }
+
+  blagdan.pomakOdUskrsaDana = ZADANI_POMICNI_BLAGDANI[indeks].pomakOdUskrsaDana;
+}
+
+static void sanitizirajNepomicniBlagdan(uint8_t indeks, NepomicniBlagdanPostavka& blagdan) {
+  postaviZadaniNepomicniBlagdan(indeks, blagdan);
+  if (!blagdan.omogucen) {
+    blagdan.satMise = 0;
+    blagdan.minutaMise = 0;
+    return;
+  }
+
+  blagdan.satMise = ograniceniSatBlagdanskeMise(blagdan.satMise);
+  blagdan.minutaMise = ogranicenaMinutaBlagdanskeMise(blagdan.minutaMise);
+}
+
+static void sanitizirajPomicniBlagdan(uint8_t indeks, PomicniBlagdanPostavka& blagdan) {
+  postaviZadaniPomicniBlagdan(indeks, blagdan);
+  if (!blagdan.omogucen) {
+    blagdan.satMise = 0;
+    blagdan.minutaMise = 0;
+    return;
+  }
+
+  blagdan.satMise = ograniceniSatBlagdanskeMise(blagdan.satMise);
+  blagdan.minutaMise = ogranicenaMinutaBlagdanskeMise(blagdan.minutaMise);
+}
+
 static uint8_t sanitizirajOznakuCavla(uint8_t cavao, uint8_t brojMjestaZaCavle) {
   if (cavao > brojMjestaZaCavle) {
     return 0;
@@ -378,6 +566,31 @@ static uint16_t izracunajChecksumSuncevihDogadaja(
   for (size_t i = 0; i < sizeof(kopija); ++i) {
     suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
     suma = static_cast<uint16_t>(suma + podaci[i] + 0x27);
+  }
+  return suma;
+}
+
+static uint16_t izracunajChecksumBlagdana(const EepromLayout::BlagdaniSpremnik& ulaz) {
+  EepromLayout::BlagdaniSpremnik kopija = ulaz;
+  kopija.checksum = 0;
+
+  const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
+  uint16_t suma = 0;
+  for (size_t i = 0; i < sizeof(kopija); ++i) {
+    suma = static_cast<uint16_t>((suma << 1) | (suma >> 15));
+    suma = static_cast<uint16_t>(suma + podaci[i] + 0x19);
+  }
+  return suma;
+}
+
+static uint16_t izracunajChecksumMisa(const EepromLayout::MiseSpremnik& ulaz) {
+  EepromLayout::MiseSpremnik kopija = ulaz;
+  kopija.checksum = 0;
+
+  const uint8_t* podaci = reinterpret_cast<const uint8_t*>(&kopija);
+  uint16_t suma = 0;
+  for (size_t i = 0; i < sizeof(kopija); ++i) {
+    suma = static_cast<uint16_t>((suma + podaci[i]) & 0xFFFFU);
   }
   return suma;
 }
@@ -547,6 +760,12 @@ static void ocistiSegmenteNakonPromjeneLayouta() {
   uspjeh &= obrisiSegmentEeproma(
       EepromLayout::BAZA_SUNCEVI_DOGADAJI,
       EepromLayout::SLOTOVI_SUNCEVI_DOGADAJI * EepromLayout::SLOT_SIZE_SUNCEVI_DOGADAJI);
+  uspjeh &= obrisiSegmentEeproma(
+      EepromLayout::BAZA_BLAGDANI,
+      EepromLayout::SLOTOVI_BLAGDANI * EepromLayout::SLOT_SIZE_BLAGDANI);
+  uspjeh &= obrisiSegmentEeproma(
+      EepromLayout::BAZA_MISE,
+      EepromLayout::SLOTOVI_MISE * EepromLayout::SLOT_SIZE_MISE);
   uspjeh &= WearLeveling::obrisiSveMetapodatke();
 
   resetirajIzvorSinkronizacijeNaRTC();
@@ -967,6 +1186,12 @@ static void pripremiIntegritetSuncevihDogadaja(EepromLayout::SunceviDogadajiSpre
   spremnik.checksum = izracunajChecksumSuncevihDogadaja(spremnik);
 }
 
+static void pripremiIntegritetBlagdana(EepromLayout::BlagdaniSpremnik& spremnik) {
+  spremnik.potpis = EepromLayout::BLAGDANI_POTPIS;
+  spremnik.verzija = EepromLayout::BLAGDANI_VERZIJA;
+  spremnik.checksum = izracunajChecksumBlagdana(spremnik);
+}
+
 static void ucitajSunceveDogadajeIzSpremnika(const EepromLayout::SunceviDogadajiSpremnik& spremnik) {
   postavke.maskaSuncevihDogadaja = sanitizirajMaskuSuncevihDogadaja(spremnik.maskaDogadaja);
   postavke.nocnaRasvjetaOmogucena = spremnik.nocnaRasvjetaOmogucena;
@@ -996,6 +1221,324 @@ static void spremiSunceveDogadajeSpremnik(EepromLayout::SunceviDogadajiSpremnik&
                    ? F("Sunce: EEPROM zapis potvrden")
                    : F("Sunce: ERROR - spremanje ili provjera EEPROM zapisa nije uspjela"));
   ucitajSunceveDogadajeIzSpremnika(spremnik);
+}
+
+static bool jeValjanEEPROMZapisBlagdana(const EepromLayout::BlagdaniSpremnik& spremnik) {
+  return spremnik.potpis == EepromLayout::BLAGDANI_POTPIS &&
+         spremnik.verzija == EepromLayout::BLAGDANI_VERZIJA &&
+         spremnik.checksum == izracunajChecksumBlagdana(spremnik);
+}
+
+static bool sanitizirajBlagdaneSpremnik(EepromLayout::BlagdaniSpremnik& spremnik) {
+  bool trebaSpremiti = false;
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    NepomicniBlagdanPostavka blagdan = {
+      spremnik.nepomicni[i].omogucen != 0,
+      spremnik.nepomicni[i].mjesec,
+      spremnik.nepomicni[i].dan,
+      spremnik.nepomicni[i].satMise,
+      spremnik.nepomicni[i].minutaMise
+    };
+    const NepomicniBlagdanPostavka prije = blagdan;
+    sanitizirajNepomicniBlagdan(i, blagdan);
+
+    if (blagdan.omogucen != prije.omogucen ||
+        blagdan.mjesec != prije.mjesec ||
+        blagdan.dan != prije.dan ||
+        blagdan.satMise != prije.satMise ||
+        blagdan.minutaMise != prije.minutaMise ||
+        spremnik.nepomicni[i].omogucen > 1) {
+      spremnik.nepomicni[i].omogucen = blagdan.omogucen ? 1 : 0;
+      spremnik.nepomicni[i].mjesec = blagdan.mjesec;
+      spremnik.nepomicni[i].dan = blagdan.dan;
+      spremnik.nepomicni[i].satMise = blagdan.satMise;
+      spremnik.nepomicni[i].minutaMise = blagdan.minutaMise;
+      trebaSpremiti = true;
+    }
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    PomicniBlagdanPostavka blagdan = {
+      spremnik.pomicni[i].omogucen != 0,
+      spremnik.pomicni[i].pomakOdUskrsaDana,
+      spremnik.pomicni[i].satMise,
+      spremnik.pomicni[i].minutaMise
+    };
+    const PomicniBlagdanPostavka prije = blagdan;
+    sanitizirajPomicniBlagdan(i, blagdan);
+
+    if (blagdan.omogucen != prije.omogucen ||
+        blagdan.pomakOdUskrsaDana != prije.pomakOdUskrsaDana ||
+        blagdan.satMise != prije.satMise ||
+        blagdan.minutaMise != prije.minutaMise ||
+        spremnik.pomicni[i].omogucen > 1) {
+      spremnik.pomicni[i].omogucen = blagdan.omogucen ? 1 : 0;
+      spremnik.pomicni[i].pomakOdUskrsaDana = blagdan.pomakOdUskrsaDana;
+      spremnik.pomicni[i].satMise = blagdan.satMise;
+      spremnik.pomicni[i].minutaMise = blagdan.minutaMise;
+      trebaSpremiti = true;
+    }
+  }
+
+  if (spremnik.reserved != 0) {
+    spremnik.reserved = 0;
+    trebaSpremiti = true;
+  }
+
+  return trebaSpremiti;
+}
+
+static void ucitajBlagdaneIzSpremnika(const EepromLayout::BlagdaniSpremnik& spremnik) {
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    NepomicniBlagdanPostavka blagdan = {
+      spremnik.nepomicni[i].omogucen != 0,
+      spremnik.nepomicni[i].mjesec,
+      spremnik.nepomicni[i].dan,
+      spremnik.nepomicni[i].satMise,
+      spremnik.nepomicni[i].minutaMise
+    };
+    sanitizirajNepomicniBlagdan(i, blagdan);
+    postavke.nepomicniBlagdani[i].omogucen = blagdan.omogucen;
+    postavke.nepomicniBlagdani[i].satMise = blagdan.satMise;
+    postavke.nepomicniBlagdani[i].minutaMise = blagdan.minutaMise;
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    PomicniBlagdanPostavka blagdan = {
+      spremnik.pomicni[i].omogucen != 0,
+      spremnik.pomicni[i].pomakOdUskrsaDana,
+      spremnik.pomicni[i].satMise,
+      spremnik.pomicni[i].minutaMise
+    };
+    sanitizirajPomicniBlagdan(i, blagdan);
+    postavke.pomicniBlagdani[i].omogucen = blagdan.omogucen;
+    postavke.pomicniBlagdani[i].satMise = blagdan.satMise;
+    postavke.pomicniBlagdani[i].minutaMise = blagdan.minutaMise;
+  }
+}
+
+static void upisiBlagdaneUSpremnik(EepromLayout::BlagdaniSpremnik& spremnik) {
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    NepomicniBlagdanPostavka blagdan = {
+      postavke.nepomicniBlagdani[i].omogucen,
+      0,
+      0,
+      postavke.nepomicniBlagdani[i].satMise,
+      postavke.nepomicniBlagdani[i].minutaMise
+    };
+    sanitizirajNepomicniBlagdan(i, blagdan);
+    spremnik.nepomicni[i].omogucen = blagdan.omogucen ? 1 : 0;
+    spremnik.nepomicni[i].mjesec = blagdan.mjesec;
+    spremnik.nepomicni[i].dan = blagdan.dan;
+    spremnik.nepomicni[i].satMise = blagdan.satMise;
+    spremnik.nepomicni[i].minutaMise = blagdan.minutaMise;
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    PomicniBlagdanPostavka blagdan = {
+      postavke.pomicniBlagdani[i].omogucen,
+      0,
+      postavke.pomicniBlagdani[i].satMise,
+      postavke.pomicniBlagdani[i].minutaMise
+    };
+    sanitizirajPomicniBlagdan(i, blagdan);
+    spremnik.pomicni[i].omogucen = blagdan.omogucen ? 1 : 0;
+    spremnik.pomicni[i].pomakOdUskrsaDana = blagdan.pomakOdUskrsaDana;
+    spremnik.pomicni[i].satMise = blagdan.satMise;
+    spremnik.pomicni[i].minutaMise = blagdan.minutaMise;
+  }
+}
+
+static bool ucitajBlagdaneSkeniranjem(EepromLayout::BlagdaniSpremnik& spremnik) {
+  EepromLayout::BlagdaniSpremnik kandidat{};
+  if (!VanjskiEEPROM::procitaj(EepromLayout::BAZA_BLAGDANI, &kandidat, sizeof(kandidat))) {
+    return false;
+  }
+  if (!jeValjanEEPROMZapisBlagdana(kandidat)) {
+    return false;
+  }
+
+  spremnik = kandidat;
+  return true;
+}
+
+static void spremiBlagdaneSpremnik(EepromLayout::BlagdaniSpremnik& spremnik) {
+  sanitizirajBlagdaneSpremnik(spremnik);
+  pripremiIntegritetBlagdana(spremnik);
+  const bool zapisano =
+      VanjskiEEPROM::zapisi(EepromLayout::BAZA_BLAGDANI, &spremnik, sizeof(spremnik));
+  EepromLayout::BlagdaniSpremnik provjera{};
+  const bool procitano = zapisano &&
+                         VanjskiEEPROM::procitaj(EepromLayout::BAZA_BLAGDANI,
+                                                 &provjera,
+                                                 sizeof(provjera)) &&
+                         jeValjanEEPROMZapisBlagdana(provjera);
+  posaljiPCLog(procitano
+                   ? F("Blagdani: EEPROM zapis potvrden")
+                   : F("Blagdani: ERROR - spremanje ili provjera EEPROM zapisa nije uspjela"));
+  ucitajBlagdaneIzSpremnika(spremnik);
+}
+
+static void ucitajBlagdane() {
+  EepromLayout::BlagdaniSpremnik spremnik = napraviZadaneBlagdane();
+  bool ucitano = ucitajBlagdaneSkeniranjem(spremnik);
+  bool trebaSpremiti = false;
+
+  if (!ucitano) {
+    spremnik = napraviZadaneBlagdane();
+    trebaSpremiti = true;
+  }
+
+  if (sanitizirajBlagdaneSpremnik(spremnik)) {
+    trebaSpremiti = true;
+  }
+
+  ucitajBlagdaneIzSpremnika(spremnik);
+
+  if (trebaSpremiti) {
+    spremiBlagdaneSpremnik(spremnik);
+  }
+}
+
+static void pripremiIntegritetMisa(EepromLayout::MiseSpremnik& spremnik) {
+  spremnik.potpis = EepromLayout::MISE_POTPIS;
+  spremnik.verzija = EepromLayout::MISE_VERZIJA;
+  spremnik.checksum = izracunajChecksumMisa(spremnik);
+}
+
+static bool jeValjanEEPROMZapisMisa(const EepromLayout::MiseSpremnik& spremnik) {
+  return spremnik.potpis == EepromLayout::MISE_POTPIS &&
+         spremnik.verzija == EepromLayout::MISE_VERZIJA &&
+         spremnik.checksum == izracunajChecksumMisa(spremnik);
+}
+
+static bool sanitizirajMiseSpremnik(EepromLayout::MiseSpremnik& spremnik) {
+  bool trebaSpremiti = false;
+
+  bool dnevnaOmogucena = spremnik.dnevna.omogucena != 0;
+  uint8_t dnevnaSat = spremnik.dnevna.satMise;
+  uint8_t dnevnaMinuta = spremnik.dnevna.minutaMise;
+  sanitizirajRedovituMisuPostavku(dnevnaOmogucena, dnevnaSat, dnevnaMinuta);
+  if (spremnik.dnevna.omogucena > 1 ||
+      (spremnik.dnevna.omogucena != 0) != dnevnaOmogucena ||
+      spremnik.dnevna.satMise != dnevnaSat ||
+      spremnik.dnevna.minutaMise != dnevnaMinuta ||
+      spremnik.dnevna.reserved != 0) {
+    spremnik.dnevna.omogucena = dnevnaOmogucena ? 1 : 0;
+    spremnik.dnevna.satMise = dnevnaSat;
+    spremnik.dnevna.minutaMise = dnevnaMinuta;
+    spremnik.dnevna.reserved = 0;
+    trebaSpremiti = true;
+  }
+
+  bool nedjeljnaOmogucena = spremnik.nedjeljna.omogucena != 0;
+  uint8_t nedjeljnaSat = spremnik.nedjeljna.satMise;
+  uint8_t nedjeljnaMinuta = spremnik.nedjeljna.minutaMise;
+  sanitizirajRedovituMisuPostavku(nedjeljnaOmogucena, nedjeljnaSat, nedjeljnaMinuta);
+  if (spremnik.nedjeljna.omogucena > 1 ||
+      (spremnik.nedjeljna.omogucena != 0) != nedjeljnaOmogucena ||
+      spremnik.nedjeljna.satMise != nedjeljnaSat ||
+      spremnik.nedjeljna.minutaMise != nedjeljnaMinuta ||
+      spremnik.nedjeljna.reserved != 0) {
+    spremnik.nedjeljna.omogucena = nedjeljnaOmogucena ? 1 : 0;
+    spremnik.nedjeljna.satMise = nedjeljnaSat;
+    spremnik.nedjeljna.minutaMise = nedjeljnaMinuta;
+    spremnik.nedjeljna.reserved = 0;
+    trebaSpremiti = true;
+  }
+
+  if (spremnik.reserved != 0) {
+    spremnik.reserved = 0;
+    trebaSpremiti = true;
+  }
+
+  return trebaSpremiti;
+}
+
+static void ucitajMiseIzSpremnika(const EepromLayout::MiseSpremnik& spremnik) {
+  postavke.dnevnaMisaOmogucena = spremnik.dnevna.omogucena != 0;
+  postavke.dnevnaSatMise = spremnik.dnevna.satMise;
+  postavke.dnevnaMinutaMise = spremnik.dnevna.minutaMise;
+  sanitizirajRedovituMisuPostavku(
+      postavke.dnevnaMisaOmogucena, postavke.dnevnaSatMise, postavke.dnevnaMinutaMise);
+
+  postavke.nedjeljnaMisaOmogucena = spremnik.nedjeljna.omogucena != 0;
+  postavke.nedjeljnaSatMise = spremnik.nedjeljna.satMise;
+  postavke.nedjeljnaMinutaMise = spremnik.nedjeljna.minutaMise;
+  sanitizirajRedovituMisuPostavku(
+      postavke.nedjeljnaMisaOmogucena, postavke.nedjeljnaSatMise, postavke.nedjeljnaMinutaMise);
+}
+
+static void upisiMiseUSpremnik(EepromLayout::MiseSpremnik& spremnik) {
+  bool dnevnaOmogucena = postavke.dnevnaMisaOmogucena;
+  uint8_t dnevnaSat = postavke.dnevnaSatMise;
+  uint8_t dnevnaMinuta = postavke.dnevnaMinutaMise;
+  sanitizirajRedovituMisuPostavku(dnevnaOmogucena, dnevnaSat, dnevnaMinuta);
+  spremnik.dnevna.omogucena = dnevnaOmogucena ? 1 : 0;
+  spremnik.dnevna.satMise = dnevnaSat;
+  spremnik.dnevna.minutaMise = dnevnaMinuta;
+  spremnik.dnevna.reserved = 0;
+
+  bool nedjeljnaOmogucena = postavke.nedjeljnaMisaOmogucena;
+  uint8_t nedjeljnaSat = postavke.nedjeljnaSatMise;
+  uint8_t nedjeljnaMinuta = postavke.nedjeljnaMinutaMise;
+  sanitizirajRedovituMisuPostavku(nedjeljnaOmogucena, nedjeljnaSat, nedjeljnaMinuta);
+  spremnik.nedjeljna.omogucena = nedjeljnaOmogucena ? 1 : 0;
+  spremnik.nedjeljna.satMise = nedjeljnaSat;
+  spremnik.nedjeljna.minutaMise = nedjeljnaMinuta;
+  spremnik.nedjeljna.reserved = 0;
+}
+
+static bool ucitajMiseSkeniranjem(EepromLayout::MiseSpremnik& spremnik) {
+  EepromLayout::MiseSpremnik kandidat{};
+  if (!VanjskiEEPROM::procitaj(EepromLayout::BAZA_MISE, &kandidat, sizeof(kandidat))) {
+    return false;
+  }
+  if (!jeValjanEEPROMZapisMisa(kandidat)) {
+    return false;
+  }
+
+  spremnik = kandidat;
+  return true;
+}
+
+static void spremiMiseSpremnik(EepromLayout::MiseSpremnik& spremnik) {
+  sanitizirajMiseSpremnik(spremnik);
+  pripremiIntegritetMisa(spremnik);
+  const bool zapisano =
+      VanjskiEEPROM::zapisi(EepromLayout::BAZA_MISE, &spremnik, sizeof(spremnik));
+  EepromLayout::MiseSpremnik provjera{};
+  const bool procitano = zapisano &&
+                         VanjskiEEPROM::procitaj(EepromLayout::BAZA_MISE,
+                                                 &provjera,
+                                                 sizeof(provjera)) &&
+                         jeValjanEEPROMZapisMisa(provjera);
+  posaljiPCLog(procitano
+                   ? F("Mise: EEPROM zapis potvrden")
+                   : F("Mise: ERROR - spremanje ili provjera EEPROM zapisa nije uspjela"));
+  ucitajMiseIzSpremnika(spremnik);
+}
+
+static void ucitajMise() {
+  EepromLayout::MiseSpremnik spremnik = napraviZadaneMise();
+  bool ucitano = ucitajMiseSkeniranjem(spremnik);
+  bool trebaSpremiti = false;
+
+  if (!ucitano) {
+    spremnik = napraviZadaneMise();
+    trebaSpremiti = true;
+  }
+
+  if (sanitizirajMiseSpremnik(spremnik)) {
+    trebaSpremiti = true;
+  }
+
+  ucitajMiseIzSpremnika(spremnik);
+
+  if (trebaSpremiti) {
+    spremiMiseSpremnik(spremnik);
+  }
 }
 
 static bool ucitajSunceveDogadajeSkeniranjem(EepromLayout::SunceviDogadajiSpremnik& spremnik) {
@@ -1063,6 +1606,8 @@ void ucitajPostavke() {
   postavkeUcitane = true;
   invalidirajMrezniCache();
   ucitajSunceveDogadaje();
+  ucitajBlagdane();
+  ucitajMise();
 
   char log[256];
   snprintf_P(
@@ -1438,6 +1983,43 @@ uint8_t dohvatiSviSvetiZavrsetakSat() {
   return ograniceniSviSvetiZavrsetakSat(postavke.sviSvetiZavrsetakSat);
 }
 
+void dohvatiNepomicniBlagdan(uint8_t indeks, NepomicniBlagdanPostavka& izlaz) {
+  if (indeks >= BROJ_NEPOMICNIH_BLAGDANA) {
+    izlaz = {false, 0, 0, 0, 0};
+    return;
+  }
+
+  izlaz.omogucen = postavke.nepomicniBlagdani[indeks].omogucen;
+  izlaz.satMise = postavke.nepomicniBlagdani[indeks].satMise;
+  izlaz.minutaMise = postavke.nepomicniBlagdani[indeks].minutaMise;
+  sanitizirajNepomicniBlagdan(indeks, izlaz);
+}
+
+void dohvatiPomicniBlagdan(uint8_t indeks, PomicniBlagdanPostavka& izlaz) {
+  if (indeks >= BROJ_POMICNIH_BLAGDANA) {
+    izlaz = {false, 0, 0, 0};
+    return;
+  }
+
+  izlaz.omogucen = postavke.pomicniBlagdani[indeks].omogucen;
+  izlaz.satMise = postavke.pomicniBlagdani[indeks].satMise;
+  izlaz.minutaMise = postavke.pomicniBlagdani[indeks].minutaMise;
+  sanitizirajPomicniBlagdan(indeks, izlaz);
+}
+
+void dohvatiRedoviteMise(RedoviteMisePostavke& izlaz) {
+  izlaz.dnevnaOmogucena = postavke.dnevnaMisaOmogucena;
+  izlaz.dnevnaSatMise = postavke.dnevnaSatMise;
+  izlaz.dnevnaMinutaMise = postavke.dnevnaMinutaMise;
+  izlaz.nedjeljnaOmogucena = postavke.nedjeljnaMisaOmogucena;
+  izlaz.nedjeljnaSatMise = postavke.nedjeljnaSatMise;
+  izlaz.nedjeljnaMinutaMise = postavke.nedjeljnaMinutaMise;
+  sanitizirajRedovituMisuPostavku(
+      izlaz.dnevnaOmogucena, izlaz.dnevnaSatMise, izlaz.dnevnaMinutaMise);
+  sanitizirajRedovituMisuPostavku(
+      izlaz.nedjeljnaOmogucena, izlaz.nedjeljnaSatMise, izlaz.nedjeljnaMinutaMise);
+}
+
 void postaviWiFiOmogucen(bool omogucen) {
   if (postavke.wifiOmogucen == omogucen) {
     return;
@@ -1626,6 +2208,131 @@ void postaviSviSvetiPostavke(bool omoguceno, uint8_t pocetakSat, uint8_t zavrset
              omoguceno ? "ON" : "OFF",
              static_cast<unsigned>(noviPocetakSat),
              static_cast<unsigned>(noviZavrsetakSat));
+  posaljiPCLog(log);
+}
+
+void postaviBlagdanskeMise(const NepomicniBlagdanPostavka* nepomicni,
+                           uint8_t brojNepomicnih,
+                           const PomicniBlagdanPostavka* pomicni,
+                           uint8_t brojPomicnih) {
+  bool promjena = false;
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    NepomicniBlagdanPostavka novi = {false, 0, 0, 0, 0};
+    postaviZadaniNepomicniBlagdan(i, novi);
+    if (nepomicni != nullptr && i < brojNepomicnih) {
+      novi.omogucen = nepomicni[i].omogucen;
+      novi.satMise = nepomicni[i].satMise;
+      novi.minutaMise = nepomicni[i].minutaMise;
+    }
+    sanitizirajNepomicniBlagdan(i, novi);
+
+    if (postavke.nepomicniBlagdani[i].omogucen != novi.omogucen ||
+        postavke.nepomicniBlagdani[i].satMise != novi.satMise ||
+        postavke.nepomicniBlagdani[i].minutaMise != novi.minutaMise) {
+      postavke.nepomicniBlagdani[i].omogucen = novi.omogucen;
+      postavke.nepomicniBlagdani[i].satMise = novi.satMise;
+      postavke.nepomicniBlagdani[i].minutaMise = novi.minutaMise;
+      promjena = true;
+    }
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    PomicniBlagdanPostavka novi = {false, 0, 0, 0};
+    postaviZadaniPomicniBlagdan(i, novi);
+    if (pomicni != nullptr && i < brojPomicnih) {
+      novi.omogucen = pomicni[i].omogucen;
+      novi.satMise = pomicni[i].satMise;
+      novi.minutaMise = pomicni[i].minutaMise;
+    }
+    sanitizirajPomicniBlagdan(i, novi);
+
+    if (postavke.pomicniBlagdani[i].omogucen != novi.omogucen ||
+        postavke.pomicniBlagdani[i].satMise != novi.satMise ||
+        postavke.pomicniBlagdani[i].minutaMise != novi.minutaMise) {
+      postavke.pomicniBlagdani[i].omogucen = novi.omogucen;
+      postavke.pomicniBlagdani[i].satMise = novi.satMise;
+      postavke.pomicniBlagdani[i].minutaMise = novi.minutaMise;
+      promjena = true;
+    }
+  }
+
+  if (!promjena) {
+    return;
+  }
+
+  EepromLayout::BlagdaniSpremnik spremnik = napraviZadaneBlagdane();
+  if (!ucitajBlagdaneSkeniranjem(spremnik)) {
+    spremnik = napraviZadaneBlagdane();
+  }
+  upisiBlagdaneUSpremnik(spremnik);
+  spremiBlagdaneSpremnik(spremnik);
+
+  uint8_t brojAktivnihNepomicnih = 0;
+  uint8_t brojAktivnihPomicnih = 0;
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    if (postavke.nepomicniBlagdani[i].omogucen) {
+      ++brojAktivnihNepomicnih;
+    }
+  }
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    if (postavke.pomicniBlagdani[i].omogucen) {
+      ++brojAktivnihPomicnih;
+    }
+  }
+
+  char log[96];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Blagdani: spremljeni nepomicni=%u, pomicni=%u"),
+             static_cast<unsigned>(brojAktivnihNepomicnih),
+             static_cast<unsigned>(brojAktivnihPomicnih));
+  posaljiPCLog(log);
+}
+
+void postaviRedoviteMise(const RedoviteMisePostavke& postavkeMisa) {
+  bool dnevnaOmogucena = postavkeMisa.dnevnaOmogucena;
+  uint8_t dnevnaSat = postavkeMisa.dnevnaSatMise;
+  uint8_t dnevnaMinuta = postavkeMisa.dnevnaMinutaMise;
+  bool nedjeljnaOmogucena = postavkeMisa.nedjeljnaOmogucena;
+  uint8_t nedjeljnaSat = postavkeMisa.nedjeljnaSatMise;
+  uint8_t nedjeljnaMinuta = postavkeMisa.nedjeljnaMinutaMise;
+  sanitizirajRedovituMisuPostavku(dnevnaOmogucena, dnevnaSat, dnevnaMinuta);
+  sanitizirajRedovituMisuPostavku(nedjeljnaOmogucena, nedjeljnaSat, nedjeljnaMinuta);
+
+  if (postavke.dnevnaMisaOmogucena == dnevnaOmogucena &&
+      postavke.dnevnaSatMise == dnevnaSat &&
+      postavke.dnevnaMinutaMise == dnevnaMinuta &&
+      postavke.nedjeljnaMisaOmogucena == nedjeljnaOmogucena &&
+      postavke.nedjeljnaSatMise == nedjeljnaSat &&
+      postavke.nedjeljnaMinutaMise == nedjeljnaMinuta) {
+    return;
+  }
+
+  postavke.dnevnaMisaOmogucena = dnevnaOmogucena;
+  postavke.dnevnaSatMise = dnevnaSat;
+  postavke.dnevnaMinutaMise = dnevnaMinuta;
+  postavke.nedjeljnaMisaOmogucena = nedjeljnaOmogucena;
+  postavke.nedjeljnaSatMise = nedjeljnaSat;
+  postavke.nedjeljnaMinutaMise = nedjeljnaMinuta;
+
+  EepromLayout::MiseSpremnik spremnik = napraviZadaneMise();
+  if (!ucitajMiseSkeniranjem(spremnik)) {
+    spremnik = napraviZadaneMise();
+  }
+  upisiMiseUSpremnik(spremnik);
+  spremiMiseSpremnik(spremnik);
+
+  char log[112];
+  snprintf_P(log,
+             sizeof(log),
+             PSTR("Mise: dnevna=%s@%02u:%02u, nedjeljna=%s@%02u:%02u"),
+             postavke.dnevnaMisaOmogucena ? "ON" : "OFF",
+             static_cast<unsigned>(postavke.dnevnaSatMise),
+             static_cast<unsigned>(postavke.dnevnaMinutaMise),
+             postavke.nedjeljnaMisaOmogucena ? "ON" : "OFF",
+             static_cast<unsigned>(postavke.nedjeljnaSatMise),
+             static_cast<unsigned>(postavke.nedjeljnaMinutaMise));
   posaljiPCLog(log);
 }
 

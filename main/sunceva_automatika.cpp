@@ -284,6 +284,10 @@ static const char* nazivBlagdanskogRazdobljaTekst(uint8_t razdoblje) {
   return "Velike Gospe";
 }
 
+static const char* nazivTipaBlagdanaTekst(bool pomicniBlagdan) {
+  return pomicniBlagdan ? "pomicni blagdan" : "nepomicni blagdan";
+}
+
 static bool jeDatumURasponu(const DateTime& sada,
                             uint8_t mjesec,
                             uint8_t prviDan,

@@ -20,6 +20,7 @@
 #include "watchdog.h"
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
+#include "mise_automatika.h"
 #include "prekidac_tisine.h"
 #include "rs485_bridge.h"
 #include "ups_nadzor.h"
@@ -80,6 +81,7 @@ void setup() {
 
   inicijalizirajZvona();
   inicijalizirajSuncevuAutomatiku();
+  inicijalizirajMiseAutomatiku();
   inicijalizirajOtkucavanje();
   inicijalizirajPrekidacTisine();
   inicijalizirajMrtvackoThumbwheel();
@@ -128,6 +130,7 @@ void loop() {
   upravljajZvonom();
   upravljajOtkucavanjem();
   upravljajSuncevomAutomatikom();
+  upravljajMiseAutomatikom();
   osvjeziMrtvackoThumbwheel();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();

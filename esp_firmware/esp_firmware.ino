@@ -32,6 +32,8 @@ static const unsigned long WIFI_SETUP_DRZANJE_MS = 4000UL;
 static const unsigned long WIFI_SETUP_TRAJANJE_MS = 300000UL;
 static const unsigned long WIFI_SETUP_GASENJE_NAKON_SPREMANJA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_LED_BLINK_MS = 400UL;
+static const uint8_t BROJ_NEPOMICNIH_BLAGDANA = 15;
+static const uint8_t BROJ_POMICNIH_BLAGDANA = 7;
 
 // Parametri UDP NTP sloja za sinkronizaciju toranjskog sata.
 char ntpPosluzitelj[40] = "pool.ntp.org";
@@ -128,6 +130,35 @@ struct MegaSuncevePostavke {
   unsigned long serijskiBroj;
 };
 
+struct MegaNepomicniBlagdan {
+  bool omogucen;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct MegaPomicniBlagdan {
+  bool omogucen;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct MegaBlagdanskePostavke {
+  bool poznateMise;
+  bool poznatiNepomicni;
+  bool poznatiPomicni;
+  MegaNepomicniBlagdan nepomicni[BROJ_NEPOMICNIH_BLAGDANA];
+  MegaPomicniBlagdan pomicni[BROJ_POMICNIH_BLAGDANA];
+  bool dnevnaMisaOmogucena;
+  uint8_t dnevnaMisaSat;
+  uint8_t dnevnaMisaMinuta;
+  bool nedjeljnaMisaOmogucena;
+  uint8_t nedjeljnaMisaSat;
+  uint8_t nedjeljnaMisaMinuta;
+  unsigned long serijskiBrojMise;
+  unsigned long serijskiBrojNepomicni;
+  unsigned long serijskiBrojPomicni;
+};
+
 // Statusne zastavice za faze rada.
 bool ntpIkadPostavljen = false;
 bool ntpUdpPokrenut = false;
@@ -190,7 +221,6 @@ MegaSustavskePostavke megaSustavskePostavke = {
   0,
   0,
   0U,
-  0UL,
   0UL
 };
 MegaPostavkeStapica megaPostavkeStapica = {
@@ -199,7 +229,6 @@ MegaPostavkeStapica megaPostavkeStapica = {
   0U,
   0U,
   0U,
-  0UL,
   0UL
 };
 MegaBATPostavke megaBATPostavke = {
@@ -209,7 +238,6 @@ MegaBATPostavke megaBATPostavke = {
   0U,
   0U,
   0U,
-  0UL,
   0UL
 };
 MegaSuncevePostavke megaSuncevePostavke = {
@@ -223,9 +251,15 @@ MegaSuncevePostavke megaSuncevePostavke = {
   0U,
   0,
   false,
-  0UL,
   0UL
 };
+MegaBlagdanskePostavke megaBlagdanskePostavke = {};
+
+static bool suSveBlagdanskeSkupinePoznate() {
+  return megaBlagdanskePostavke.poznateMise &&
+         megaBlagdanskePostavke.poznatiNepomicni &&
+         megaBlagdanskePostavke.poznatiPomicni;
+}
 
 static const unsigned long OTA_RESTART_ODGODA_MS = 1200UL;
 
@@ -285,6 +319,13 @@ void posaljiJsonBATPostavki(bool prisilno = false);
 bool obradiSuncevePostavkeMegai(char* payload);
 bool osvjeziSuncevePostavkeMegai(bool prisilno);
 void posaljiJsonSuncevihPostavki(bool prisilno = false);
+bool obradiMisePostavkeMegai(char* payload);
+bool osvjeziMisePostavkeMegai(bool prisilno);
+bool obradiNepomicneBlagdaneMegai(char* payload);
+bool osvjeziNepomicneBlagdaneMegai(bool prisilno);
+bool obradiPomicneBlagdaneMegai(char* payload);
+bool osvjeziPomicneBlagdaneMegai(bool prisilno);
+void posaljiJsonBlagdanskihPostavki(bool prisilno = false);
 PostavkeOdgovorMegai posaljiSustavskePostavkeMegai(bool lcdPozadinskoOsvjetljenje,
                                                    bool logiranje,
                                                    bool rs485,
@@ -315,6 +356,19 @@ PostavkeOdgovorMegai posaljiSuncevePostavkeMegai(bool jutroOmoguceno,
                                                  int vecerOdgodaMin,
                                                  bool nocnaRasvjeta,
                                                  unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiMisePostavkeMegai(bool dnevnaOmogucena,
+                                              unsigned int dnevnaSat,
+                                              unsigned int dnevnaMinuta,
+                                              bool nedjeljnaOmogucena,
+                                              unsigned int nedjeljnaSat,
+                                              unsigned int nedjeljnaMinuta,
+                                              unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiNepomicneBlagdaneMegai(const MegaNepomicniBlagdan* postavke,
+                                                   uint8_t brojPostavki,
+                                                   unsigned long timeoutMs);
+PostavkeOdgovorMegai posaljiPomicneBlagdaneMegai(const MegaPomicniBlagdan* postavke,
+                                                 uint8_t brojPostavki,
+                                                 unsigned long timeoutMs);
 void ucitajWebAutentikaciju();
 bool osigurajWebAutorizaciju();
 void posaljiApiKomanduMegai(const char* naredba, const char* odgovor);
@@ -324,6 +378,7 @@ void obradiZakazaniRestartNakonOta();
 CmdOdgovorMegai posaljiKomanduMegaiIPricekaj(const char* naredba, unsigned long timeoutMs);
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs);
 bool jeDecimalniBrojString(const String& vrijednost);
+bool jePotpisaniDecimalniBrojString(const String& vrijednost);
 void pokreniSetupPristupnuTocku();
 void zaustaviSetupPristupnuTocku(bool zbogTimeouta);
 void odrzavajSetupTipku();
@@ -873,6 +928,18 @@ bool jeDecimalniBrojString(const String& vrijednost) {
   return true;
 }
 
+bool jePotpisaniDecimalniBrojString(const String& vrijednost) {
+  if (vrijednost.length() == 0) {
+    return false;
+  }
+
+  if (vrijednost.charAt(0) == '-') {
+    return vrijednost.length() > 1 && jeDecimalniBrojString(vrijednost.substring(1));
+  }
+
+  return jeDecimalniBrojString(vrijednost);
+}
+
 bool posaljiSetupWiFiMegai(const String &ssid, const String &lozinka, String &odgovor, unsigned long timeoutMs) {
   odgovorSetupWiFiPrimljen = false;
   setupWiFiNeuspjeh = false;
@@ -1196,6 +1263,200 @@ bool obradiSuncevePostavkeMegai(char* payload) {
   return true;
 }
 
+bool obradiMisePostavkeMegai(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  bool dnevnaMisaPoznata = false;
+  bool nedjeljnaMisaPoznata = false;
+  bool dnevnaOmogucena = false;
+  uint8_t dnevnaSat = 0;
+  uint8_t dnevnaMinuta = 0;
+  bool nedjeljnaOmogucena = false;
+  uint8_t nedjeljnaSat = 0;
+  uint8_t nedjeljnaMinuta = 0;
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiBuffer(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiBuffer(kljuc);
+    trimJednolinijskiBuffer(vrijednost);
+
+    unsigned int omogucena = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf(vrijednost, "%u,%u,%u", &omogucena, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    if (strcmp(kljuc, "rd") == 0) {
+      dnevnaOmogucena = omogucena != 0;
+      dnevnaSat = static_cast<uint8_t>(sat);
+      dnevnaMinuta = static_cast<uint8_t>(minuta);
+      dnevnaMisaPoznata = true;
+    } else if (strcmp(kljuc, "nd") == 0) {
+      nedjeljnaOmogucena = omogucena != 0;
+      nedjeljnaSat = static_cast<uint8_t>(sat);
+      nedjeljnaMinuta = static_cast<uint8_t>(minuta);
+      nedjeljnaMisaPoznata = true;
+    } else {
+      return false;
+    }
+  }
+
+  if (!dnevnaMisaPoznata || !nedjeljnaMisaPoznata) {
+    return false;
+  }
+
+  megaBlagdanskePostavke.dnevnaMisaOmogucena = dnevnaOmogucena;
+  megaBlagdanskePostavke.dnevnaMisaSat = dnevnaSat;
+  megaBlagdanskePostavke.dnevnaMisaMinuta = dnevnaMinuta;
+  megaBlagdanskePostavke.nedjeljnaMisaOmogucena = nedjeljnaOmogucena;
+  megaBlagdanskePostavke.nedjeljnaMisaSat = nedjeljnaSat;
+  megaBlagdanskePostavke.nedjeljnaMisaMinuta = nedjeljnaMinuta;
+  megaBlagdanskePostavke.poznateMise = true;
+  ++megaBlagdanskePostavke.serijskiBrojMise;
+  return true;
+}
+
+bool obradiNepomicneBlagdaneMegai(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  bool nepomicniPoznati[BROJ_NEPOMICNIH_BLAGDANA] = {};
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiBuffer(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiBuffer(kljuc);
+    trimJednolinijskiBuffer(vrijednost);
+
+    if (kljuc[0] != 'f' || kljuc[1] == '\0') {
+      return false;
+    }
+
+    char* krajIndeksa = nullptr;
+    const unsigned long indeksBroj = strtoul(kljuc + 1, &krajIndeksa, 10);
+    if (krajIndeksa == nullptr || *krajIndeksa != '\0') {
+      return false;
+    }
+
+    const uint8_t indeks = static_cast<uint8_t>(indeksBroj);
+    if (indeks >= BROJ_NEPOMICNIH_BLAGDANA) {
+      return false;
+    }
+
+    unsigned int omogucen = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf(vrijednost, "%u,%u,%u", &omogucen, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    megaBlagdanskePostavke.nepomicni[indeks].omogucen = omogucen != 0;
+    megaBlagdanskePostavke.nepomicni[indeks].satMise = static_cast<uint8_t>(sat);
+    megaBlagdanskePostavke.nepomicni[indeks].minutaMise = static_cast<uint8_t>(minuta);
+    nepomicniPoznati[indeks] = true;
+  }
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    if (!nepomicniPoznati[i]) {
+      return false;
+    }
+  }
+
+  megaBlagdanskePostavke.poznatiNepomicni = true;
+  ++megaBlagdanskePostavke.serijskiBrojNepomicni;
+  return true;
+}
+
+bool obradiPomicneBlagdaneMegai(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  bool pomicniPoznati[BROJ_POMICNIH_BLAGDANA] = {};
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiBuffer(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiBuffer(kljuc);
+    trimJednolinijskiBuffer(vrijednost);
+
+    if (kljuc[0] != 'p' || kljuc[1] == '\0') {
+      return false;
+    }
+
+    char* krajIndeksa = nullptr;
+    const unsigned long indeksBroj = strtoul(kljuc + 1, &krajIndeksa, 10);
+    if (krajIndeksa == nullptr || *krajIndeksa != '\0') {
+      return false;
+    }
+
+    const uint8_t indeks = static_cast<uint8_t>(indeksBroj);
+    if (indeks >= BROJ_POMICNIH_BLAGDANA) {
+      return false;
+    }
+
+    unsigned int omogucen = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf(vrijednost, "%u,%u,%u", &omogucen, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    megaBlagdanskePostavke.pomicni[indeks].omogucen = omogucen != 0;
+    megaBlagdanskePostavke.pomicni[indeks].satMise = static_cast<uint8_t>(sat);
+    megaBlagdanskePostavke.pomicni[indeks].minutaMise = static_cast<uint8_t>(minuta);
+    pomicniPoznati[indeks] = true;
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    if (!pomicniPoznati[i]) {
+      return false;
+    }
+  }
+
+  megaBlagdanskePostavke.poznatiPomicni = true;
+  ++megaBlagdanskePostavke.serijskiBrojPomicni;
+  return true;
+}
+
 bool osvjeziStatusMegai(bool prisilno) {
   const unsigned long sadaMs = millis();
   if (!prisilno) {
@@ -1309,6 +1570,72 @@ bool osvjeziSuncevePostavkeMegai(bool prisilno) {
   return megaSuncevePostavke.poznate;
 }
 
+bool osvjeziMisePostavkeMegai(bool prisilno) {
+  if (!prisilno && megaBlagdanskePostavke.poznateMise) {
+    return true;
+  }
+
+  const unsigned long pocetniBroj = megaBlagdanskePostavke.serijskiBrojMise;
+  Serial.println("SETREQ:MISE");
+
+  const unsigned long krajMs = millis() + STATUS_CEKANJE_NA_MEGU_MS;
+  while (static_cast<long>(millis() - krajMs) < 0) {
+    obradiSerijskiUlaz();
+    yield();
+    if (megaBlagdanskePostavke.serijskiBrojMise != pocetniBroj) {
+      return megaBlagdanskePostavke.poznateMise;
+    }
+    delay(10);
+  }
+
+  obradiSerijskiUlaz();
+  return megaBlagdanskePostavke.poznateMise;
+}
+
+bool osvjeziNepomicneBlagdaneMegai(bool prisilno) {
+  if (!prisilno && megaBlagdanskePostavke.poznatiNepomicni) {
+    return true;
+  }
+
+  const unsigned long pocetniBroj = megaBlagdanskePostavke.serijskiBrojNepomicni;
+  Serial.println("SETREQ:BLAGDANI_NEP");
+
+  const unsigned long krajMs = millis() + STATUS_CEKANJE_NA_MEGU_MS;
+  while (static_cast<long>(millis() - krajMs) < 0) {
+    obradiSerijskiUlaz();
+    yield();
+    if (megaBlagdanskePostavke.serijskiBrojNepomicni != pocetniBroj) {
+      return megaBlagdanskePostavke.poznatiNepomicni;
+    }
+    delay(10);
+  }
+
+  obradiSerijskiUlaz();
+  return megaBlagdanskePostavke.poznatiNepomicni;
+}
+
+bool osvjeziPomicneBlagdaneMegai(bool prisilno) {
+  if (!prisilno && megaBlagdanskePostavke.poznatiPomicni) {
+    return true;
+  }
+
+  const unsigned long pocetniBroj = megaBlagdanskePostavke.serijskiBrojPomicni;
+  Serial.println("SETREQ:BLAGDANI_POM");
+
+  const unsigned long krajMs = millis() + STATUS_CEKANJE_NA_MEGU_MS;
+  while (static_cast<long>(millis() - krajMs) < 0) {
+    obradiSerijskiUlaz();
+    yield();
+    if (megaBlagdanskePostavke.serijskiBrojPomicni != pocetniBroj) {
+      return megaBlagdanskePostavke.poznatiPomicni;
+    }
+    delay(10);
+  }
+
+  obradiSerijskiUlaz();
+  return megaBlagdanskePostavke.poznatiPomicni;
+}
+
 void obradiSerijskiUlaz() {
   static char prijemniBuffer[SERIJSKI_BUFFER_MAX + 1] = {0};
   static size_t prijemnaDuljina = 0;
@@ -1347,8 +1674,14 @@ void obradiSerijskiUlaz() {
           obradiBATPostavkeMegai(linija + 8);
         } else if (strncmp(linija, "SET:SUNCE|", 10) == 0) {
           obradiSuncevePostavkeMegai(linija + 10);
-        } else if (strncmp(linija, "STATUS:", 7) == 0) {
-          obradiStatusMegai(linija + 7);
+      } else if (strncmp(linija, "SET:MISE|", 9) == 0) {
+        obradiMisePostavkeMegai(linija + 9);
+      } else if (strncmp(linija, "SET:BLAGDANI_NEP|", 17) == 0) {
+        obradiNepomicneBlagdaneMegai(linija + 17);
+      } else if (strncmp(linija, "SET:BLAGDANI_POM|", 17) == 0) {
+        obradiPomicneBlagdaneMegai(linija + 17);
+      } else if (strncmp(linija, "STATUS:", 7) == 0) {
+        obradiStatusMegai(linija + 7);
         } else if (strcmp(linija, "WIFISTATUS?") == 0) {
           prijaviPromjenuWiFiStatusa();
           if (wifiOmogucen && WiFi.status() == WL_CONNECTED) {
@@ -2094,6 +2427,104 @@ PostavkeOdgovorMegai posaljiSustavskePostavkeMegai(bool lcdPozadinskoOsvjetljenj
   return POSTAVKE_ODGOVOR_TIMEOUT;
 }
 
+PostavkeOdgovorMegai posaljiMisePostavkeMegai(bool dnevnaOmogucena,
+                                              unsigned int dnevnaSat,
+                                              unsigned int dnevnaMinuta,
+                                              bool nedjeljnaOmogucena,
+                                              unsigned int nedjeljnaSat,
+                                              unsigned int nedjeljnaMinuta,
+                                              unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  String naredba = "SETCFG:MISE|rd=";
+  naredba += (dnevnaOmogucena ? "1" : "0");
+  naredba += ",";
+  naredba += String(dnevnaSat);
+  naredba += ",";
+  naredba += String(dnevnaMinuta);
+  naredba += "|nd=";
+  naredba += (nedjeljnaOmogucena ? "1" : "0");
+  naredba += ",";
+  naredba += String(nedjeljnaSat);
+  naredba += ",";
+  naredba += String(nedjeljnaMinuta);
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+PostavkeOdgovorMegai posaljiNepomicneBlagdaneMegai(const MegaNepomicniBlagdan* postavke,
+                                                   uint8_t brojPostavki,
+                                                   unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  String naredba = "SETCFG:BLAGDANI_NEP";
+  for (uint8_t i = 0; i < brojPostavki; ++i) {
+    naredba += "|f";
+    naredba += String(i);
+    naredba += "=";
+    naredba += (postavke[i].omogucen ? "1" : "0");
+    naredba += ",";
+    naredba += String(postavke[i].satMise);
+    naredba += ",";
+    naredba += String(postavke[i].minutaMise);
+  }
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
+PostavkeOdgovorMegai posaljiPomicneBlagdaneMegai(const MegaPomicniBlagdan* postavke,
+                                                 uint8_t brojPostavki,
+                                                 unsigned long timeoutMs) {
+  zadnjiOdgovorSustavskihPostavkiMega = POSTAVKE_ODGOVOR_CEKA;
+
+  String naredba = "SETCFG:BLAGDANI_POM";
+  for (uint8_t i = 0; i < brojPostavki; ++i) {
+    naredba += "|p";
+    naredba += String(i);
+    naredba += "=";
+    naredba += (postavke[i].omogucen ? "1" : "0");
+    naredba += ",";
+    naredba += String(postavke[i].satMise);
+    naredba += ",";
+    naredba += String(postavke[i].minutaMise);
+  }
+  Serial.println(naredba);
+
+  const unsigned long pocetakMs = millis();
+  while ((millis() - pocetakMs) < timeoutMs) {
+    obradiSerijskiUlaz();
+    if (zadnjiOdgovorSustavskihPostavkiMega != POSTAVKE_ODGOVOR_CEKA) {
+      return zadnjiOdgovorSustavskihPostavkiMega;
+    }
+    delay(1);
+    yield();
+  }
+
+  return POSTAVKE_ODGOVOR_TIMEOUT;
+}
+
 PostavkeOdgovorMegai posaljiPostavkeStapicaMegai(unsigned int trajanjeRadniMin,
                                                  unsigned int trajanjeNedjeljaMin,
                                                  unsigned int trajanjeSlavljenjaMin,
@@ -2263,6 +2694,57 @@ void posaljiJsonSuncevihPostavki(bool prisilno) {
              static_cast<unsigned>(megaSuncevePostavke.poznate ? megaSuncevePostavke.vecerZvono : 0U),
              static_cast<int>(megaSuncevePostavke.poznate ? megaSuncevePostavke.vecerOdgodaMin : 0),
              (megaSuncevePostavke.poznate && megaSuncevePostavke.nocnaRasvjeta) ? "true" : "false");
+  webPosluzitelj.send(200, "application/json", tijelo);
+}
+
+void posaljiJsonBlagdanskihPostavki(bool prisilno) {
+  osvjeziMisePostavkeMegai(prisilno);
+  osvjeziNepomicneBlagdaneMegai(prisilno);
+  osvjeziPomicneBlagdaneMegai(prisilno);
+
+  String tijelo = "{\"known\":";
+  tijelo += suSveBlagdanskeSkupinePoznate() ? "true" : "false";
+  tijelo += ",\"daily\":{\"enabled\":";
+  tijelo += (megaBlagdanskePostavke.poznateMise && megaBlagdanskePostavke.dnevnaMisaOmogucena) ? "true" : "false";
+  tijelo += ",\"hour\":";
+  tijelo += String(megaBlagdanskePostavke.poznateMise ? megaBlagdanskePostavke.dnevnaMisaSat : 0);
+  tijelo += ",\"minute\":";
+  tijelo += String(megaBlagdanskePostavke.poznateMise ? megaBlagdanskePostavke.dnevnaMisaMinuta : 0);
+  tijelo += "},\"sunday\":{\"enabled\":";
+  tijelo += (megaBlagdanskePostavke.poznateMise && megaBlagdanskePostavke.nedjeljnaMisaOmogucena) ? "true" : "false";
+  tijelo += ",\"hour\":";
+  tijelo += String(megaBlagdanskePostavke.poznateMise ? megaBlagdanskePostavke.nedjeljnaMisaSat : 0);
+  tijelo += ",\"minute\":";
+  tijelo += String(megaBlagdanskePostavke.poznateMise ? megaBlagdanskePostavke.nedjeljnaMisaMinuta : 0);
+  tijelo += "}";
+  tijelo += ",\"fixed\":[";
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    if (i > 0) {
+      tijelo += ",";
+    }
+    tijelo += "{\"enabled\":";
+    tijelo += (megaBlagdanskePostavke.poznatiNepomicni && megaBlagdanskePostavke.nepomicni[i].omogucen) ? "true" : "false";
+    tijelo += ",\"hour\":";
+    tijelo += String(megaBlagdanskePostavke.poznatiNepomicni ? megaBlagdanskePostavke.nepomicni[i].satMise : 0);
+    tijelo += ",\"minute\":";
+    tijelo += String(megaBlagdanskePostavke.poznatiNepomicni ? megaBlagdanskePostavke.nepomicni[i].minutaMise : 0);
+    tijelo += "}";
+  }
+  tijelo += "],\"movable\":[";
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    if (i > 0) {
+      tijelo += ",";
+    }
+    tijelo += "{\"enabled\":";
+    tijelo += (megaBlagdanskePostavke.poznatiPomicni && megaBlagdanskePostavke.pomicni[i].omogucen) ? "true" : "false";
+    tijelo += ",\"hour\":";
+    tijelo += String(megaBlagdanskePostavke.poznatiPomicni ? megaBlagdanskePostavke.pomicni[i].satMise : 0);
+    tijelo += ",\"minute\":";
+    tijelo += String(megaBlagdanskePostavke.poznatiPomicni ? megaBlagdanskePostavke.pomicni[i].minutaMise : 0);
+    tijelo += "}";
+  }
+  tijelo += "]}";
+
   webPosluzitelj.send(200, "application/json", tijelo);
 }
 
@@ -2507,6 +2989,7 @@ static const char WEB_POCETNA_STRANICA[] PROGMEM = R"HTML(
       <div id="odgovor" class="log-text">Dashboard je spreman.</div>
       <div class="service-links">
         <a class="service-link" href="/settings">POSTAVKE</a>
+        <a class="service-link" href="/blagdani">BLAGDANI</a>
       </div>
     </section>
   </div>
@@ -3164,6 +3647,7 @@ static const char WEB_POSTAVKE_STRANICA[] PROGMEM = R"HTML(
       </div>
 
       <div class="actions">
+        <a class="secondary" href="/blagdani">Blagdani</a>
         <button class="secondary" type="button" onclick="ucitajSvePostavke(true)">Osvjezi sve s Mege</button>
         <a class="secondary" href="/">Natrag na dashboard</a>
       </div>
@@ -3465,6 +3949,510 @@ static const char WEB_POSTAVKE_STRANICA[] PROGMEM = R"HTML(
 </html>
 )HTML";
 
+static const char WEB_BLAGDANI_STRANICA[] PROGMEM = R"HTML(
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZVONKO blagdani</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg:#e6edf5;
+      --panel:#f9fbff;
+      --line:#bcc7d6;
+      --text:#223246;
+      --muted:#5d6f84;
+      --accent:#3f78bd;
+      --accent-soft:#dcecff;
+      --shadow:0 10px 24px rgba(63,82,110,0.12);
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family: Arial, sans-serif;
+      background:linear-gradient(180deg,#dfe7f1,#f5f8fc);
+      color:var(--text);
+    }
+    .wrap {
+      max-width:980px;
+      margin:0 auto;
+      padding:18px 12px 28px;
+    }
+    .panel {
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    h1 {
+      margin:0 0 8px;
+      font-size:28px;
+      text-align:center;
+      letter-spacing:0.02em;
+    }
+    h2 {
+      margin:0 0 10px;
+      font-size:22px;
+    }
+    .intro {
+      margin:0 0 16px;
+      color:var(--muted);
+      line-height:1.5;
+      text-align:center;
+      font-size:14px;
+    }
+    .section {
+      margin-top:18px;
+      padding-top:18px;
+      border-top:1px solid var(--line);
+    }
+    .section-note {
+      margin:0 0 12px;
+      color:var(--muted);
+      line-height:1.45;
+      font-size:14px;
+    }
+    .rows {
+      display:grid;
+      gap:10px;
+    }
+    .row {
+      display:grid;
+      grid-template-columns:90px 100px 100px 120px 1fr;
+      gap:10px;
+      align-items:center;
+      padding:12px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#fff;
+    }
+    .row-pomicni {
+      grid-template-columns:90px 150px 120px 1fr;
+    }
+    .slot {
+      font-weight:700;
+      color:var(--muted);
+    }
+    .toggle-chip {
+      padding:10px 12px;
+      border-radius:12px;
+      border:2px solid #97a8bb;
+      background:#edf2f7;
+      color:#435567;
+      font-weight:700;
+      cursor:pointer;
+      min-width:84px;
+    }
+    .toggle-chip.active {
+      background:var(--accent-soft);
+      border-color:var(--accent);
+      color:#184a86;
+    }
+    input[type=number] {
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:12px 10px;
+      font:inherit;
+      color:var(--text);
+      background:#fff;
+    }
+    .hint {
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.35;
+    }
+    .actions {
+      margin-top:18px;
+      display:flex;
+      gap:12px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
+    .actions button,
+    .actions a {
+      display:inline-block;
+      padding:12px 18px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      font:inherit;
+      font-weight:700;
+      text-decoration:none;
+      cursor:pointer;
+    }
+    .primary {
+      background:var(--accent);
+      color:#fff;
+      border-color:var(--accent);
+    }
+    .secondary {
+      background:#f2f6fb;
+      color:var(--text);
+    }
+    .log {
+      margin-top:16px;
+      min-height:24px;
+      white-space:pre-wrap;
+      line-height:1.45;
+      font-size:14px;
+      color:var(--muted);
+    }
+    @media (max-width:840px) {
+      .row,
+      .row-pomicni {
+        grid-template-columns:1fr 1fr;
+      }
+      .hint {
+        grid-column:1 / -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Blagdani toranjskog sata</h1>
+<p class="intro">Na ovoj stranici toranjskog sata unose se redovite dnevne i nedjeljne mise, kao i posebni nepomični i pomični blagdani. Dnevna misa pokreće samo muško zvono 30 minuta prije mise, a nedjeljna i blagdanska misa pokreću oba zvona 2 sata i 1 sat prije mise, bez dodatnog slavljenja. Sva ta zvonjenja startaju u 25. sekundi minute, kao i čitanje čavala okretne ploče.</p>
+
+      <div class="section" style="margin-top:0;padding-top:0;border-top:none;">
+        <h2>Redovite mise</h2>
+        <p class="section-note">Dnevna misa vrijedi za dane koji nisu nedjelja. Nedjeljna misa vrijedi samo nedjeljom.</p>
+        <div class="rows">
+          <div class="row">
+            <div class="slot">Dnevna misa</div>
+            <button id="rd_en" type="button" class="toggle-chip" onclick="prebaciToggle('rd_en')">ISKLJUCEN</button>
+            <input id="rd_tm" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" data-time-field="1">
+<div class="hint">Muško zvono 30 min prije mise, uz radno trajanje zvonjenja iz postavki.</div>
+          </div>
+          <div class="row">
+            <div class="slot">Nedjeljna misa</div>
+            <button id="nd_en" type="button" class="toggle-chip" onclick="prebaciToggle('nd_en')">ISKLJUCEN</button>
+            <input id="nd_tm" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" data-time-field="1">
+<div class="hint">Oba zvona 2 h i 1 h prije mise, uz nedjeljno trajanje zvonjenja iz postavki.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Nepomični blagdani</h2>
+        <p class="section-note">Primjeri: 13.06. za svetog Antu ili 29.06. za svetog Petra. Sat mise je puni sat 0-23.</p>
+        <div id="fixedRows" class="rows"></div>
+      </div>
+
+      <div class="section">
+        <h2>Pomični blagdani vezani uz Uskrs</h2>
+        <p class="section-note">Pomak se upisuje u danima u odnosu na Uskrs. Negativan broj je prije Uskrsa, pozitivan nakon Uskrsa.</p>
+        <div id="movableRows" class="rows"></div>
+      </div>
+
+      <div class="actions">
+        <button class="primary" type="button" onclick="spremiBlagdane()">Spremi mise i blagdane</button>
+        <button class="secondary" type="button" onclick="ucitajBlagdane(true)">Osvjezi s Mege</button>
+        <a class="secondary" href="/settings">Natrag na postavke</a>
+        <a class="secondary" href="/">Pocetna</a>
+      </div>
+
+      <div id="holidayLog" class="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const brojNepomicnih = 15;
+    const brojPomicnih = 7;
+    const naziviNepomicnih = [
+      'Nova Godina',
+      'Bogojavljenje',
+      'Svjecnica',
+      'Alojzije Stepinac',
+      'Sveti Josip',
+      'Blagovijest',
+      'Sveti Ante',
+      'Sveti Petar',
+      'Velika Gospa',
+      'Svi Sveti',
+      'Dusni dan',
+      'Badnjak (polnocka)',
+      'Bozic',
+      'Sveti Stjepan',
+      'Sveti Ivan'
+    ];
+    const naziviPomicnih = [
+      'PEPELNICA',
+      'VELIKI CETVRTAK',
+      'USKRS',
+      'USKRSNI PONEDJELJAK',
+      'UZASASCE',
+      'TIJELOVO',
+      'SRCE ISUSOVO'
+    ];
+
+    function osvjeziTekstBlagdanskeStranice() {
+      const intro = document.querySelector('.intro');
+      if (intro) {
+        intro.textContent = 'Na ovoj stranici toranjskog sata unose se redovite dnevne i nedjeljne mise te ukljucenje i vrijeme vec zadanih blagdana. Dnevna misa pokrece samo musko zvono 30 minuta prije mise, a nedjeljna i blagdanska misa pokrecu oba zvona 2 sata i 1 sat prije mise, bez dodatnog slavljenja. Sva ta zvonjenja startaju u 25. sekundi minute, kao i citanje cavala okretne ploce.';
+      }
+
+      const sectionTitles = document.querySelectorAll('.section h2');
+      if (sectionTitles.length >= 3) {
+        sectionTitles[1].textContent = 'Nepomicni blagdani';
+        sectionTitles[2].textContent = 'Pomicni blagdani vezani uz Uskrs';
+      }
+
+      const sectionNotes = document.querySelectorAll('.section .section-note');
+      if (sectionNotes.length >= 3) {
+        sectionNotes[1].textContent = 'Datumi su vec zadani u kodu toranjskog sata. Ovdje se za svaki blagdan uredjuje samo ukljucenje i vrijeme mise u formatu HH:MM.';
+        sectionNotes[2].textContent = 'Pomicni blagdani su vec vezani uz Uskrs u kodu toranjskog sata. Ovdje se za svaki blagdan uredjuje samo ukljucenje i vrijeme mise u formatu HH:MM.';
+      }
+    }
+
+    function postaviLog(poruka) {
+      const log = document.getElementById('holidayLog');
+      if (log) {
+        log.textContent = poruka;
+      }
+    }
+
+    function redNepomicni(indeks) {
+      return `
+        <div class="row">
+          <div class="slot">${naziviNepomicnih[indeks] || ('Blagdan ' + (indeks + 1))}</div>
+          <button id="f${indeks}_en" type="button" class="toggle-chip" onclick="prebaciToggle('f${indeks}_en')">ISKLJUCEN</button>
+          <input id="f${indeks}_tm" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" data-time-field="1">
+          <div class="hint">Vrijeme mise HH:MM</div>
+        </div>`;
+    }
+
+    function redPomicni(indeks) {
+      return `
+        <div class="row row-pomicni">
+          <div class="slot">${naziviPomicnih[indeks] || ('Pomicni ' + (indeks + 1))}</div>
+          <button id="p${indeks}_en" type="button" class="toggle-chip" onclick="prebaciToggle('p${indeks}_en')">ISKLJUCEN</button>
+          <input id="p${indeks}_tm" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" data-time-field="1">
+          <div class="hint">Vrijeme mise HH:MM</div>
+        </div>`;
+    }
+
+    function iscrtajRetke() {
+      const fixed = document.getElementById('fixedRows');
+      const movable = document.getElementById('movableRows');
+      let fixedHtml = '';
+      let movableHtml = '';
+      for (let i = 0; i < brojNepomicnih; i += 1) {
+        fixedHtml += redNepomicni(i);
+      }
+      for (let i = 0; i < brojPomicnih; i += 1) {
+        movableHtml += redPomicni(i);
+      }
+      fixed.innerHTML = fixedHtml;
+      movable.innerHTML = movableHtml;
+      inicijalizirajPoljaVremena();
+    }
+
+    function postaviToggle(id, aktivno) {
+      const tipka = document.getElementById(id);
+      if (!tipka) {
+        return;
+      }
+      tipka.dataset.active = aktivno ? '1' : '0';
+      tipka.textContent = aktivno ? 'UKLJUCEN' : 'ISKLJUCEN';
+      tipka.classList.toggle('active', aktivno);
+    }
+
+    function prebaciToggle(id) {
+      const tipka = document.getElementById(id);
+      const aktivno = tipka && tipka.dataset.active === '1';
+      postaviToggle(id, !aktivno);
+    }
+
+    function brojIzPolja(id, min, max) {
+      const polje = document.getElementById(id);
+      if (!polje) {
+        throw new Error('Polje ' + id + ' nije pronadjeno.');
+      }
+      const vrijednost = String(polje.value || '').trim();
+      if (vrijednost.length === 0) {
+        throw new Error('Polje ' + id + ' je prazno.');
+      }
+      const broj = Number(vrijednost);
+      if (!Number.isInteger(broj) || broj < min || broj > max) {
+        throw new Error('Polje ' + id + ' mora biti u rasponu ' + min + '-' + max + '.');
+      }
+      return broj;
+    }
+
+    function normalizirajUnosVremena(vrijednost) {
+      const znamenke = String(vrijednost || '').replace(/\D/g, '').slice(0, 4);
+      if (znamenke.length <= 2) {
+        return znamenke;
+      }
+      return znamenke.slice(0, 2) + ':' + znamenke.slice(2);
+    }
+
+    function obradiUnosVremenaDogadaj(event) {
+      const polje = event && event.target;
+      if (!polje) {
+        return;
+      }
+      const prije = String(polje.value || '');
+      const poslije = normalizirajUnosVremena(prije);
+      if (prije !== poslije) {
+        polje.value = poslije;
+      }
+    }
+
+    function inicijalizirajPoljaVremena() {
+      document.querySelectorAll('input[data-time-field="1"]').forEach((polje) => {
+        if (polje.dataset.timeInit === '1') {
+          return;
+        }
+        polje.dataset.timeInit = '1';
+        polje.addEventListener('input', obradiUnosVremenaDogadaj);
+        polje.addEventListener('blur', obradiUnosVremenaDogadaj);
+      });
+    }
+
+    function procitajVrijeme(id) {
+      const polje = document.getElementById(id);
+      if (!polje) {
+        throw new Error('Polje ' + id + ' nije pronadjeno.');
+      }
+      const vrijednost = normalizirajUnosVremena(String(polje.value || '').trim());
+      polje.value = vrijednost;
+      if (vrijednost.length === 0) {
+        return null;
+      }
+      if (!/^\d{1,2}:\d{2}$/.test(vrijednost)) {
+        throw new Error('Polje ' + id + ' mora biti u formatu HH:MM.');
+      }
+      const [satTekst, minutaTekst] = vrijednost.split(':');
+      const sat = Number(satTekst);
+      const minuta = Number(minutaTekst);
+      if (!Number.isInteger(sat) || !Number.isInteger(minuta) || sat < 0 || sat > 23 || minuta < 0 || minuta > 59) {
+        throw new Error('Polje ' + id + ' mora biti valjano vrijeme HH:MM.');
+      }
+      return { sat, minuta };
+    }
+
+    function formatVrijeme(sat, minuta, zadano = '10:00') {
+      if (!Number.isInteger(sat) || sat < 0 || sat > 23 || !Number.isInteger(minuta) || minuta < 0 || minuta > 59) {
+        return zadano;
+      }
+      return String(sat).padStart(2, '0') + ':' + String(minuta).padStart(2, '0');
+    }
+
+    function ucitajRedoviteMiseUPayload(params) {
+      const dnevna = procitajVrijeme('rd_tm');
+      const dnevnaAktivna = !!dnevna && document.getElementById('rd_en').dataset.active === '1';
+      params.append('rd_en', dnevnaAktivna ? '1' : '0');
+      params.append('rd_tm', dnevna ? formatVrijeme(dnevna.sat, dnevna.minuta) : '');
+
+      const nedjeljna = procitajVrijeme('nd_tm');
+      const nedjeljnaAktivna = !!nedjeljna && document.getElementById('nd_en').dataset.active === '1';
+      params.append('nd_en', nedjeljnaAktivna ? '1' : '0');
+      params.append('nd_tm', nedjeljna ? formatVrijeme(nedjeljna.sat, nedjeljna.minuta) : '');
+    }
+
+    function ucitajNepomicneUPayload(params) {
+      for (let i = 0; i < brojNepomicnih; i += 1) {
+        const vrijeme = procitajVrijeme('f' + i + '_tm');
+        const aktivno = !!vrijeme && document.getElementById('f' + i + '_en').dataset.active === '1';
+        params.append('f' + i + '_en', aktivno ? '1' : '0');
+        params.append('f' + i + '_tm', vrijeme ? formatVrijeme(vrijeme.sat, vrijeme.minuta) : '');
+      }
+    }
+
+    function ucitajPomicneUPayload(params) {
+      for (let i = 0; i < brojPomicnih; i += 1) {
+        const vrijeme = procitajVrijeme('p' + i + '_tm');
+        const aktivno = !!vrijeme && document.getElementById('p' + i + '_en').dataset.active === '1';
+        params.append('p' + i + '_en', aktivno ? '1' : '0');
+        params.append('p' + i + '_tm', vrijeme ? formatVrijeme(vrijeme.sat, vrijeme.minuta) : '');
+      }
+    }
+
+    function popuniBlagdane(podaci) {
+      const dnevna = podaci.daily || {};
+      postaviToggle('rd_en', !!dnevna.enabled);
+      document.getElementById('rd_tm').value =
+        dnevna.enabled ? formatVrijeme(dnevna.hour, dnevna.minute, '19:00') : '';
+
+      const nedjeljna = podaci.sunday || {};
+      postaviToggle('nd_en', !!nedjeljna.enabled);
+      document.getElementById('nd_tm').value =
+        nedjeljna.enabled ? formatVrijeme(nedjeljna.hour, nedjeljna.minute, '10:00') : '';
+
+      for (let i = 0; i < brojNepomicnih; i += 1) {
+        const red = (podaci.fixed && podaci.fixed[i]) || {};
+        postaviToggle('f' + i + '_en', !!red.enabled);
+        document.getElementById('f' + i + '_tm').value =
+          red.enabled ? formatVrijeme(red.hour, red.minute) : '';
+      }
+      for (let i = 0; i < brojPomicnih; i += 1) {
+        const red = (podaci.movable && podaci.movable[i]) || {};
+        postaviToggle('p' + i + '_en', !!red.enabled);
+        document.getElementById('p' + i + '_tm').value =
+          red.enabled ? formatVrijeme(red.hour, red.minute) : '';
+      }
+    }
+
+    async function ucitajBlagdane(prisilno = false) {
+      postaviLog('Ucitavam mise i blagdanske postavke s Mege...');
+      try {
+        const odgovor = await fetch('/api/settings/blagdani' + (prisilno ? '?force=1' : ''), { cache: 'no-store' });
+        if (!odgovor.ok) {
+          throw new Error('HTTP ' + odgovor.status);
+        }
+        const podaci = await odgovor.json();
+        if (!podaci.known) {
+          postaviLog('Mega jos nije vratila misne i blagdanske postavke. Pokusaj ponovno za trenutak.');
+          return;
+        }
+        popuniBlagdane(podaci);
+        postaviLog('Misne i blagdanske postavke ucitane s Mege.');
+      } catch (greska) {
+        postaviLog('Ne mogu ucitati misne i blagdanske postavke: ' + greska.message);
+      }
+    }
+
+    async function spremiBlagdane() {
+      try {
+        const params = new URLSearchParams();
+        ucitajRedoviteMiseUPayload(params);
+        ucitajNepomicneUPayload(params);
+        ucitajPomicneUPayload(params);
+
+        postaviLog('Spremam misne i blagdanske postavke na Megu...');
+        const odgovor = await fetch('/api/settings/blagdani', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+          },
+          body: params.toString()
+        });
+
+        const tekst = await odgovor.text();
+        if (!odgovor.ok) {
+          throw new Error(tekst || ('HTTP ' + odgovor.status));
+        }
+
+        postaviLog(tekst);
+        await ucitajBlagdane(true);
+      } catch (greska) {
+        postaviLog('Misne i blagdanske postavke nisu spremljene: ' + greska.message);
+      }
+    }
+
+    osvjeziTekstBlagdanskeStranice();
+    iscrtajRetke();
+    ucitajBlagdane(true);
+  </script>
+</body>
+</html>
+)HTML";
+
 static const char WEB_SETUP_STRANICA[] PROGMEM = R"HTML(
 <!doctype html>
 <html lang="hr">
@@ -3702,6 +4690,18 @@ void konfigurirajWebPosluzitelj() {
       return;
     }
     posaljiHtmlStranicuIzProgMema(WEB_POSTAVKE_STRANICA);
+  });
+
+  Serial.println("WEB: Registriram /blagdani rutu");
+  webPosluzitelj.on("/blagdani", HTTP_GET, []() {
+    if (setupApAktivan) {
+      posaljiHtmlStranicuIzProgMema(WEB_SETUP_STRANICA);
+      return;
+    }
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    posaljiHtmlStranicuIzProgMema(WEB_BLAGDANI_STRANICA);
   });
 
   Serial.println("WEB: Registriram /setup rutu");
@@ -4094,6 +5094,190 @@ void konfigurirajWebPosluzitelj() {
     }
 
     webPosluzitelj.send(504, "text/plain", "Mega nije potvrdila spremanje suncevih postavki.");
+  });
+
+  Serial.println("WEB: Registriram /api/settings/blagdani rutu");
+  webPosluzitelj.on("/api/settings/blagdani", HTTP_GET, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+    const bool prisilno =
+        webPosluzitelj.hasArg("force") &&
+        webPosluzitelj.arg("force") == "1";
+    posaljiJsonBlagdanskihPostavki(prisilno);
+  });
+  webPosluzitelj.on("/api/settings/blagdani", HTTP_POST, []() {
+    if (!osigurajWebAutorizaciju()) {
+      return;
+    }
+
+    auto procitajVrijemeHHMM = [](const String& ulaz, uint8_t& sat, uint8_t& minuta, bool& prazno) -> bool {
+      const String ocisceno = ocistiJednolinijskiTekst(ulaz, 8);
+      prazno = (ocisceno.length() == 0);
+      if (prazno) {
+        sat = 0;
+        minuta = 0;
+        return true;
+      }
+
+      const int pozicijaDvotocke = ocisceno.indexOf(':');
+      if (pozicijaDvotocke <= 0 || pozicijaDvotocke >= (ocisceno.length() - 1)) {
+        return false;
+      }
+
+      const String satTekst = ocisceno.substring(0, pozicijaDvotocke);
+      const String minutaTekst = ocisceno.substring(pozicijaDvotocke + 1);
+      if (satTekst.length() > 2 || minutaTekst.length() != 2) {
+        return false;
+      }
+      if (!jeDecimalniBrojString(satTekst) || !jeDecimalniBrojString(minutaTekst)) {
+        return false;
+      }
+
+      const long satVrijednost = satTekst.toInt();
+      const long minutaVrijednost = minutaTekst.toInt();
+      if (satVrijednost < 0L || satVrijednost > 23L ||
+          minutaVrijednost < 0L || minutaVrijednost > 59L) {
+        return false;
+      }
+
+      sat = static_cast<uint8_t>(satVrijednost);
+      minuta = static_cast<uint8_t>(minutaVrijednost);
+      return true;
+    };
+
+    MegaBlagdanskePostavke novePostavke = {};
+    const String rdEnArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("rd_en"), 1);
+    const String rdTmArg = webPosluzitelj.arg("rd_tm");
+    if (!(rdEnArg == "0" || rdEnArg == "1")) {
+      webPosluzitelj.send(422, "text/plain", "Dnevna misa mora imati valjan ON/OFF status");
+      return;
+    }
+    uint8_t rdSat = 0;
+    uint8_t rdMinuta = 0;
+    bool rdPrazno = false;
+    if (!procitajVrijemeHHMM(rdTmArg, rdSat, rdMinuta, rdPrazno)) {
+      webPosluzitelj.send(422, "text/plain", "Dnevna misa mora imati valjano vrijeme mise u formatu HH:MM");
+      return;
+    }
+    novePostavke.dnevnaMisaOmogucena = (rdEnArg == "1") && !rdPrazno;
+    novePostavke.dnevnaMisaSat = rdSat;
+    novePostavke.dnevnaMisaMinuta = rdMinuta;
+
+    const String ndEnArg = ocistiJednolinijskiTekst(webPosluzitelj.arg("nd_en"), 1);
+    const String ndTmArg = webPosluzitelj.arg("nd_tm");
+    if (!(ndEnArg == "0" || ndEnArg == "1")) {
+      webPosluzitelj.send(422, "text/plain", "Nedjeljna misa mora imati valjan ON/OFF status");
+      return;
+    }
+    uint8_t ndSat = 0;
+    uint8_t ndMinuta = 0;
+    bool ndPrazno = false;
+    if (!procitajVrijemeHHMM(ndTmArg, ndSat, ndMinuta, ndPrazno)) {
+      webPosluzitelj.send(422, "text/plain", "Nedjeljna misa mora imati valjano vrijeme mise u formatu HH:MM");
+      return;
+    }
+    novePostavke.nedjeljnaMisaOmogucena = (ndEnArg == "1") && !ndPrazno;
+    novePostavke.nedjeljnaMisaSat = ndSat;
+    novePostavke.nedjeljnaMisaMinuta = ndMinuta;
+
+    for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+      const String prefiks = "f" + String(i) + "_";
+      const String enArg = ocistiJednolinijskiTekst(webPosluzitelj.arg(prefiks + "en"), 1);
+      const String tmArg = webPosluzitelj.arg(prefiks + "tm");
+
+      if (!webPosluzitelj.hasArg(prefiks + "en") ||
+          !webPosluzitelj.hasArg(prefiks + "tm")) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja nepomicnih blagdana");
+        return;
+      }
+
+      uint8_t sat = 0;
+      uint8_t minuta = 0;
+      bool prazno = false;
+      if (!((enArg == "0" || enArg == "1") &&
+            procitajVrijemeHHMM(tmArg, sat, minuta, prazno))) {
+        webPosluzitelj.send(422, "text/plain", "Nepomicni blagdani moraju imati valjano vrijeme mise u formatu HH:MM");
+        return;
+      }
+
+      novePostavke.nepomicni[i].omogucen = (enArg == "1") && !prazno;
+      novePostavke.nepomicni[i].satMise = sat;
+      novePostavke.nepomicni[i].minutaMise = minuta;
+    }
+
+    for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+      const String prefiks = "p" + String(i) + "_";
+      const String enArg = ocistiJednolinijskiTekst(webPosluzitelj.arg(prefiks + "en"), 1);
+      const String tmArg = webPosluzitelj.arg(prefiks + "tm");
+
+      if (!webPosluzitelj.hasArg(prefiks + "en") ||
+          !webPosluzitelj.hasArg(prefiks + "tm")) {
+        webPosluzitelj.send(400, "text/plain", "Nedostaje jedno ili vise polja pomicnih blagdana");
+        return;
+      }
+
+      uint8_t sat = 0;
+      uint8_t minuta = 0;
+      bool prazno = false;
+      if (!((enArg == "0" || enArg == "1") &&
+            procitajVrijemeHHMM(tmArg, sat, minuta, prazno))) {
+        webPosluzitelj.send(422, "text/plain", "Pomicni blagdani moraju imati valjano vrijeme mise u formatu HH:MM");
+        return;
+      }
+
+      novePostavke.pomicni[i].omogucen = (enArg == "1") && !prazno;
+      novePostavke.pomicni[i].satMise = sat;
+      novePostavke.pomicni[i].minutaMise = minuta;
+    }
+
+    PostavkeOdgovorMegai status = posaljiMisePostavkeMegai(
+        novePostavke.dnevnaMisaOmogucena,
+        novePostavke.dnevnaMisaSat,
+        novePostavke.dnevnaMisaMinuta,
+        novePostavke.nedjeljnaMisaOmogucena,
+        novePostavke.nedjeljnaMisaSat,
+        novePostavke.nedjeljnaMisaMinuta,
+        CMD_CEKANJE_NA_MEGU_MS);
+    if (status != POSTAVKE_ODGOVOR_OK) {
+      webPosluzitelj.send(status == POSTAVKE_ODGOVOR_ERR ? 422 : 504,
+                          "text/plain",
+                          status == POSTAVKE_ODGOVOR_ERR
+                              ? "Mega je odbila misne postavke."
+                              : "Mega nije potvrdila spremanje misnih postavki.");
+      return;
+    }
+
+    status = posaljiNepomicneBlagdaneMegai(
+        novePostavke.nepomicni,
+        BROJ_NEPOMICNIH_BLAGDANA,
+        CMD_CEKANJE_NA_MEGU_MS);
+    if (status != POSTAVKE_ODGOVOR_OK) {
+      webPosluzitelj.send(status == POSTAVKE_ODGOVOR_ERR ? 422 : 504,
+                          "text/plain",
+                          status == POSTAVKE_ODGOVOR_ERR
+                              ? "Mega je odbila nepomicne blagdane."
+                              : "Mega nije potvrdila spremanje nepomicnih blagdana.");
+      return;
+    }
+
+    status = posaljiPomicneBlagdaneMegai(
+        novePostavke.pomicni,
+        BROJ_POMICNIH_BLAGDANA,
+        CMD_CEKANJE_NA_MEGU_MS);
+    if (status != POSTAVKE_ODGOVOR_OK) {
+      webPosluzitelj.send(status == POSTAVKE_ODGOVOR_ERR ? 422 : 504,
+                          "text/plain",
+                          status == POSTAVKE_ODGOVOR_ERR
+                              ? "Mega je odbila pomicne blagdane."
+                              : "Mega nije potvrdila spremanje pomicnih blagdana.");
+      return;
+    }
+
+    osvjeziMisePostavkeMegai(true);
+    osvjeziNepomicneBlagdaneMegai(true);
+    osvjeziPomicneBlagdaneMegai(true);
+    webPosluzitelj.send(200, "text/plain", "Misne i blagdanske postavke su spremljene na Megi.");
   });
 
   Serial.println("WEB: Registriram API rute");

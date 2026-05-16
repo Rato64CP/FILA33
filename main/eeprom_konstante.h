@@ -215,6 +215,70 @@ constexpr int BAZA_SUNCEVI_DOGADAJI =
 constexpr int SLOTOVI_SUNCEVI_DOGADAJI = 6;
 constexpr int SLOT_SIZE_SUNCEVI_DOGADAJI = sizeof(SunceviDogadajiSpremnik);
 
+// ==================== BLAGDANI I SVETE MISE ====================
+// Zaseban blok za web-postavke blagdana toranjskog sata.
+// Datumi blagdana su hardkodirani u firmwareu, a korisnik preko weba uredjuje
+// samo ukljucenost i vrijeme mise `HH:MM`.
+
+struct NepomicniBlagdanSpremnik {
+  uint8_t omogucen;
+  uint8_t mjesec;
+  uint8_t dan;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct PomicniBlagdanSpremnik {
+  uint8_t omogucen;
+  int8_t pomakOdUskrsaDana;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct BlagdaniSpremnik {
+  uint16_t potpis;
+  uint8_t verzija;
+  uint8_t reserved;
+  NepomicniBlagdanSpremnik nepomicni[15];
+  PomicniBlagdanSpremnik pomicni[7];
+  uint16_t checksum;
+};
+
+constexpr uint16_t BLAGDANI_POTPIS = 0x424C;
+constexpr uint8_t BLAGDANI_VERZIJA = 2;
+
+constexpr int BAZA_BLAGDANI =
+  BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI);
+constexpr int SLOTOVI_BLAGDANI = 6;
+constexpr int SLOT_SIZE_BLAGDANI = sizeof(BlagdaniSpremnik);
+
+// ==================== REDOVITE MISE ====================
+// Zaseban blok za dnevnu i nedjeljnu misu toranjskog sata.
+
+struct RedovitaMisaSpremnik {
+  uint8_t omogucena;
+  uint8_t satMise;
+  uint8_t minutaMise;
+  uint8_t reserved;
+};
+
+struct MiseSpremnik {
+  uint16_t potpis;
+  uint8_t verzija;
+  uint8_t reserved;
+  RedovitaMisaSpremnik dnevna;
+  RedovitaMisaSpremnik nedjeljna;
+  uint16_t checksum;
+};
+
+constexpr uint16_t MISE_POTPIS = 0x4D53;
+constexpr uint8_t MISE_VERZIJA = 2;
+
+constexpr int BAZA_MISE =
+  BAZA_BLAGDANI + (SLOTOVI_BLAGDANI * SLOT_SIZE_BLAGDANI);
+constexpr int SLOTOVI_MISE = 6;
+constexpr int SLOT_SIZE_MISE = sizeof(MiseSpremnik);
+
 // ==================== VALIDATION MACROS ====================
 
 // Zadnji dio kompatibilnog 4 KB rasporeda rezerviran je za metapodatke wear-levelinga.
@@ -254,7 +318,7 @@ constexpr int BAZA_WATCHDOG_SAFE_MODE =
   BAZA_LATCHED_FAULT + static_cast<int>(sizeof(LatchedFaultState));
 
 static_assert(
-  (BAZA_SUNCEVI_DOGADAJI + (SLOTOVI_SUNCEVI_DOGADAJI * SLOT_SIZE_SUNCEVI_DOGADAJI)) <=
+  (BAZA_MISE + (SLOTOVI_MISE * SLOT_SIZE_MISE)) <=
       BAZA_LATCHED_FAULT,
   "EEPROM layout overlaps latched fault block"
 );

@@ -61,6 +61,9 @@ static const unsigned long LCD_I2C_PROVJERA_INTERVAL_MS = 250UL;
 static uint8_t lcd_reinit_pokusaji_preostali = 0;
 static unsigned long lcd_zadnji_reinit_ms = 0;
 static const unsigned long LCD_REINIT_PONOVI_INTERVAL_MS = 1000UL;
+static bool lcd_sqw_greska_aktivna_prethodno = false;
+static bool lcd_sqw_greska_poruka_vidljiva = true;
+static unsigned long lcd_sqw_greska_zadnje_treptanje_ms = 0;
 
 static enum {
   ACTIVITY_NONE = 0,
@@ -121,6 +124,7 @@ static const char LCD_PORUKA_MRTVACKO[] PROGMEM = "MRTVA\x01KO ZVONO  ";
 static const char LCD_PORUKA_BAT_RTC[] PROGMEM = "Baterija prazna";
 static const char LCD_PORUKA_RTC_DEGRADED_1[] PROGMEM = "RTC OGRANICEN RAD";
 static const char LCD_PORUKA_RTC_DEGRADED_2[] PROGMEM = "CEKAM OPORAVAK  ";
+static const char LCD_PORUKA_SQW_GRESKA[] PROGMEM = "SQW GRESKA      ";
 static const char LCD_PORUKA_LATCH_EEPROM_1[] PROGMEM = "EEPROM GRESKA   ";
 static const char LCD_PORUKA_LATCH_EEPROM_2[] PROGMEM = "ENT=POTVRDI     ";
 static const char LCD_PORUKA_INERCIJA[] PROGMEM = "Smirivanje zvona";
@@ -138,6 +142,7 @@ static const unsigned long LCD_SAFE_MODE_UPUTA_INTERVAL_MS = 2000UL;
 static const unsigned long LCD_LATCHED_FAULT_INTERVAL_MS = 1500UL;
 static const unsigned long LCD_RTC_DEGRADED_INTERVAL_MS = 1500UL;
 static const unsigned long LCD_RS485_PREKID_INTERVAL_MS = 1500UL;
+static const unsigned long LCD_SQW_GRESKA_BLINK_INTERVAL_MS = 500UL;
 
 static void resetirajCachePrikazaLCD() {
   zadnje_ispisani_redak1[0] = '\0';
@@ -275,12 +280,12 @@ static void upisiRedakNaLCD(uint8_t redak, const char* tekst, char* zadnjiRedak)
   strncpy(zadnjiRedak, pripremljeniRedak, 17);
 }
 
-static void pripremiDrugiRedakSaWiFiOznakom(const char* tekst) {
+static void pripremiDrugiRedakZaLCD(const char* tekst) {
   pripremiRedakZaLCD(tekst, line2_buffer);
 }
 
-static void upisiDrugiRedakNaLCDSaWiFiOznakom(const char* tekst) {
-  pripremiDrugiRedakSaWiFiOznakom(tekst);
+static void upisiDrugiRedakNaLCD(const char* tekst) {
+  pripremiDrugiRedakZaLCD(tekst);
   upisiRedakNaLCD(1, line2_buffer, zadnje_ispisani_redak2);
 }
 
@@ -524,7 +529,7 @@ static void build_date_string() {
                now.day(),
                now.month());
   }
-  pripremiDrugiRedakSaWiFiOznakom(datum_poruka);
+  pripremiDrugiRedakZaLCD(datum_poruka);
 
   last_date_minute = now.minute();
 }
@@ -547,7 +552,7 @@ static void build_line2() {
         poruka,
         sizeof(poruka),
         prikaziPotvrdu ? LCD_PORUKA_LATCH_EEPROM_2 : LCD_PORUKA_LATCH_EEPROM_1);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     return;
   }
 
@@ -568,14 +573,14 @@ static void build_line2() {
         poruka,
         sizeof(poruka),
         prikaziDruguRtcPoruku ? LCD_PORUKA_RTC_DEGRADED_2 : LCD_PORUKA_RTC_DEGRADED_1);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     return;
   }
 
   if (rtc_battery_warning_active) {
     char poruka[17];
     FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BAT_RTC);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     return;
   }
 
@@ -596,7 +601,7 @@ static void build_line2() {
         poruka,
         sizeof(poruka),
         prikaziDruguRs485Poruku ? LCD_PORUKA_RS485_2 : LCD_PORUKA_RS485_1);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     return;
   }
 
@@ -608,9 +613,36 @@ static void build_line2() {
     otkucavanje_poruka_aktivna = false;
     hod_sata_prikaz_aktivan = false;
     FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_UPS_NEMA_MREZE);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+      pripremiDrugiRedakZaLCD(poruka);
     return;
   }
+
+  if (jeRtcSqwGreskaAktivna()) {
+    const unsigned long sadaMs = millis();
+
+    if (!lcd_sqw_greska_aktivna_prethodno) {
+      lcd_sqw_greska_aktivna_prethodno = true;
+      lcd_sqw_greska_poruka_vidljiva = true;
+      lcd_sqw_greska_zadnje_treptanje_ms = sadaMs;
+    } else if ((sadaMs - lcd_sqw_greska_zadnje_treptanje_ms) >=
+               LCD_SQW_GRESKA_BLINK_INTERVAL_MS) {
+      lcd_sqw_greska_zadnje_treptanje_ms = sadaMs;
+      lcd_sqw_greska_poruka_vidljiva = !lcd_sqw_greska_poruka_vidljiva;
+    }
+
+    if (lcd_sqw_greska_poruka_vidljiva) {
+      char poruka[17];
+      FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_SQW_GRESKA);
+      pripremiDrugiRedakZaLCD(poruka);
+    } else {
+      pripremiDrugiRedakZaLCD("");
+    }
+    return;
+  }
+
+  lcd_sqw_greska_aktivna_prethodno = false;
+  lcd_sqw_greska_poruka_vidljiva = true;
+  lcd_sqw_greska_zadnje_treptanje_ms = 0;
 
   const bool zvono1Aktivno = jeZvonoAktivno(1);
   const bool zvono2Aktivno = jeZvonoAktivno(2);
@@ -622,19 +654,19 @@ static void build_line2() {
 
     if (zvono1Aktivno && zvono2Aktivno) {
       FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_OBA_ZVONA);
-      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      pripremiDrugiRedakZaLCD(poruka);
       return;
     }
 
     if (zvono1Aktivno) {
       FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BELL1);
-      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      pripremiDrugiRedakZaLCD(poruka);
       return;
     }
 
     if (zvono2Aktivno) {
       FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_BELL2);
-      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      pripremiDrugiRedakZaLCD(poruka);
       return;
     }
 
@@ -654,7 +686,7 @@ static void build_line2() {
   if (current_activity == ACTIVITY_NONE && jeLiInerciaAktivna()) {
     char poruka[17];
     FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_INERCIJA);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     otkucavanje_poruka_aktivna = false;
     return;
   }
@@ -664,7 +696,7 @@ static void build_line2() {
       wifi_ip_prikaz_aktivan = false;
       wifi_ip_poruka[0] = '\0';
     } else if (current_activity != ACTIVITY_ERROR && !activity_is_error) {
-      pripremiDrugiRedakSaWiFiOznakom(wifi_ip_poruka);
+      pripremiDrugiRedakZaLCD(wifi_ip_poruka);
       otkucavanje_poruka_aktivna = false;
       return;
     }
@@ -673,7 +705,7 @@ static void build_line2() {
   if (current_activity == ACTIVITY_NONE && jeOtkucavanjeUTijeku()) {
     char poruka[17];
     FlashTekst::kopirajLiteral(poruka, sizeof(poruka), LCD_PORUKA_OTKUCAJ);
-    pripremiDrugiRedakSaWiFiOznakom(poruka);
+    pripremiDrugiRedakZaLCD(poruka);
     otkucavanje_poruka_aktivna = true;
     hod_sata_prikaz_aktivan = false;
     return;
@@ -689,7 +721,7 @@ static void build_line2() {
     if (trebaPrikazatiDugiHodSata(memoriraneMinute)) {
       char poruka[17];
       formatirajHodSata(memoriraneMinute, poruka, sizeof(poruka));
-      pripremiDrugiRedakSaWiFiOznakom(poruka);
+      pripremiDrugiRedakZaLCD(poruka);
       otkucavanje_poruka_aktivna = false;
       hod_sata_prikaz_aktivan = true;
       return;
@@ -717,12 +749,12 @@ static void build_line2() {
       }
 
       if (blink_visible) {
-        pripremiDrugiRedakSaWiFiOznakom(activity_message);
+        pripremiDrugiRedakZaLCD(activity_message);
       } else {
-        pripremiDrugiRedakSaWiFiOznakom("");
+        pripremiDrugiRedakZaLCD("");
       }
     } else {
-      pripremiDrugiRedakSaWiFiOznakom(activity_message);
+      pripremiDrugiRedakZaLCD(activity_message);
     }
     otkucavanje_poruka_aktivna = false;
   } else {
@@ -897,7 +929,7 @@ void prikaziPoruku(const char* redak1, const char* redak2) {
   }
 
   if (redak2) {
-    upisiDrugiRedakNaLCDSaWiFiOznakom(redak2);
+    upisiDrugiRedakNaLCD(redak2);
   }
 }
 

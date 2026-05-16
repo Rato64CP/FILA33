@@ -118,7 +118,6 @@ static bool primijeniVrijemeIzNTP(DateTime ntpVrijeme,
                                   bool dstAktivanIzvori);
 static bool osvjeziTrenutnoVrijemeIzRtc();
 static bool osigurajRtcDostupan(bool prisilniPokusaj);
-static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs);
 static void oznaciPovratakNaRTC();
 static void evidentirajRtcUspjeh();
 static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog);
@@ -577,31 +576,6 @@ static void ucitajZadnjuSinkronizaciju() {
   azurirajOznakuIzvora();
 }
 
-static bool pokusajPrimijenitiZakazaniNtpBezSqw(unsigned long sadaMs) {
-  if (!ntpSinkronizacijaZakazana || zakazaniNtpMs == 0) {
-    return false;
-  }
-
-  const unsigned long protekloMs = sadaMs - zakazaniNtpMs;
-  if (protekloMs < 1000UL) {
-    return false;
-  }
-
-  const uint32_t protekliRtcTickovi =
-      izracunajPomakSekundiZaZakazaniNtp(protekloMs, zakazanoNtpMilisekunde, 1U);
-
-  const DateTime vrijemeZaPrimjenu(
-      zakazanoNtpVrijeme.unixtime() + protekliRtcTickovi);
-  if (!primijeniVrijemeIzNTP(vrijemeZaPrimjenu,
-                             zakazanoNtpImaEksplicitanDST,
-                             zakazanoNtpDstAktivan)) {
-    return false;
-  }
-
-  posaljiPCLog(F("NTP: sinkronizacija primijenjena preko fallbacka bez RTC SQW impulsa"));
-  return true;
-}
-
 static bool osvjeziTrenutnoVrijemeIzRtc() {
   if (!osigurajRtcDostupan(false)) {
     evidentirajRtcNeuspjeh(
@@ -713,7 +687,7 @@ static void evidentirajRtcNeuspjeh(const __FlashStringHelper* razlog) {
   posaljiPCLog(razlog);
 }
 
-static DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
+DateTime dohvatiDatumUskrsaZaGodinu(int godina) {
   const int a = godina % 19;
   const int b = godina / 100;
   const int c = godina % 100;
@@ -801,7 +775,7 @@ DateTime dohvatiTrenutnoVrijeme() {
   lokalniRtcTick = rtcSekundniBrojac;
   interrupts();
 
-    if (lokalniRtcTick != zadnjiObradeniRtcTick || zadnjiObradeniRtcTick == 0xFFFFFFFFUL) {
+  if (lokalniRtcTick != zadnjiObradeniRtcTick || zadnjiObradeniRtcTick == 0xFFFFFFFFUL) {
     zadnjiObradeniRtcTick = lokalniRtcTick;
     rtcSqwAktivan = true;
     rtcSqwZadnjiTickMs = sadaMs;
@@ -811,6 +785,12 @@ DateTime dohvatiTrenutnoVrijeme() {
     }
     bool ntpPrimijenjenNaOvomTicku = false;
     if (ntpSinkronizacijaZakazana) {
+      if (zakazaniNtpRtcTick == 0) {
+        zakazaniNtpRtcTick = lokalniRtcTick;
+        posaljiPCLog(
+            F("NTP: RTC SQW se vratio, sinkronizacija ceka prvi sljedeci valjani SQW tik"));
+      }
+
       uint32_t protekliRtcTickovi = 1;
       unsigned long protekloOdZakazanogMs = 0;
       bool ntpSpremanZaPrimjenu = false;
@@ -820,15 +800,6 @@ DateTime dohvatiTrenutnoVrijeme() {
       if (zakazaniNtpRtcTick != 0 && lokalniRtcTick > zakazaniNtpRtcTick) {
         protekliRtcTickovi = lokalniRtcTick - zakazaniNtpRtcTick;
         protekloOdZakazanogMs = sadaMs - zakazaniNtpMs;
-        if (protekliRtcTickovi == 0) {
-          protekliRtcTickovi = 1;
-        }
-        ntpSpremanZaPrimjenu = true;
-      } else if (zakazaniNtpRtcTick == 0 &&
-                 zakazaniNtpMs != 0 &&
-                 (sadaMs - zakazaniNtpMs) >= 1000UL) {
-        protekloOdZakazanogMs = sadaMs - zakazaniNtpMs;
-        protekliRtcTickovi = protekloOdZakazanogMs / 1000UL;
         if (protekliRtcTickovi == 0) {
           protekliRtcTickovi = 1;
         }
@@ -861,14 +832,12 @@ DateTime dohvatiTrenutnoVrijeme() {
   } else if ((sadaMs - rtcSqwZadnjiTickMs) > 2500UL) {
     rtcSqwAktivan = false;
     if (!rtcSqwGreskaPrijavljena) {
-      posaljiPCLog(F("RTC SQW: nema 1 Hz impulsa na D2, koristim RTC fallback citanje"));
+      posaljiPCLog(F("RTC SQW: nema 1 Hz impulsa na D2, mehanika toranjskog sata ostaje blokirana do povratka SQW"));
       rtcSqwGreskaPrijavljena = true;
     }
     if ((sadaMs - zadnjiFallbackPollMs) >= 1000UL || zadnjiFallbackPollMs == 0) {
       zadnjiFallbackPollMs = sadaMs;
-      if (!pokusajPrimijenitiZakazaniNtpBezSqw(sadaMs)) {
-        osvjeziTrenutnoVrijemeIzRtc();
-      }
+      osvjeziTrenutnoVrijemeIzRtc();
     }
   }
 
@@ -969,8 +938,16 @@ void azurirajVrijemeIzNTP(const DateTime& ntpVrijeme,
     return;
   }
 
-  // Ako RTC SQW trenutno nije dostupan, primijeni odmah kao fallback.
-  primijeniVrijemeIzNTP(ntpVrijeme, imaEksplicitanDST, dstAktivanIzvori);
+  // Ako RTC SQW trenutno nije dostupan, sinkronizaciju zadrzi na cekanju
+  // i primijeni je tek nakon povratka valjanog SQW takta.
+  zakazanoNtpVrijeme = ntpVrijeme;
+  zakazanoNtpMilisekunde = ntpMilisekunde;
+  ntpSinkronizacijaZakazana = true;
+  zakazaniNtpRtcTick = 0;
+  zakazaniNtpMs = millis();
+  zakazanoNtpImaEksplicitanDST = imaEksplicitanDST;
+  zakazanoNtpDstAktivan = dstAktivanIzvori;
+  posaljiPCLog(F("NTP: RTC SQW nije aktivan, sinkronizacija ceka povratak SQW signala"));
   return;
 }
 
@@ -1017,6 +994,13 @@ const char* dohvatiOznakuIzvoraVremena() {
 
 bool jeRtcSqwAktivan() {
   return rtcSqwAktivan;
+}
+
+bool jeRtcSqwGreskaAktivna() {
+  return !rtcSqwAktivan &&
+         rtcDostupanNakonInicijalizacije &&
+         !rtcIzlazniFailSafeAktivan &&
+         !rtcDegradiraniNacinAktivan;
 }
 
 bool jeRtcSqwPrvaPolovicaSekunde() {

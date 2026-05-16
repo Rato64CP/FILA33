@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
 #include <RTClib.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "esp_serial.h"
@@ -23,10 +24,10 @@
 static HardwareSerial& espSerijskiPort = ESP_SERIJSKI_PORT;
 
 static const unsigned long ESP_BRZINA = 9600;
-// Najduze ulazne linije s mreznog mosta sada ukljucuju i vise grupa web
-// postavki (`SUSTAV`, `STAPICI`, `BAT`, `SUNCE`), pa buffer drzimo malo
-// vecim kako bismo izbjegli nepotrebno odbijanje cijelog paketa.
-static const uint8_t ESP_ULAZNI_BUFFER_MAX = 224;
+// Nakon razdvajanja `MISE`, `BLAGDANI_NEP` i `BLAGDANI_POM` najveci serijski
+// paketi vise ne trebaju 512 B. Time vracamo dio SRAM-a na `Megi`, a i dalje
+// ostavljamo dovoljnu rezervu za najduzi pojedinacni web paket.
+static const uint16_t ESP_ULAZNI_BUFFER_MAX = 256;
 static const unsigned long WIFI_POCETNA_ODGODA_NAKON_NAPAJANJA_MS = 120000UL;
 static const unsigned long WIFI_STATUS_DRUGI_UPIT_ODGODA_MS = 15000UL;
 static const unsigned long WIFI_STATUS_RECOVERY_INTERVAL_MS = 300000UL;
@@ -43,7 +44,9 @@ static const uint32_t NTP_KLJUC_NEPOSTAVLJEN = 0xFFFFFFFFUL;
 // - automatski NTP ne smije remetiti osnovni rad sata ni prikaz izvora vremena
 
 static char ulazniBuffer[ESP_ULAZNI_BUFFER_MAX + 1];
-static uint8_t ulazniBufferDuljina = 0;
+// Duljina i dalje mora biti siri tip od `uint8_t` jer pojedini paketi i dalje
+// mogu prijeci 255 znakova, iako je stalni ulazni buffer sada manji nego prije.
+static uint16_t ulazniBufferDuljina = 0;
 static bool ntpCekanjePrijavljeno = false;
 static bool wifiPovezanNaESP = false;
 static char zadnjaLokalnaWiFiIP[16] = "";
@@ -155,6 +158,12 @@ static void posaljiBATPostavkeESPu();
 static bool spremiBATPostavkeIzESPa(char* payload);
 static void posaljiSuncevePostavkeESPu();
 static bool spremiSuncevePostavkeIzESPa(char* payload);
+static void posaljiMisePostavkeESPu();
+static bool spremiMisePostavkeIzESPa(char* payload);
+static void posaljiNepomicneBlagdaneESPu();
+static bool spremiNepomicneBlagdaneIzESPa(char* payload);
+static void posaljiPomicneBlagdaneESPu();
+static bool spremiPomicneBlagdaneIzESPa(char* payload);
 
 static void posaljiStatusESPU() {
   const DateTime sada = dohvatiTrenutnoVrijeme();
@@ -254,6 +263,67 @@ static void posaljiSuncevePostavkeESPu() {
   espSerijskiPort.println(linija);
 }
 
+static void posaljiMisePostavkeESPu() {
+  RedoviteMisePostavke redoviteMise;
+  dohvatiRedoviteMise(redoviteMise);
+
+  char linija[80];
+  snprintf_P(linija,
+             sizeof(linija),
+             PSTR("SET:MISE|rd=%u,%u,%u|nd=%u,%u,%u"),
+             redoviteMise.dnevnaOmogucena ? 1U : 0U,
+             static_cast<unsigned>(redoviteMise.dnevnaSatMise),
+             static_cast<unsigned>(redoviteMise.dnevnaMinutaMise),
+             redoviteMise.nedjeljnaOmogucena ? 1U : 0U,
+             static_cast<unsigned>(redoviteMise.nedjeljnaSatMise),
+             static_cast<unsigned>(redoviteMise.nedjeljnaMinutaMise));
+  espSerijskiPort.println(linija);
+}
+
+static void posaljiNepomicneBlagdaneESPu() {
+  char linija[320];
+  int duljina = snprintf_P(linija, sizeof(linija), PSTR("SET:BLAGDANI_NEP"));
+  if (duljina < 0) {
+    return;
+  }
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA && duljina < static_cast<int>(sizeof(linija)); ++i) {
+    NepomicniBlagdanPostavka blagdan;
+    dohvatiNepomicniBlagdan(i, blagdan);
+    duljina += snprintf_P(linija + duljina,
+                          sizeof(linija) - static_cast<size_t>(duljina),
+                          PSTR("|f%u=%u,%u,%u"),
+                          static_cast<unsigned>(i),
+                          blagdan.omogucen ? 1U : 0U,
+                          static_cast<unsigned>(blagdan.satMise),
+                          static_cast<unsigned>(blagdan.minutaMise));
+  }
+
+  espSerijskiPort.println(linija);
+}
+
+static void posaljiPomicneBlagdaneESPu() {
+  char linija[192];
+  int duljina = snprintf_P(linija, sizeof(linija), PSTR("SET:BLAGDANI_POM"));
+  if (duljina < 0) {
+    return;
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA && duljina < static_cast<int>(sizeof(linija)); ++i) {
+    PomicniBlagdanPostavka blagdan;
+    dohvatiPomicniBlagdan(i, blagdan);
+    duljina += snprintf_P(linija + duljina,
+                          sizeof(linija) - static_cast<size_t>(duljina),
+                          PSTR("|p%u=%u,%u,%u"),
+                          static_cast<unsigned>(i),
+                          blagdan.omogucen ? 1U : 0U,
+                          static_cast<unsigned>(blagdan.satMise),
+                          static_cast<unsigned>(blagdan.minutaMise));
+  }
+
+  espSerijskiPort.println(linija);
+}
+
 static void resetirajUlazniBuffer() {
   ulazniBuffer[0] = '\0';
   ulazniBufferDuljina = 0;
@@ -318,10 +388,16 @@ static bool jePrepoznataESPLinija(const char* linija) {
          strcmp(linija, "SETREQ:STAPICI") == 0 ||
          strcmp(linija, "SETREQ:BAT") == 0 ||
          strcmp(linija, "SETREQ:SUNCE") == 0 ||
+         strcmp(linija, "SETREQ:MISE") == 0 ||
+         strcmp(linija, "SETREQ:BLAGDANI_NEP") == 0 ||
+         strcmp(linija, "SETREQ:BLAGDANI_POM") == 0 ||
          strncmp(linija, "SETCFG:SUSTAV|", 14) == 0 ||
          strncmp(linija, "SETCFG:STAPICI|", 15) == 0 ||
          strncmp(linija, "SETCFG:BAT|", 11) == 0 ||
          strncmp(linija, "SETCFG:SUNCE|", 13) == 0 ||
+         strncmp(linija, "SETCFG:MISE|", 12) == 0 ||
+         strncmp(linija, "SETCFG:BLAGDANI_NEP|", 20) == 0 ||
+         strncmp(linija, "SETCFG:BLAGDANI_POM|", 20) == 0 ||
          strncmp(linija, "STATUS:", 7) == 0 ||
          strcmp(linija, "STATUS?") == 0 ||
          strncmp(linija, "NTP:", 4) == 0 ||
@@ -369,6 +445,9 @@ static void posaljiKonfiguracijuESPuNakonZahtjeva() {
   posaljiPostavkeStapicaESPu();
   posaljiBATPostavkeESPu();
   posaljiSuncevePostavkeESPu();
+  posaljiMisePostavkeESPu();
+  posaljiNepomicneBlagdaneESPu();
+  posaljiPomicneBlagdaneESPu();
   zatraziWiFiStatusESP();
   posaljiPCLog(F("Mrezni most zatrazio osvjezavanje konfiguracije"));
 }
@@ -801,6 +880,207 @@ static bool spremiSuncevePostavkeIzESPa(char* payload) {
              vecerOdgoda,
              nocnaRasvjeta ? 1 : 0);
   posaljiPCLog(log);
+  return true;
+}
+
+static bool spremiMisePostavkeIzESPa(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  RedoviteMisePostavke redoviteMise = {false, 0, 0, false, 0, 0};
+  bool dnevnaMisaPoznata = false;
+  bool nedjeljnaMisaPoznata = false;
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiTekstESP(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiTekstESP(kljuc);
+    trimJednolinijskiTekstESP(vrijednost);
+
+    unsigned int omogucena = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf_P(vrijednost, PSTR("%u,%u,%u"), &omogucena, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    if (strcmp(kljuc, "rd") == 0) {
+      redoviteMise.dnevnaOmogucena = omogucena != 0;
+      redoviteMise.dnevnaSatMise = static_cast<uint8_t>(sat);
+      redoviteMise.dnevnaMinutaMise = static_cast<uint8_t>(minuta);
+      dnevnaMisaPoznata = true;
+    } else if (strcmp(kljuc, "nd") == 0) {
+      redoviteMise.nedjeljnaOmogucena = omogucena != 0;
+      redoviteMise.nedjeljnaSatMise = static_cast<uint8_t>(sat);
+      redoviteMise.nedjeljnaMinutaMise = static_cast<uint8_t>(minuta);
+      nedjeljnaMisaPoznata = true;
+    } else {
+      return false;
+    }
+  }
+
+  if (!dnevnaMisaPoznata || !nedjeljnaMisaPoznata) {
+    return false;
+  }
+
+  postaviRedoviteMise(redoviteMise);
+  posaljiPCLog(F("Mrezni most je spremio misne postavke toranjskog sata"));
+  return true;
+}
+
+static bool spremiNepomicneBlagdaneIzESPa(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  NepomicniBlagdanPostavka nepomicni[BROJ_NEPOMICNIH_BLAGDANA] = {};
+  PomicniBlagdanPostavka pomicni[BROJ_POMICNIH_BLAGDANA] = {};
+  bool nepomicniPoznati[BROJ_NEPOMICNIH_BLAGDANA] = {};
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    dohvatiPomicniBlagdan(i, pomicni[i]);
+  }
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiTekstESP(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiTekstESP(kljuc);
+    trimJednolinijskiTekstESP(vrijednost);
+
+    if (kljuc[0] != 'f' || kljuc[1] == '\0') {
+      return false;
+    }
+
+    char* krajIndeksa = nullptr;
+    const unsigned long indeksBroj = strtoul(kljuc + 1, &krajIndeksa, 10);
+    if (krajIndeksa == nullptr || *krajIndeksa != '\0') {
+      return false;
+    }
+
+    const uint8_t indeks = static_cast<uint8_t>(indeksBroj);
+    if (indeks >= BROJ_NEPOMICNIH_BLAGDANA) {
+      return false;
+    }
+
+    unsigned int omogucen = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf_P(vrijednost, PSTR("%u,%u,%u"), &omogucen, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    nepomicni[indeks].omogucen = omogucen != 0;
+    nepomicni[indeks].satMise = static_cast<uint8_t>(sat);
+    nepomicni[indeks].minutaMise = static_cast<uint8_t>(minuta);
+    nepomicniPoznati[indeks] = true;
+  }
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    if (!nepomicniPoznati[i]) {
+      return false;
+    }
+  }
+
+  postaviBlagdanskeMise(nepomicni,
+                        BROJ_NEPOMICNIH_BLAGDANA,
+                        pomicni,
+                        BROJ_POMICNIH_BLAGDANA);
+  posaljiPCLog(F("Mrezni most je spremio nepomicne blagdane toranjskog sata"));
+  return true;
+}
+
+static bool spremiPomicneBlagdaneIzESPa(char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+
+  NepomicniBlagdanPostavka nepomicni[BROJ_NEPOMICNIH_BLAGDANA] = {};
+  PomicniBlagdanPostavka pomicni[BROJ_POMICNIH_BLAGDANA] = {};
+  bool pomicniPoznati[BROJ_POMICNIH_BLAGDANA] = {};
+
+  for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
+    dohvatiNepomicniBlagdan(i, nepomicni[i]);
+  }
+
+  char* context = nullptr;
+  for (char* polje = strtok_r(payload, "|", &context);
+       polje != nullptr;
+       polje = strtok_r(nullptr, "|", &context)) {
+    trimJednolinijskiTekstESP(polje);
+
+    char* jednako = strchr(polje, '=');
+    if (jednako == nullptr) {
+      return false;
+    }
+
+    *jednako = '\0';
+    char* kljuc = polje;
+    char* vrijednost = jednako + 1;
+    trimJednolinijskiTekstESP(kljuc);
+    trimJednolinijskiTekstESP(vrijednost);
+
+    if (kljuc[0] != 'p' || kljuc[1] == '\0') {
+      return false;
+    }
+
+    char* krajIndeksa = nullptr;
+    const unsigned long indeksBroj = strtoul(kljuc + 1, &krajIndeksa, 10);
+    if (krajIndeksa == nullptr || *krajIndeksa != '\0') {
+      return false;
+    }
+
+    const uint8_t indeks = static_cast<uint8_t>(indeksBroj);
+    if (indeks >= BROJ_POMICNIH_BLAGDANA) {
+      return false;
+    }
+
+    unsigned int omogucen = 0;
+    unsigned int sat = 0;
+    unsigned int minuta = 0;
+    if (sscanf_P(vrijednost, PSTR("%u,%u,%u"), &omogucen, &sat, &minuta) != 3) {
+      return false;
+    }
+
+    pomicni[indeks].omogucen = omogucen != 0;
+    pomicni[indeks].satMise = static_cast<uint8_t>(sat);
+    pomicni[indeks].minutaMise = static_cast<uint8_t>(minuta);
+    pomicniPoznati[indeks] = true;
+  }
+
+  for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
+    if (!pomicniPoznati[i]) {
+      return false;
+    }
+  }
+
+  postaviBlagdanskeMise(nepomicni,
+                        BROJ_NEPOMICNIH_BLAGDANA,
+                        pomicni,
+                        BROJ_POMICNIH_BLAGDANA);
+  posaljiPCLog(F("Mrezni most je spremio pomicne blagdane toranjskog sata"));
   return true;
 }
 
@@ -1340,6 +1620,27 @@ static void obradiESPRedak() {
     return;
   }
 
+  if (strcmp(ulazniBuffer, "SETREQ:MISE") == 0) {
+    posaljiMisePostavkeESPu();
+    posaljiPCLog(F("Mrezni most je zatrazio misne postavke toranjskog sata"));
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strcmp(ulazniBuffer, "SETREQ:BLAGDANI_NEP") == 0) {
+    posaljiNepomicneBlagdaneESPu();
+    posaljiPCLog(F("Mrezni most je zatrazio nepomicne blagdane toranjskog sata"));
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strcmp(ulazniBuffer, "SETREQ:BLAGDANI_POM") == 0) {
+    posaljiPomicneBlagdaneESPu();
+    posaljiPCLog(F("Mrezni most je zatrazio pomicne blagdane toranjskog sata"));
+    resetirajUlazniBuffer();
+    return;
+  }
+
   if (strncmp(ulazniBuffer, "SETCFG:SUSTAV|", 14) == 0) {
     if (spremiSustavskePostavkeIzESPa(ulazniBuffer + 14)) {
       posaljiSustavskePostavkeESPu();
@@ -1383,6 +1684,42 @@ static void obradiESPRedak() {
     } else {
       espSerijskiPort.println(F("ERR:SETCFG"));
       posaljiPCLog(F("Mrezni most je poslao neispravne sunceve postavke toranjskog sata"));
+    }
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "SETCFG:MISE|", 12) == 0) {
+    if (spremiMisePostavkeIzESPa(ulazniBuffer + 12)) {
+      posaljiMisePostavkeESPu();
+      espSerijskiPort.println(F("ACK:SETCFG"));
+    } else {
+      espSerijskiPort.println(F("ERR:SETCFG"));
+      posaljiPCLog(F("Mrezni most je poslao neispravne misne postavke toranjskog sata"));
+    }
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "SETCFG:BLAGDANI_NEP|", 20) == 0) {
+    if (spremiNepomicneBlagdaneIzESPa(ulazniBuffer + 20)) {
+      posaljiNepomicneBlagdaneESPu();
+      espSerijskiPort.println(F("ACK:SETCFG"));
+    } else {
+      espSerijskiPort.println(F("ERR:SETCFG"));
+      posaljiPCLog(F("Mrezni most je poslao neispravne nepomicne blagdane toranjskog sata"));
+    }
+    resetirajUlazniBuffer();
+    return;
+  }
+
+  if (strncmp(ulazniBuffer, "SETCFG:BLAGDANI_POM|", 20) == 0) {
+    if (spremiPomicneBlagdaneIzESPa(ulazniBuffer + 20)) {
+      posaljiPomicneBlagdaneESPu();
+      espSerijskiPort.println(F("ACK:SETCFG"));
+    } else {
+      espSerijskiPort.println(F("ERR:SETCFG"));
+      posaljiPCLog(F("Mrezni most je poslao neispravne pomicne blagdane toranjskog sata"));
     }
     resetirajUlazniBuffer();
     return;

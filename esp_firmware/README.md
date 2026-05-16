@@ -18,6 +18,7 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 
 - `/` - jedina glavna stranica dashboarda
 - `/settings` - zasebna stranica za sigurne web postavke `Sustav`, `Stapici`, `BAT` i `Sunce`
+- `/blagdani` - zasebna stranica za redovite mise te unaprijed zadane nepomicne i pomicne blagdane s uredjivanjem ukljucenja i vremena mise `HH:MM`; prazno vrijeme znaci da je misa ili blagdan iskljucen
 - `/setup` - setup stranica za unos nove `WiFi` mreze dok je aktivan privremeni `AP`
 - `/update` - skrivena `OTA` stranica za upload novog `ESP` firmwarea
 - `/api/status` - `JSON` status `WiFi` veze i stvarnog stanja koje dashboard boja prikazuje
@@ -25,6 +26,7 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `/api/settings/stapici` - `JSON` dohvat i spremanje skupine `Stapici`
 - `/api/settings/bat` - `JSON` dohvat i spremanje skupine `BAT`
 - `/api/settings/sunce` - `JSON` dohvat i spremanje skupine `Sunce`
+- `/api/settings/blagdani` - `JSON` dohvat i spremanje skupine `Blagdani`
 - `/api/...` - servisne naredbe prema Megi
 
 ## 🧭 Dashboard
@@ -46,11 +48,17 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `Stapici`
 - `BAT`
 - `Sunce`
+- `Blagdani`
 - `Sustav` ukljucuje `LCD svjetlo`, `Logiranje`, `RS485`, `UPS mod`, `Kocnicu zvona`, `INR1`, `INR2` i `Impuls cekica`
 - `Stapici` ukljucuju trajanja `TR`, `TN`, `TS` i odgodu slavljenja `S`
 - `BAT` ukljucuje sate `od/do` i modove `OTK`, `S` i `M`
 - `BAT od/do` na webu znaci raspon u kojem je redovno otkucavanje dopusteno; izvan tog raspona `Mega` blokira samo otkucavanje kroz [main/postavke.cpp](../main/postavke.cpp) i [main/otkucavanje.cpp](../main/otkucavanje.cpp)
 - `Sunce` ukljucuje `Jutro`, `Podne`, `Vecer`, odabir zvona, jutarnje/vecernje odgode i `Nocnu rasvjetu`
+- `Blagdani` ukljucuju dnevnu i nedjeljnu misu te unaprijed zadanu listu `15` nepomicnih i `7` pomicnih blagdana; na webu se za svaki blagdan uredjuje samo ukljucenje i vrijeme mise `HH:MM`
+- dnevna misa pokrece samo `MUSKO` zvono `30 min` prije upisanog vremena mise `HH:MM`, uz radno trajanje zvonjenja iz [main/postavke.cpp](../main/postavke.cpp)
+- nedjeljna i blagdanska misa pokrecu nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije upisanog vremena mise `HH:MM`, bez dodatnog `slavljenja`
+- prazno polje vremena na `/blagdani` znaci da su odgovarajuca redovita misa ili blagdan iskljuceni, bez obzira na stanje kvacice
+- sva misna zvonjenja startaju u `25.` sekundi minute, sinkronizirano s citanjem cavala iz [main/okretna_ploca.cpp](../main/okretna_ploca.cpp)
 - `Mega` ostaje jedini autoritet za validaciju i spremanje kroz [main/postavke.cpp](../main/postavke.cpp)
 - `ESP32` samo prikazuje formu, salje cijeli paket i nakon potvrde ponovno cita stvarno stanje s `Mege`
 
@@ -78,7 +86,7 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `WIFISTATUS?` trazi trenutno `WiFi` stanje mreznog mosta
 - `NTPCFG:<server>` postavlja `NTP` server
 - `NTPREQ:SYNC` trazi trenutno `NTP` vrijeme u trenutku koji odabere `Mega`
-- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT` i `SETREQ:SUNCE` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE` i `SETREQ:BLAGDANI` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
 
 ### `ESP -> Mega`
 
@@ -92,7 +100,8 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `SET:STAPICI|tr=...|tn=...|ts=...|odg=...` vraca postavke stapica
 - `SET:BAT|od=...|do=...|otk=...|sl=...|mr=...` vraca `BAT` postavke
 - `SET:SUNCE|ju=...|jb=...|jo=...|pu=...|pb=...|vu=...|vb=...|vo=...|nr=...` vraca sunceve postavke
-- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...` i `SETCFG:SUNCE|...` salju novi puni paket odgovarajuce skupine prema `Megi`
+- `SET:BLAGDANI|f0=...|...|p0=...|rd=...|nd=...` vraca redovite mise i stanje unaprijed zadanih blagdana
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...` i `SETCFG:BLAGDANI|...` salju novi puni paket odgovarajuce skupine prema `Megi`
 - `ACK:*`, `ERR:*` i `NTPLOG:*` linije sluze za potvrde i dijagnostiku mreznog mosta
 
 ## ⏱️ UDP NTP tok
@@ -116,11 +125,11 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 ## 🚫 Sto vise nije aktivno
 
 - nema ruta `/mise` ni `/mise/blagdani`
-- nema `ESP` rasporeda za mise, blagdane ni posebnu zvonjavu
+- nema zasebne `ESP` automatike za mise, blagdane ni posebnu zvonjavu; web samo uredjuje postavke, a `Mega` vodi stvarni raspored toranjskog sata
 - nema `TIME?` fallbacka prema Megi
 - nema ruta `/detalji`, `/clock-config`, `/hand-service`, `/plate-service` ni `/password`
 - nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce toranjskog sata
-- nema web uredjivanja vremena, datuma, kazaljki, okretne ploce ni slozenih blagdanskih servisnih grupa izvan skupina `Sustav`, `Stapici`, `BAT` i `Sunce`
+- nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce; blagdanski web sloj pokriva samo ukljucenje i vrijeme mise unaprijed zadanih blagdana
 - nema aktivnog `WEBCFG` toka prema Megi
 - ako netko ipak posalje `WEBCFG?` ili `WEBCFGSET:...`, `Mega` vraca `ERR:WEBCFGDISABLED`
 
@@ -161,10 +170,12 @@ Napomena:
 - `ESP` vise ne treba sam slati `NTP:` po spajanju; `NTP` prema Megi ide tek nakon `NTPREQ:SYNC`
 - `http://<ip-esp>/api/status` treba vratiti `JSON` sa stanjem `WiFi` veze, glavnih tipki, suncevih tipki i `TIHOG MODA`
 - `http://<ip-esp>/settings` treba otvoriti stranicu sa skupinama `Sustav`, `Stapici`, `BAT` i `Sunce` te pri ulazu povuci stvarno stanje s `Mege`
+- `http://<ip-esp>/blagdani` treba otvoriti zasebnu stranicu za redovite i blagdanske mise te pri ulazu povuci stvarno stanje s `Mege`
 - `http://<ip-esp>/api/settings/system?force=1` treba vratiti `JSON` sa stanjem `Sustav` postavki
 - `http://<ip-esp>/api/settings/stapici?force=1` treba vratiti `JSON` sa stanjem `Stapica`
 - `http://<ip-esp>/api/settings/bat?force=1` treba vratiti `JSON` sa stanjem `BAT` postavki
 - `http://<ip-esp>/api/settings/sunce?force=1` treba vratiti `JSON` sa stanjem `Sunce` postavki
+- `http://<ip-esp>/api/settings/blagdani?force=1` treba vratiti `JSON` sa stanjem `Blagdana`
 - pocetna stranica treba prikazati samo glavne tipke, sunceve tipke i crveni `TIHI MOD`
 - API pozivi poput `http://<ip-esp>/api/bell1/on` i `http://<ip-esp>/api/quiet/on` trebaju poslati odgovarajuci `CMD:` prema Megi
 - `http://<ip-esp>/update` treba otvoriti `OTA` upload stranicu i nakon uspjesnog slanja firmwarea izazvati restart `ESP` modula

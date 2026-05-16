@@ -22,12 +22,14 @@ void azurirajVrijemeRucno(const DateTime& rucnoVrijeme);
 
 const char* dohvatiOznakuIzvoraVremena();
 bool jeRtcSqwAktivan();
+bool jeRtcSqwGreskaAktivna();
 bool jeRtcSqwPrvaPolovicaSekunde();
 bool jeRtcDegradiraniNacinAktivan();
 bool jeRtcIzlazniFailSafeAktivan();
 bool dohvatiRtcTemperaturu(float& temperaturaC);
 bool jeVrijemePotvrdjenoZaAutomatiku();
 bool jeUskrsnaTisinaAktivna(const DateTime& vrijeme);
+DateTime dohvatiDatumUskrsaZaGodinu(int godina);
 int dohvatiUTCOffsetMinuteZaLokalnoVrijeme(const DateTime& vrijeme);
 
 void resetirajIzvorSinkronizacijeNaRTC();

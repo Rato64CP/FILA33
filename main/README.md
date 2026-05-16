@@ -27,7 +27,12 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `Mega 2560` vodi sve radne odluke toranjskog sata
 - vanjski `ESP32` je samo pomocni mrezni sloj
 - vanjski mrezni sloj donosi WiFi, NTP, setup WiFi i bezicni servisni API
-- preko `ESP32` weba sada su dopustene sigurne skupine `Sustav`, `Stapici`, `BAT` i `Sunce`, dok `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje
+- preko `ESP32` weba sada su dopustene sigurne skupine `Sustav`, `Stapici`, `BAT`, `Sunce` i `Blagdani`, dok `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje
+- zasebni modul `main/mise_automatika.*` sada vodi redovite dnevne i nedjeljne mise te posebne blagdanske mise, odvojeno od `main/sunceva_automatika.*`
+- `Blagdani` koriste unaprijed zadanu listu nepomicnih i pomicnih blagdana; web i serijski sloj uredjuju samo ukljucenje i vrijeme mise `HH:MM`, a toranjski sat zatim sam vodi nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise, bez dodatnog `slavljenja`
+- `Redovite mise` nose dnevno i nedjeljno vrijeme mise `HH:MM`; dnevna misa koristi samo `MUSKO` zvono `30 min` prije mise, a nedjeljna misa nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise
+- prazno vrijeme iz web sloja znaci da su odgovarajuca dnevna misa, nedjeljna misa ili blagdan iskljuceni, bez obzira na stanje kvacice
+- sva misna zvonjenja iz [main/mise_automatika.cpp](mise_automatika.cpp) startaju u `25.` sekundi minute, sinkronizirano s citanjem cavala iz [main/okretna_ploca.cpp](okretna_ploca.cpp)
 - `BAT od/do` iz weba i lokalnog menija tumace se kao raspon u kojem je redovno otkucavanje dopusteno; izvan njega `Mega` blokira samo otkucavanje
 - stare `WEBCFG` poruke ostale su samo kao kompatibilno odbijanje u `main/esp_serial.cpp`
 
@@ -38,6 +43,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - `esp_serial.*` - UART protokol prema vanjskom mreznom mostu
 - `kazaljke_sata.*` - kretanje i sinkronizacija kazaljki
 - `okretna_ploca.*` - polozaj, koraci, faze i cavli ploce
+- `mise_automatika.*` - redovite dnevne/nedjeljne mise i blagdanske mise
 - `zvonjenje.*` - zvona i pripadna stanja
 - `otkucavanje.*` - satno i polusatno otkucavanje
 - `slavljenje_mrtvacko.*` - slavljenje, mrtvacko i thumbwheel timer
@@ -63,14 +69,15 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 
 - Mega trenutno koristi `Serial3` za vanjski `ESP32` mrezni most
 - `Serial1` je aktivni `RS485` transportni sloj, dok komunikacija prema `ESP-u` ostaje na `Serial3`
-- aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za skupine `SUSTAV`, `STAPICI`, `BAT` i `SUNCE`
+- aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za skupine `SUSTAV`, `STAPICI`, `BAT`, `SUNCE` i `BLAGDANI`
 - `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
 - vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
 - prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije nego sto ga `Mega` prihvati za toranjski sat
 - `WEBCFG?` i `WEBCFGSET:` vise ne nose konfiguraciju sata i vracaju `ERR:WEBCFGDISABLED`
 - prihvaceni `NTP` zapis i start redovnog otkucavanja poravnavaju se na `RTC SQW` granicu sekunde kad je dostupna
-- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT` i `SETREQ:SUNCE` traze trenutno stanje pojedine skupine iz `main/postavke.*`
-- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...` i `SETCFG:SUNCE|...` salju puni paket pojedine skupine, a `Mega` ga validira i sprema
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE` i `SETREQ:BLAGDANI` traze trenutno stanje pojedine skupine iz `main/postavke.*`
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...` i `SETCFG:BLAGDANI|...` salju puni paket pojedine skupine, a `Mega` ga validira i sprema
+- `SET:BLAGDANI|...|rd=...|nd=...` i odgovarajuci `SETCFG:BLAGDANI|...|rd=...|nd=...` sada nose i dnevnu i nedjeljnu misu uz blagdanske unose
 
 ## 💾 EEPROM i recovery
 

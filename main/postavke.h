@@ -17,6 +17,33 @@ enum BlagdanskoRazdoblje {
   BLAGDAN_RAZDOBLJE_BROJ = 3
 };
 
+struct NepomicniBlagdanPostavka {
+  bool omogucen;
+  uint8_t mjesec;
+  uint8_t dan;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct PomicniBlagdanPostavka {
+  bool omogucen;
+  int8_t pomakOdUskrsaDana;
+  uint8_t satMise;
+  uint8_t minutaMise;
+};
+
+struct RedoviteMisePostavke {
+  bool dnevnaOmogucena;
+  uint8_t dnevnaSatMise;
+  uint8_t dnevnaMinutaMise;
+  bool nedjeljnaOmogucena;
+  uint8_t nedjeljnaSatMise;
+  uint8_t nedjeljnaMinutaMise;
+};
+
+constexpr uint8_t BROJ_NEPOMICNIH_BLAGDANA = 15;
+constexpr uint8_t BROJ_POMICNIH_BLAGDANA = 7;
+
 // Inicijalizacija postavki iz EEPROM-a
 void ucitajPostavke();
 
@@ -95,6 +122,9 @@ uint8_t dohvatiMaskuBlagdanskihRazdoblja();
 bool jeSviSvetiMrtvackoOmoguceno();
 uint8_t dohvatiSviSvetiPocetakSat();
 uint8_t dohvatiSviSvetiZavrsetakSat();
+void dohvatiNepomicniBlagdan(uint8_t indeks, NepomicniBlagdanPostavka& izlaz);
+void dohvatiPomicniBlagdan(uint8_t indeks, PomicniBlagdanPostavka& izlaz);
+void dohvatiRedoviteMise(RedoviteMisePostavke& izlaz);
 void postaviWiFiOmogucen(bool omogucen);
 void postaviRS485Omogucen(bool omogucen);
 void postaviUPSModOmogucen(bool omogucen);
@@ -105,6 +135,11 @@ void postaviSuncevDogadaj(uint8_t dogadaj, bool omogucen, uint8_t zvono, int odg
 void postaviNocnuRasvjetuOmoguceno(bool omoguceno);
 void postaviBlagdanskePostavke(uint8_t slavljenjeMaska, uint8_t razdobljaMaska);
 void postaviSviSvetiPostavke(bool omoguceno, uint8_t pocetakSat, uint8_t zavrsetakSat);
+void postaviBlagdanskeMise(const NepomicniBlagdanPostavka* nepomicni,
+                           uint8_t brojNepomicnih,
+                           const PomicniBlagdanPostavka* pomicni,
+                           uint8_t brojPomicnih);
+void postaviRedoviteMise(const RedoviteMisePostavke& postavkeMisa);
 void postaviKonfiguracijuPloce(bool aktivna, int pocetakMinuta, int krajMinuta);
 void postaviWiFiPodatkeZaSetup(const char* ssid, const char* lozinka);
 void postaviNTPOmogucen(bool omogucen);
