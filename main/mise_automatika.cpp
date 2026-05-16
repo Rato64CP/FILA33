@@ -41,9 +41,9 @@ static ZakazanaMisaAutomatike zakazanaMisa = {
     false, TIP_MISE_DNEVNA, 0, 0, 0, 0, 0};
 static uint32_t zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
 static uint16_t zadnjiOkinutiDnevnaMisa = KLJUC_DATUMA_NEPOSTAVLJEN;
-static uint16_t zadnjiOkinutiNedjeljnaMisa = KLJUC_DATUMA_NEPOSTAVLJEN;
-static uint16_t zadnjiOkinutiNepomicniBlagdan[BROJ_NEPOMICNIH_BLAGDANA];
-static uint16_t zadnjiOkinutiPomicniBlagdan[BROJ_POMICNIH_BLAGDANA];
+static uint16_t zadnjiOkinutiNedjeljnaMisa[2];
+static uint16_t zadnjiOkinutiNepomicniBlagdan[BROJ_NEPOMICNIH_BLAGDANA][2];
+static uint16_t zadnjiOkinutiPomicniBlagdan[BROJ_POMICNIH_BLAGDANA][2];
 static uint32_t zadnjaObradenaMisaUTekucojSekundi = 0xFFFFFFFFUL;
 
 static uint16_t napraviDatumKljuc(const DateTime& vrijeme) {
@@ -269,18 +269,16 @@ static void obradiJedanTerminMise(TipMiseAutomatike tip,
                                   uint8_t minutaMise,
                                   uint16_t minutePrijeMise,
                                   unsigned long trajanjeZvonaMs,
-                                  uint16_t& zadnjiKljucZaTip) {
+                                  uint16_t& zadnjiDatumZaTermin) {
   const uint16_t datumKljuc = napraviDatumKljuc(sada);
   const uint32_t kljucSekunde = napraviKljucSekunde(sada);
 
   if (!jeTerminMiseAktivan(sada, satMise, minutaMise, minutePrijeMise)) {
     return;
   }
-  if (zadnjiKljucZaTip == kljucSekunde) {
+  if (zadnjiDatumZaTermin == datumKljuc) {
     return;
   }
-
-  zadnjiKljucZaTip = kljucSekunde;
   if (zadnjaObradenaMisaUTekucojSekundi == kljucSekunde) {
     return;
   }
@@ -298,6 +296,7 @@ static void obradiJedanTerminMise(TipMiseAutomatike tip,
     return;
   }
 
+  zadnjiDatumZaTermin = datumKljuc;
   if (jeMehanikaZauzetaZaMisu()) {
     zakaziMisu(tip, indeksUnosa, datumKljuc, minutePrijeMise, trajanjeZvonaMs);
     return;
@@ -324,7 +323,7 @@ static void obradiBlagdanskeMise(const DateTime& sada) {
                             blagdan.minutaMise,
                             ODMACI_BLAGDANSKE_MISE_MIN[odmak],
                             trajanjeZvonaMs,
-                            zadnjiOkinutiNepomicniBlagdan[i]);
+                            zadnjiOkinutiNepomicniBlagdan[i][odmak]);
     }
   }
 
@@ -342,7 +341,7 @@ static void obradiBlagdanskeMise(const DateTime& sada) {
                             blagdan.minutaMise,
                             ODMACI_BLAGDANSKE_MISE_MIN[odmak],
                             trajanjeZvonaMs,
-                            zadnjiOkinutiPomicniBlagdan[i]);
+                            zadnjiOkinutiPomicniBlagdan[i][odmak]);
     }
   }
 }
@@ -360,7 +359,7 @@ static void obradiRedoviteMise(const DateTime& sada) {
                             mise.nedjeljnaMinutaMise,
                             120U,
                             dohvatiTrajanjeZvonjenjaNedjeljaMs(),
-                            zadnjiOkinutiNedjeljnaMisa);
+                            zadnjiOkinutiNedjeljnaMisa[0]);
       obradiJedanTerminMise(TIP_MISE_NEDJELJNA,
                             0,
                             sada,
@@ -368,7 +367,7 @@ static void obradiRedoviteMise(const DateTime& sada) {
                             mise.nedjeljnaMinutaMise,
                             60U,
                             dohvatiTrajanjeZvonjenjaNedjeljaMs(),
-                            zadnjiOkinutiNedjeljnaMisa);
+                            zadnjiOkinutiNedjeljnaMisa[1]);
     }
     return;
   }
@@ -391,13 +390,19 @@ void inicijalizirajMiseAutomatiku() {
   zakazanaMisa.aktivna = false;
   zadnjiObradeniKljucSekunde = 0xFFFFFFFFUL;
   zadnjiOkinutiDnevnaMisa = KLJUC_DATUMA_NEPOSTAVLJEN;
-  zadnjiOkinutiNedjeljnaMisa = KLJUC_DATUMA_NEPOSTAVLJEN;
   zadnjaObradenaMisaUTekucojSekundi = 0xFFFFFFFFUL;
+  for (uint8_t odmak = 0; odmak < 2; ++odmak) {
+    zadnjiOkinutiNedjeljnaMisa[odmak] = KLJUC_DATUMA_NEPOSTAVLJEN;
+  }
   for (uint8_t i = 0; i < BROJ_NEPOMICNIH_BLAGDANA; ++i) {
-    zadnjiOkinutiNepomicniBlagdan[i] = KLJUC_DATUMA_NEPOSTAVLJEN;
+    for (uint8_t odmak = 0; odmak < 2; ++odmak) {
+      zadnjiOkinutiNepomicniBlagdan[i][odmak] = KLJUC_DATUMA_NEPOSTAVLJEN;
+    }
   }
   for (uint8_t i = 0; i < BROJ_POMICNIH_BLAGDANA; ++i) {
-    zadnjiOkinutiPomicniBlagdan[i] = KLJUC_DATUMA_NEPOSTAVLJEN;
+    for (uint8_t odmak = 0; odmak < 2; ++odmak) {
+      zadnjiOkinutiPomicniBlagdan[i][odmak] = KLJUC_DATUMA_NEPOSTAVLJEN;
+    }
   }
 }
 

@@ -37,11 +37,10 @@
 ## 🔄 Serijska komunikacija
 
 - Mega koristi `Serial3` za vanjski `ESP32` kao jedini aktivni mrezni most
-- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za web skupine `SUSTAV`, `STAPICI`, `BAT`, `SUNCE` i `BLAGDANI`
+- aktivne naredbe su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za web skupine `SUSTAV`, `STAPICI`, `BAT`, `SUNCE`, `MISE`, `BLAGDANI_NEP` i `BLAGDANI_POM`
 - `Mega 2560` sama bira siguran trenutak za `NTPREQ:SYNC`, tek kad su kazaljke i okretna ploca mirne
 - `ESP` vise ne salje `NTP:` automatski po spajanju ili satno, nego odgovara samo na zahtjev Mege
 - prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije prve sinkronizacije toranjskog sata
-- stare `WEBCFG?` i `WEBCFGSET:` poruke ostavljene su samo radi kompatibilnog odbijanja i vracaju `ERR:WEBCFGDISABLED`
 - `ESP32` sada ima zasebne stranice `/settings` i `/blagdani`, ali `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje svih web postavki
 
 ## 🧩 Struktura Projekta

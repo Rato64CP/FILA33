@@ -86,7 +86,7 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `WIFISTATUS?` trazi trenutno `WiFi` stanje mreznog mosta
 - `NTPCFG:<server>` postavlja `NTP` server
 - `NTPREQ:SYNC` trazi trenutno `NTP` vrijeme u trenutku koji odabere `Mega`
-- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE` i `SETREQ:BLAGDANI` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE`, `SETREQ:MISE`, `SETREQ:BLAGDANI_NEP` i `SETREQ:BLAGDANI_POM` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
 
 ### `ESP -> Mega`
 
@@ -100,8 +100,10 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `SET:STAPICI|tr=...|tn=...|ts=...|odg=...` vraca postavke stapica
 - `SET:BAT|od=...|do=...|otk=...|sl=...|mr=...` vraca `BAT` postavke
 - `SET:SUNCE|ju=...|jb=...|jo=...|pu=...|pb=...|vu=...|vb=...|vo=...|nr=...` vraca sunceve postavke
-- `SET:BLAGDANI|f0=...|...|p0=...|rd=...|nd=...` vraca redovite mise i stanje unaprijed zadanih blagdana
-- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...` i `SETCFG:BLAGDANI|...` salju novi puni paket odgovarajuce skupine prema `Megi`
+- `SET:MISE|rd=...|nd=...` vraca redovite dnevne i nedjeljne mise
+- `SET:BLAGDANI_NEP|f0=...|...` vraca stanje unaprijed zadanih nepomicnih blagdana
+- `SET:BLAGDANI_POM|p0=...|...` vraca stanje unaprijed zadanih pomicnih blagdana
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...`, `SETCFG:MISE|...`, `SETCFG:BLAGDANI_NEP|...` i `SETCFG:BLAGDANI_POM|...` salju novi puni paket odgovarajuce skupine prema `Megi`
 - `ACK:*`, `ERR:*` i `NTPLOG:*` linije sluze za potvrde i dijagnostiku mreznog mosta
 
 ## ⏱️ UDP NTP tok
@@ -130,8 +132,6 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - nema ruta `/detalji`, `/clock-config`, `/hand-service`, `/plate-service` ni `/password`
 - nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce toranjskog sata
 - nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce; blagdanski web sloj pokriva samo ukljucenje i vrijeme mise unaprijed zadanih blagdana
-- nema aktivnog `WEBCFG` toka prema Megi
-- ako netko ipak posalje `WEBCFG?` ili `WEBCFGSET:...`, `Mega` vraca `ERR:WEBCFGDISABLED`
 
 ## 📶 Setup WiFi
 

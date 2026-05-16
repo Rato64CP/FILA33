@@ -4267,22 +4267,6 @@ static const char WEB_BLAGDANI_STRANICA[] PROGMEM = R"HTML(
       postaviToggle(id, !aktivno);
     }
 
-    function brojIzPolja(id, min, max) {
-      const polje = document.getElementById(id);
-      if (!polje) {
-        throw new Error('Polje ' + id + ' nije pronadjeno.');
-      }
-      const vrijednost = String(polje.value || '').trim();
-      if (vrijednost.length === 0) {
-        throw new Error('Polje ' + id + ' je prazno.');
-      }
-      const broj = Number(vrijednost);
-      if (!Number.isInteger(broj) || broj < min || broj > max) {
-        throw new Error('Polje ' + id + ' mora biti u rasponu ' + min + '-' + max + '.');
-      }
-      return broj;
-    }
-
     function normalizirajUnosVremena(vrijednost) {
       const znamenke = String(vrijednost || '').replace(/\D/g, '').slice(0, 4);
       if (znamenke.length <= 2) {

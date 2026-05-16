@@ -1725,20 +1725,6 @@ static void obradiESPRedak() {
     return;
   }
 
-  if (strcmp(ulazniBuffer, "WEBCFG?") == 0) {
-    espSerijskiPort.println(F("ERR:WEBCFGDISABLED"));
-      posaljiPCLog(F("Web konfiguracija na mreznom mostu je onemogucena; postavke toranjskog sata uredjuju se na Megi"));
-    resetirajUlazniBuffer();
-    return;
-  }
-
-  if (strncmp(ulazniBuffer, "WEBCFGSET:", 10) == 0) {
-    espSerijskiPort.println(F("ERR:WEBCFGDISABLED"));
-      posaljiPCLog(F("Mrezni most je pokusao spremiti web postavke sata, ali je konfiguracija vracena na Megu"));
-    resetirajUlazniBuffer();
-    return;
-  }
-
   if (strcmp(ulazniBuffer, "STATUS?") == 0) {
     posaljiStatusESPU();
     resetirajUlazniBuffer();
