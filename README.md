@@ -96,7 +96,6 @@
 - kad je `EEPROM` u degradiranom nacinu rada, periodicni backup i pomocni zapisi poput DST i zadnje sinkronizacije se pauziraju
 - `I2C` sabirnica koristi zajednicki `Wire` timeout i reset sabirnice za `LCD`, `DS3231`, vanjski `FRAM` spremnik i servisno skeniranje
 - `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan kako pomocni zapisi ne bi nepotrebno gurali toranjski sat prema WDT resetu
-- stari `offset` ploce i MQTT tragovi vise nisu dio aktivnog EEPROM modela
 - kod izmjena koje diraju EEPROM raspored ili recovery logiku obavezno provjeri:
 - `main/eeprom_konstante.h`
 - `main/unified_motion_state.*`

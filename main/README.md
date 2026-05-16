@@ -92,7 +92,6 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - u degradiranom `EEPROM` nacinu rada pauziraju se periodicni backup i pomocni zapisi iz `time_glob.*`
 - `LCD`, `RTC`, vanjska `EEPROM/FRAM` memorija i servisni `I2C` scan koriste zajednicku pripremu `Wire` sabirnice s timeoutom
 - `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan
-- `offset` ploce i MQTT tragovi vise nisu dio aktivnog modela
 - pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
 - `eeprom_konstante.h`
 - `unified_motion_state.*`

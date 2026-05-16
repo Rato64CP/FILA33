@@ -124,15 +124,6 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - kad `Mega` blokira automatiku zbog `RTC` ili `EEPROM` problema, `ESP` ostaje samo pomocni izvor mreze i vremena bez ovlasti nad mehanikom toranjskog sata
 - nakon `WiFi` watchdog reseta `Mega` dobiva `NTP:` tek kad `ESP` ponovno potvrdi svjeze vrijeme
 
-## 🚫 Sto vise nije aktivno
-
-- nema ruta `/mise` ni `/mise/blagdani`
-- nema zasebne `ESP` automatike za mise, blagdane ni posebnu zvonjavu; web samo uredjuje postavke, a `Mega` vodi stvarni raspored toranjskog sata
-- nema `TIME?` fallbacka prema Megi
-- nema ruta `/detalji`, `/clock-config`, `/hand-service`, `/plate-service` ni `/password`
-- nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce toranjskog sata
-- nema web uredjivanja vremena, datuma, kazaljki ni okretne ploce; blagdanski web sloj pokriva samo ukljucenje i vrijeme mise unaprijed zadanih blagdana
-
 ## 📶 Setup WiFi
 
 - setup `AP` ima `SSID` `ZVONKO_setup`
