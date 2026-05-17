@@ -5,9 +5,6 @@
 
 void inicijalizirajPCSerijsku() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000) {
-    delay(10);
-  }
   Serial.println(F("============================================"));
   Serial.println(F("ZVONKO v. 1.0 - RTC+NTP sinkronizacija"));
   Serial.println(F("============================================"));

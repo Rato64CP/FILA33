@@ -56,6 +56,7 @@
 - `main/zvonjenje.*` - upravljanje zvonima i inercijom
 - `main/otkucavanje.*` - cekici, satno i polusatno otkucavanje
 - `main/slavljenje_mrtvacko.*` - posebni nacini rada cekica i thumbwheel timer mrtvackog
+- `main/pogrebne_skripte.*` - jednokratne sekvence `POKOJNIK` i `POKOJNICA`
 - `main/prekidac_tisine.*` - jedinstveni tihi rezim i lampica tihog moda
 - `main/ups_nadzor.*` - nadzor mreznog napona i `UPS mod`
 - `main/menu_system.*`, `main/tipke.*`, `main/lcd_display.*` - lokalni LCD izbornik i unos
@@ -74,7 +75,9 @@
 - status LED koristi `GPIO26`
 - setup stranica je dostupna na `http://192.168.4.1/` i `http://192.168.4.1/setup`
 - nakon spremanja nove mreze `ESP32` prosljeduje WiFi podatke i Megi kako bi cijeli toranjski sat ostao uskladen
-- servisni dashboard na `ESP` sada koristi glavne tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`, sunceve tipke `JUTRO`, `PODNE`, `VECER` i crveni toggle `TIHI MOD`
+- servisni dashboard na `ESP` sada koristi glavne tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`, jednokratne pogrebne tipke `POKOJNIK` i `POKOJNICA`, sunceve tipke `JUTRO`, `PODNE`, `VECER` i crveni toggle `TIHI MOD`
+- `POKOJNIK` pokrece `MUSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
+- `POKOJNICA` pokrece `ZENSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
 - kroz `/settings` i `/blagdani` `ESP32` sada moze sigurno uredjivati `Sustav`, `Stapice`, `BAT`, `Sunce`, redovite mise i unaprijed zadane blagdanske mise, bez diranja vremena, datuma, kazaljki i okretne ploce
 - dnevna misa pokrece samo `MUSKO` zvono `30 min` prije upisanog vremena mise `HH:MM`
 - nedjeljna i blagdanska misa pokrecu nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije upisanog vremena mise `HH:MM`, bez dodatnog `slavljenja`

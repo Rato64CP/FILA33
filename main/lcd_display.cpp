@@ -445,13 +445,6 @@ void inicijalizirajLCD() {
   memset(activity_message, ' ', sizeof(activity_message) - 1);
   activity_message[16] = '\0';
   wifi_ip_poruka[0] = '\0';
-
-  lcd.setCursor(0, 0);
-  lcd.print(F("ZVONKO v. 1.0"));
-  lcd.setCursor(0, 1);
-  lcd.print(F("Inicijalizacija"));
-
-  delay(2000);
   lcd.clear();
 
   resetirajCachePrikazaLCD();

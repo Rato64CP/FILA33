@@ -14,6 +14,14 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - prihvaca setup `WiFi` kroz privremeni `AP`
 - ostaje pomocni mrezni sloj i ne zaobilazi odluke koje donose [main/time_glob.cpp](../main/time_glob.cpp), [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp) i [main/power_recovery.cpp](../main/power_recovery.cpp)
 
+## 🧩 Struktura firmwarea
+
+- `esp_firmware.ino` sadrzi zajednicke globalne strukture, konfiguraciju i forward deklaracije
+- `esp_boot_wifi.ino` vodi boot tok, `setup()/loop()`, `WiFi` povezivanje i setup `AP`
+- `esp_serial_mega.ino` vodi serijski protokol izmedu `ESP32` mreznog mosta i [main/esp_serial.cpp](../main/esp_serial.cpp)
+- `esp_time_ntp.ino` sadrzi `NTP` i kalendarske pomocne funkcije za lokalno vrijeme toranjskog sata
+- `esp_web.ino` sadrzi `Basic Auth`, `JSON` API, `OTA` i sve web stranice dashboarda, postavki i blagdana
+
 ## 🌐 Aktivne web rute
 
 - `/` - jedina glavna stranica dashboarda
@@ -22,6 +30,8 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 - `/setup` - setup stranica za unos nove `WiFi` mreze dok je aktivan privremeni `AP`
 - `/update` - skrivena `OTA` stranica za upload novog `ESP` firmwarea
 - `/api/status` - `JSON` status `WiFi` veze i stvarnog stanja koje dashboard boja prikazuje
+- `/api/pokojnik` - pokrece jednokratnu sekvencu `POKOJNIK`
+- `/api/pokojnica` - pokrece jednokratnu sekvencu `POKOJNICA`
 - `/api/settings/system` - `JSON` dohvat i spremanje skupine `Sustav`
 - `/api/settings/stapici` - `JSON` dohvat i spremanje skupine `Stapici`
 - `/api/settings/bat` - `JSON` dohvat i spremanje skupine `BAT`
@@ -33,6 +43,9 @@ Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj t
 
 - gornji 2x2 blok koristi tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`
 - gornje tipke su naglasene i tamnije plave kad su ukljucene
+- ispod gornjeg bloka postoje dvije jednokratne tipke `POKOJNIK` i `POKOJNICA`
+- `POKOJNIK` salje sekvencu `MUSKO` zvono `2 minute` -> cekanje inercije -> `MRTVACKO` `10 minuta`
+- `POKOJNICA` salje sekvencu `ZENSKO` zvono `2 minute` -> cekanje inercije -> `MRTVACKO` `10 minuta`
 - donji blok koristi tipke `JUTRO`, `PODNE`, `VECER`
 - ispod suncevih tipki postoji crveni toggle `TIHI MOD`
 - pri dnu dashboarda postoji i servisni link `POSTAVKE`

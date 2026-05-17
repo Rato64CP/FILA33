@@ -29,6 +29,9 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - vanjski mrezni sloj donosi WiFi, NTP, setup WiFi i bezicni servisni API
 - preko `ESP32` weba sada su dopustene sigurne skupine `Sustav`, `Stapici`, `BAT`, `Sunce` i `Blagdani`, dok `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje
 - zasebni modul `main/mise_automatika.*` sada vodi redovite dnevne i nedjeljne mise te posebne blagdanske mise, odvojeno od `main/sunceva_automatika.*`
+- zasebni modul `main/pogrebne_skripte.*` sada vodi jednokratne sekvence `POKOJNIK` i `POKOJNICA` s `ESP32` dashboarda
+- `POKOJNIK` pokrece `MUSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
+- `POKOJNICA` pokrece `ZENSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
 - `Blagdani` koriste unaprijed zadanu listu nepomicnih i pomicnih blagdana; web i serijski sloj uredjuju samo ukljucenje i vrijeme mise `HH:MM`, a toranjski sat zatim sam vodi nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise, bez dodatnog `slavljenja`
 - `Redovite mise` nose dnevno i nedjeljno vrijeme mise `HH:MM`; dnevna misa koristi samo `MUSKO` zvono `30 min` prije mise, a nedjeljna misa nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise
 - prazno vrijeme iz web sloja znaci da su odgovarajuca dnevna misa, nedjeljna misa ili blagdan iskljuceni, bez obzira na stanje kvacice
@@ -39,17 +42,27 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 
 - `main.ino` - inicijalizacija i glavna petlja
 - `time_glob.*` - upravljanje izvorima vremena, DST-om i sinkronizacijom
-- `esp_serial.*` - UART protokol prema vanjskom mreznom mostu
+- `esp_serial.*` - javna jezgra UART protokola prema vanjskom mreznom mostu
+- `esp_serial_internal.h` - interni dogovor izmedu serijskih podmodula
+- `esp_serial_status.cpp` - `STATUS` snapshot i push prema `ESP32` dashboardu
+- `esp_serial_ntp.cpp` - `WiFi`, `NTP` i vremenska koordinacija prema mreznom mostu
+- `esp_serial_postavke.cpp` - `SETREQ/SETCFG` razmjena skupina postavki
+- `esp_serial_cmd.cpp` - `CMD:` komande za zvona, slavljenje, tihi mod i pogrebne skripte
+- `esp_serial_parser.cpp` - parser dolaznih redaka s `ESP32` mosta
 - `kazaljke_sata.*` - kretanje i sinkronizacija kazaljki
 - `okretna_ploca.*` - polozaj, koraci, faze i cavli ploce
 - `mise_automatika.*` - redovite dnevne/nedjeljne mise i blagdanske mise
+- `pogrebne_skripte.*` - jednokratne sekvence `POKOJNIK` i `POKOJNICA`
 - `zvonjenje.*` - zvona i pripadna stanja
 - `otkucavanje.*` - satno i polusatno otkucavanje
 - `slavljenje_mrtvacko.*` - slavljenje, mrtvacko i thumbwheel timer
 - `prekidac_tisine.*` - jedinstveni tihi rezim i lampica
 - `ups_nadzor.*` - nadzor mreznog napona i blokada mehanike dok toranjski sat radi samo s UPS-a
 - `menu_system.*`, `lcd_display.*`, `tipke.*` - lokalni korisnicki sloj
-- `postavke.*` - trajne postavke toranjskog sata
+- `postavke.*` - glavna jezgra trajnih postavki toranjskog sata
+- `postavke_skladistenje.*` - checksum, citanje/pisanje spremnika i EEPROM helperi
+- `postavke_mreza.*` - WiFi, IP i NTP tekstualna validacija za `ESP32` most
+- `postavke_kalendar.*` - liturgijski kalendar, blagdani i satnice misa
 - `unified_motion_state.*` - zajednicko stanje gibanja
 - `power_recovery.*` i `watchdog.*` - pouzdanost rada 24/7
 - `wear_leveling.*` i `i2c_eeprom.*` - trajna pohrana i raspodjela zapisa

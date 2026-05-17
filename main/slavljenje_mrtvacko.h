@@ -18,5 +18,6 @@ void preklopiSlavljenjeDaljinskimUpravljacem();
 void zapocniMrtvacko();
 bool pokusajZapocetiMrtvackoBezCekanja();
 bool pokusajZapocetiMrtvackoBezAutoStopa();
+bool pokusajZapocetiMrtvackoSaFiksnimTrajanjemBezCekanja(uint8_t trajanjeMin);
 void zaustaviMrtvacko();
 bool jeMrtvackoUTijeku();

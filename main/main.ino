@@ -21,6 +21,7 @@
 #include "power_recovery.h"
 #include "sunceva_automatika.h"
 #include "mise_automatika.h"
+#include "pogrebne_skripte.h"
 #include "prekidac_tisine.h"
 #include "rs485_bridge.h"
 #include "ups_nadzor.h"
@@ -82,6 +83,7 @@ void setup() {
   inicijalizirajZvona();
   inicijalizirajSuncevuAutomatiku();
   inicijalizirajMiseAutomatiku();
+  inicijalizirajPogrebneSkripte();
   inicijalizirajOtkucavanje();
   inicijalizirajPrekidacTisine();
   inicijalizirajMrtvackoThumbwheel();
@@ -131,9 +133,11 @@ void loop() {
   upravljajOtkucavanjem();
   upravljajSuncevomAutomatikom();
   upravljajMiseAutomatikom();
+  upravljajPogrebnimSkriptama(millis());
   osvjeziMrtvackoThumbwheel();
   upravljajKorekcijomKazaljki();
   upravljajPlocom();
+  osvjeziStatusPushPremaESP();
   obradiAutomatskiNTPZahtjevESP();
   spremiKriticalnoStanje();
   osvjeziPowerRecoveryDijagnostiku();

@@ -324,11 +324,18 @@ void azurirajMrtvacko(unsigned long sadaMs) {
     if (proteklo >= trajanjeImpulsa) {
       deaktivirajObaCekicaZaPosebniNacin();
       mrtvacko.cekiciAktivni = false;
-      mrtvacko.vrijemeFazeMs = sadaMs;
       if (mrtvacko.aktivniMod == MOD_MRTVACKO_SEKVENCIJALNO &&
           mrtvacko.faza == MRTVACKO_FAZA_CEKIC1) {
+        mrtvacko.vrijemeFazeMs = sadaMs;
         mrtvacko.faza = MRTVACKO_FAZA_PAUZA_NAKON_CEKIC1;
       } else {
+        // Klasicno mrtvacko mora zadrzati ritam "od pocetka do pocetka"
+        // kako se kroz 10 minuta ne bi akumuliralo trajanje samog impulsa
+        // i postupno razvlacilo razmak izmedu udaraca.
+        mrtvacko.vrijemeFazeMs =
+            (mrtvacko.aktivniMod == MOD_MRTVACKO_SEKVENCIJALNO)
+                ? sadaMs
+                : (sadaMs - trajanjeImpulsa);
         mrtvacko.faza = MRTVACKO_FAZA_PAUZA;
       }
     }
@@ -526,7 +533,10 @@ bool pokreniSlavljenjeInterno(bool postaviCekanjeAkoBlokirano) {
   return true;
 }
 
-bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokirano) {
+bool pokreniMrtvackoInterno(bool koristiThumbwheel,
+                            bool postaviCekanjeAkoBlokirano,
+                            bool koristiFiksnoTrajanje = false,
+                            uint8_t fiksnoTrajanjeMin = 0) {
   const unsigned long sadaMs = millis();
   const uint8_t modMrtvackog = dohvatiModMrtvackog();
 
@@ -569,6 +579,11 @@ bool pokreniMrtvackoInterno(bool koristiThumbwheel, bool postaviCekanjeAkoBlokir
   digitalWrite(PIN_LAMPICA_MRTVACKO, HIGH);
   if (koristiThumbwheel) {
     primijeniTrajanjeMrtvackogIzThumbwheela(sadaMs, true);
+  } else if (koristiFiksnoTrajanje) {
+    mrtvacko.zadanoTrajanjeMin = fiksnoTrajanjeMin;
+    mrtvacko.autoStopUkljucen = (fiksnoTrajanjeMin > 0);
+    mrtvacko.autoStopNakonMs =
+        mrtvacko.autoStopUkljucen ? static_cast<unsigned long>(fiksnoTrajanjeMin) * 60000UL : 0UL;
   } else {
     mrtvacko.zadanoTrajanjeMin = 0;
     mrtvacko.autoStopUkljucen = false;
@@ -681,6 +696,10 @@ bool pokusajZapocetiMrtvackoBezCekanja() {
 
 bool pokusajZapocetiMrtvackoBezAutoStopa() {
   return pokreniMrtvackoInterno(false, false);
+}
+
+bool pokusajZapocetiMrtvackoSaFiksnimTrajanjemBezCekanja(uint8_t trajanjeMin) {
+  return pokreniMrtvackoInterno(false, false, true, trajanjeMin);
 }
 
 void zaustaviMrtvacko() {
