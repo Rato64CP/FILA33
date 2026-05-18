@@ -1,190 +1,167 @@
 # 🔧 ZVONKO v. 1.0 - ESP firmware
 
-Ova podmapa sadrzi firmware za vanjski `ESP32` modul koji radi kao mrezni sloj toranjskog sata. `ESP` serijski suraduje s `Arduino Megom 2560` kroz [main/esp_serial.cpp](../main/esp_serial.cpp), ali ne preuzima vlasnistvo nad `RTC`-om, zvonima, cekicima, kazaljkama ni okretnom plocom.
+Croatian version: [README.hr.md](README.hr.md)
 
-## ✨ Uloga ESP modula
+This folder contains the firmware for the external `ESP32` module that acts as the network layer of the tower clock. The `ESP` communicates with the `Arduino Mega 2560` through `main/esp_serial.cpp`, but it does not take ownership of the `RTC`, bells, hammers, hands, or rotating plate.
 
-- spaja toranjski sat na lokalnu `WiFi` mrezu
-- odrzava vlastiti UDP `NTP` sloj
-- salje `NTP` vrijeme Megi samo nakon `NTPREQ:SYNC`
-- interno prati `UTC` u milisekundama od zadnje potvrdene sinkronizacije
-- koristi `NTP` sekunde, `fraction` dio i `RTT/2` korekciju za precizniji mrezni timestamp
-- potvrduje prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta drugim uzorkom prije prve sinkronizacije toranjskog sata
-- pruza svedeni web dashboard i servisni API prema Megi
-- prihvaca setup `WiFi` kroz privremeni `AP`
-- ostaje pomocni mrezni sloj i ne zaobilazi odluke koje donose [main/time_glob.cpp](../main/time_glob.cpp), [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp) i [main/power_recovery.cpp](../main/power_recovery.cpp)
+## ✨ Role of the ESP module
 
-## 🧩 Struktura firmwarea
+- connects the tower clock to the local `WiFi` network
+- maintains its own UDP `NTP` layer
+- sends `NTP` time to the Mega only after `NTPREQ:SYNC`
+- tracks internal `UTC` time in milliseconds since the last confirmed synchronization
+- uses `NTP` seconds, the fractional part, and `RTT/2` correction for a more precise network timestamp
+- confirms the first `NTP` sample after restart or WiFi reconnect with a second sample before the first synchronization of the tower clock
+- provides the compact web dashboard and the service API towards the Mega
+- accepts WiFi setup through a temporary `AP`
+- remains only the network layer and does not bypass decisions made by `main/time_glob.cpp`, `main/prekidac_tisine.cpp`, and `main/power_recovery.cpp`
 
-- `esp_firmware.ino` sadrzi zajednicke globalne strukture, konfiguraciju i forward deklaracije
-- `esp_boot_wifi.ino` vodi boot tok, `setup()/loop()`, `WiFi` povezivanje i setup `AP`
-- `esp_serial_mega.ino` vodi serijski protokol izmedu `ESP32` mreznog mosta i [main/esp_serial.cpp](../main/esp_serial.cpp)
-- `esp_time_ntp.ino` sadrzi `NTP` i kalendarske pomocne funkcije za lokalno vrijeme toranjskog sata
-- `esp_web.ino` sadrzi `Basic Auth`, `JSON` API, `OTA` i sve web stranice dashboarda, postavki i blagdana
+## 🧩 Firmware structure
 
-## 🌐 Aktivne web rute
+- `esp_firmware.ino` contains shared global structures, configuration, and forward declarations
+- `esp_boot_wifi.ino` handles the boot flow, `setup()/loop()`, WiFi connection, and the setup `AP`
+- `esp_serial_mega.ino` handles the serial protocol between the `ESP32` bridge and `main/esp_serial.cpp`
+- `esp_time_ntp.ino` contains `NTP` and calendar helper functions for tower-clock local time
+- `esp_web.ino` contains `Basic Auth`, the `JSON` API, `OTA`, and all dashboard/settings/feast web pages
 
-- `/` - jedina glavna stranica dashboarda
-- `/settings` - zasebna stranica za sigurne web postavke `Sustav`, `Stapici`, `BAT` i `Sunce`
-- `/blagdani` - zasebna stranica za redovite mise te unaprijed zadane nepomicne i pomicne blagdane s uredjivanjem ukljucenja i vremena mise `HH:MM`; prazno vrijeme znaci da je misa ili blagdan iskljucen
-- `/setup` - setup stranica za unos nove `WiFi` mreze dok je aktivan privremeni `AP`
-- `/update` - skrivena `OTA` stranica za upload novog `ESP` firmwarea
-- `/api/status` - `JSON` status `WiFi` veze i stvarnog stanja koje dashboard boja prikazuje
-- `/api/pokojnik` - pokrece jednokratnu sekvencu `POKOJNIK`
-- `/api/pokojnica` - pokrece jednokratnu sekvencu `POKOJNICA`
-- `/api/settings/system` - `JSON` dohvat i spremanje skupine `Sustav`
-- `/api/settings/stapici` - `JSON` dohvat i spremanje skupine `Stapici`
-- `/api/settings/bat` - `JSON` dohvat i spremanje skupine `BAT`
-- `/api/settings/sunce` - `JSON` dohvat i spremanje skupine `Sunce`
-- `/api/settings/blagdani` - `JSON` dohvat i spremanje skupine `Blagdani`
-- `/api/...` - servisne naredbe prema Megi
+## 🌐 Active web routes
+
+- `/` - main dashboard page
+- `/settings` - separate page for safe web settings: `Sustav`, `Stapici`, `BAT`, and `Sunce`
+- `/blagdani` - separate page for regular Masses and predefined fixed and movable feasts, with editing of enable flags and Mass times `HH:MM`
+- `/setup` - setup page for entering a new `WiFi` network while the temporary `AP` is active
+- `/update` - hidden `OTA` page for uploading new `ESP` firmware
+- `/api/status` - `JSON` status of the WiFi connection and real runtime state used to color the dashboard buttons
+- `/api/pokojnik` - starts the one-shot `POKOJNIK` sequence
+- `/api/pokojnica` - starts the one-shot `POKOJNICA` sequence
+- `/api/settings/system` - `JSON` fetch and save for the `Sustav` group
+- `/api/settings/stapici` - `JSON` fetch and save for the `Stapici` group
+- `/api/settings/bat` - `JSON` fetch and save for the `BAT` group
+- `/api/settings/sunce` - `JSON` fetch and save for the `Sunce` group
+- `/api/settings/blagdani` - `JSON` fetch and save for the `Blagdani` group
 
 ## 🧭 Dashboard
 
-- gornji 2x2 blok koristi tipke `MUSKO`, `ZENSKO`, `SLAVI`, `BRECA`
-- gornje tipke su naglasene i tamnije plave kad su ukljucene
-- ispod gornjeg bloka postoje dvije jednokratne tipke `POKOJNIK` i `POKOJNICA`
-- `POKOJNIK` salje sekvencu `MUSKO` zvono `2 minute` -> cekanje inercije -> `MRTVACKO` `10 minuta`
-- `POKOJNICA` salje sekvencu `ZENSKO` zvono `2 minute` -> cekanje inercije -> `MRTVACKO` `10 minuta`
-- donji blok koristi tipke `JUTRO`, `PODNE`, `VECER`
-- ispod suncevih tipki postoji crveni toggle `TIHI MOD`
-- pri dnu dashboarda postoji i servisni link `POSTAVKE`
-- `TIHI MOD` preko weba ulazi u isti jedinstveni tihi rezim kao [main/prekidac_tisine.cpp](../main/prekidac_tisine.cpp)
-- ako korisnik promijeni stanje fizickim kip-prekidacem tihog moda, dashboard nakon sljedezeg `STATUS:` osvjezavanja prikazuje stvarno stanje iz Mege
-- dashboard pri prvom otvaranju odmah radi jedan prisilni dohvat `STATUS?` kako bi se tipke obojile prema stvarnom stanju toranjskog sata
+- the top 2x2 block uses `MUSKO`, `ZENSKO`, `SLAVI`, and `BRECA`
+- below the top block there are two one-shot buttons: `POKOJNIK` and `POKOJNICA`
+- `POKOJNIK` sends the sequence `male bell for 2 minutes -> wait for inertia -> funeral ringing for 10 minutes`
+- `POKOJNICA` sends the sequence `female bell for 2 minutes -> wait for inertia -> funeral ringing for 10 minutes`
+- the lower block uses `JUTRO`, `PODNE`, and `VECER`
+- below the sun buttons there is a red `TIHI MOD` toggle
+- the bottom of the dashboard includes a service link to `POSTAVKE`
+- web `TIHI MOD` enters the same unified silent mode handled by `main/prekidac_tisine.cpp`
+- if the physical silent-mode switch changes state, the dashboard shows the real state from the Mega after the next `STATUS:` refresh
+- when the dashboard opens, it immediately performs one forced `STATUS?` fetch so that button colors match the real tower-clock state
 
-## ⚙️ Web postavke
+## ⚙️ Web settings
 
-- stranica `/settings` namjerno uredjuje samo sigurne postavke koje ne pomicu kazaljke, ne diraju okretajnu plocu i ne mijenjaju vrijeme
-- trenutno podrzava skupine:
-- `Sustav`
-- `Stapici`
-- `BAT`
-- `Sunce`
-- `Blagdani`
-- `Sustav` ukljucuje `LCD svjetlo`, `Logiranje`, `RS485`, `UPS mod`, `Kocnicu zvona`, `INR1`, `INR2` i `Impuls cekica`
-- `Stapici` ukljucuju trajanja `TR`, `TN`, `TS` i odgodu slavljenja `S`
-- `BAT` ukljucuje sate `od/do` i modove `OTK`, `S` i `M`
-- `BAT od/do` na webu znaci raspon u kojem je redovno otkucavanje dopusteno; izvan tog raspona `Mega` blokira samo otkucavanje kroz [main/postavke.cpp](../main/postavke.cpp) i [main/otkucavanje.cpp](../main/otkucavanje.cpp)
-- `Sunce` ukljucuje `Jutro`, `Podne`, `Vecer`, odabir zvona, jutarnje/vecernje odgode i `Nocnu rasvjetu`
-- `Blagdani` ukljucuju dnevnu i nedjeljnu misu te unaprijed zadanu listu `15` nepomicnih i `7` pomicnih blagdana; na webu se za svaki blagdan uredjuje samo ukljucenje i vrijeme mise `HH:MM`
-- dnevna misa pokrece samo `MUSKO` zvono `30 min` prije upisanog vremena mise `HH:MM`, uz radno trajanje zvonjenja iz [main/postavke.cpp](../main/postavke.cpp)
-- nedjeljna i blagdanska misa pokrecu nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije upisanog vremena mise `HH:MM`, bez dodatnog `slavljenja`
-- prazno polje vremena na `/blagdani` znaci da su odgovarajuca redovita misa ili blagdan iskljuceni, bez obzira na stanje kvacice
-- sva misna zvonjenja startaju u `25.` sekundi minute, sinkronizirano s citanjem cavala iz [main/okretna_ploca.cpp](../main/okretna_ploca.cpp)
-- `Mega` ostaje jedini autoritet za validaciju i spremanje kroz [main/postavke.cpp](../main/postavke.cpp)
-- `ESP32` samo prikazuje formu, salje cijeli paket i nakon potvrde ponovno cita stvarno stanje s `Mege`
+- `/settings` intentionally edits only safe settings that do not move the hands, do not touch the rotating plate, and do not change time
+- supported groups are:
+  - `Sustav`
+  - `Stapici`
+  - `BAT`
+  - `Sunce`
+  - `Blagdani`
+- `Sustav` includes `LCD light`, `logging`, `RS485`, `UPS mode`, `bell brake`, `INR1`, `INR2`, and `hammer pulse`
+- `Stapici` includes `TR`, `TN`, `TS`, and celebration delay `S`
+- `BAT` includes hours `od/do` and modes `OTK`, `S`, and `M`
+- web `BAT od/do` means the range in which regular striking is allowed; outside that range the `Mega` blocks only striking through `main/postavke.cpp` and `main/otkucavanje.cpp`
+- `Sunce` includes `Jutro`, `Podne`, `Vecer`, bell selection, morning/evening offsets, and `Nocna rasvjeta`
+- `Blagdani` includes the daily and Sunday Mass plus a predefined list of `15` fixed and `7` movable feasts; each feast only edits its enable flag and `HH:MM` Mass time
+- the daily Mass triggers only the male bell `30 min` before the configured Mass time `HH:MM`, using the weekday ringing duration from `main/postavke.cpp`
+- the Sunday Mass and feast-day Mass trigger Sunday-style ringing on both bells `2 h` and `1 h` before the configured Mass time `HH:MM`, without extra celebration ringing
+- an empty time field on `/blagdani` means that the corresponding regular Mass or feast is disabled regardless of the checkbox state
+- all Mass-related ringing starts at second `:25`, synchronized with pin reading in `main/okretna_ploca.cpp`
+- the `Mega` remains the only authority for validation and saving through `main/postavke.cpp`
+- the `ESP32` only renders the form, sends the full payload, and after confirmation reads the real state back from the `Mega`
 
-## 🔐 Autentikacija
+## 🔐 Authentication
 
-- dashboard `/` i sve `/api/...` rute koriste `Basic Auth`
-- ruta `/update` koristi isti `Basic Auth`
-- lozinka se ucitava iz `EEPROM`-a ili pada na zadanu firmware vrijednost
-- `/setup` ne trazi `Basic Auth` dok je aktivan setup `AP`
+- the dashboard `/` and all `/api/...` routes use `Basic Auth`
+- the `/update` route uses the same `Basic Auth`
+- the password is loaded from `EEPROM` or falls back to the default firmware value
+- `/setup` does not require `Basic Auth` while the setup `AP` is active
 
-## 📡 OTA nadogradnja
+## 📡 OTA updates
 
-- `OTA` je izveden kao skrivena web ruta `/update`
-- koristi se upload kompajlirane `.bin` datoteke za `ESP32`
-- tijekom upisa firmwarea `ESP` privremeno zaustavlja redovni `NTP` i ostale web/serijske poslove koji nisu potrebni za upload
-- nakon uspjesne nadogradnje `ESP` sam zakazuje kratki restart i vraca se u normalan rad
-- dashboard ne prikazuje link prema `/update`; ruta se otvara rucnim upisom adrese u pregledniku
+- `OTA` is implemented as the hidden web route `/update`
+- it uploads the compiled `.bin` file for the `ESP32`
+- during firmware writing, the `ESP` temporarily pauses regular `NTP` and other web/serial tasks that are not needed for the upload
+- after a successful update, the `ESP` schedules a short restart and returns to normal operation
+- the dashboard does not expose a visible link to `/update`; the route is opened manually by typing the address
 
-## 🧵 Serijski protokol prema Megi
+## 🧵 Serial protocol towards the Mega
 
 ### `Mega -> ESP`
 
-- `WIFI:<ssid>|<lozinka>|<dhcp>|<ip>|<maska>|<gateway>` salje mrezne postavke toranjskog sata
-- `WIFIEN:0` i `WIFIEN:1` gase ili pale `WiFi` radio
-- `WIFISTATUS?` trazi trenutno `WiFi` stanje mreznog mosta
-- `NTPCFG:<server>` postavlja `NTP` server
-- `NTPREQ:SYNC` trazi trenutno `NTP` vrijeme u trenutku koji odabere `Mega`
-- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE`, `SETREQ:MISE`, `SETREQ:BLAGDANI_NEP` i `SETREQ:BLAGDANI_POM` traze trenutno stanje pojedine web skupine iz `main/postavke.*`
+- `WIFI:<ssid>|<lozinka>|<dhcp>|<ip>|<maska>|<gateway>` sends tower-clock network settings
+- `WIFIEN:0` and `WIFIEN:1` disable or enable the `WiFi` radio
+- `WIFISTATUS?` asks for the current `WiFi` state of the network bridge
+- `NTPCFG:<server>` sets the `NTP` server
+- `NTPREQ:SYNC` asks for the current `NTP` time at a moment chosen by the `Mega`
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE`, `SETREQ:MISE`, `SETREQ:BLAGDANI_NEP`, and `SETREQ:BLAGDANI_POM` request the current state of a single web settings group from `main/postavke.*`
 
 ### `ESP -> Mega`
 
-- `CFGREQ` trazi pocetnu konfiguraciju nakon boota
-- `WIFI:CONNECTED`, `WIFI:DISCONNECTED`, `WIFI:LOCAL_IP:...`, `WIFI:MAC:...` prijavljuju stanje veze
-- `NTP:YYYY-MM-DDTHH:MM:SS.mmm;DST=0/1` salje lokalno vrijeme toranjskog sata s milisekundama
-- `SETUPWIFI:<ssid>|<lozinka>` prosljeduje novu mrezu koju je korisnik upisao kroz setup `AP`
-- `CMD:<naredba>` prenosi servisne naredbe prema [main/esp_serial.cpp](../main/esp_serial.cpp)
-- `STATUS:` vraca objedinjeni status koji dashboard koristi za boju tipki
-- `SET:SUSTAV|lcd=...|log=...|rs=...|ups=...|koc=...|inr1=...|inr2=...|imp=...` vraca trenutne `Sustav` postavke
-- `SET:STAPICI|tr=...|tn=...|ts=...|odg=...` vraca postavke stapica
-- `SET:BAT|od=...|do=...|otk=...|sl=...|mr=...` vraca `BAT` postavke
-- `SET:SUNCE|ju=...|jb=...|jo=...|pu=...|pb=...|vu=...|vb=...|vo=...|nr=...` vraca sunceve postavke
-- `SET:MISE|rd=...|nd=...` vraca redovite dnevne i nedjeljne mise
-- `SET:BLAGDANI_NEP|f0=...|...` vraca stanje unaprijed zadanih nepomicnih blagdana
-- `SET:BLAGDANI_POM|p0=...|...` vraca stanje unaprijed zadanih pomicnih blagdana
-- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...`, `SETCFG:MISE|...`, `SETCFG:BLAGDANI_NEP|...` i `SETCFG:BLAGDANI_POM|...` salju novi puni paket odgovarajuce skupine prema `Megi`
-- `ACK:*`, `ERR:*` i `NTPLOG:*` linije sluze za potvrde i dijagnostiku mreznog mosta
+- `CFGREQ` asks for initial configuration after boot
+- `WIFI:CONNECTED`, `WIFI:DISCONNECTED`, `WIFI:LOCAL_IP:...`, and `WIFI:MAC:...` report connection status
+- `NTP:YYYY-MM-DDTHH:MM:SS.mmm;DST=0/1` sends tower-clock local time with milliseconds
+- `SETUPWIFI:<ssid>|<lozinka>` forwards a new network entered through the setup `AP`
+- `CMD:<naredba>` forwards service commands to `main/esp_serial.cpp`
+- `STATUS:` returns the combined status used by the dashboard for button colors
+- `SET:SUSTAV|...`, `SET:STAPICI|...`, `SET:BAT|...`, `SET:SUNCE|...`, `SET:MISE|...`, `SET:BLAGDANI_NEP|...`, and `SET:BLAGDANI_POM|...` return the current state of the individual groups
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...`, `SETCFG:MISE|...`, `SETCFG:BLAGDANI_NEP|...`, and `SETCFG:BLAGDANI_POM|...` send a new full payload for the corresponding group to the `Mega`
+- `ACK:*`, `ERR:*`, and `NTPLOG:*` lines are used for confirmations and diagnostics
 
-## ⏱️ UDP NTP tok
+## ⏱️ UDP NTP flow
 
-- `ESP` vise ne koristi `NTPClient`, nego vlastiti UDP `NTP` dohvat u [esp_firmware.ino](esp_firmware.ino)
-- prije novog upita odbacuju se zaostali UDP paketi kako kasni odgovor ne bi pokvario novo `RTT` mjerenje
-- prihvacaju se samo valjani `NTP` odgovori, uz osnovnu provjeru `mode`, `stratum` vrijednosti i vremena
-- prvi `NTP` uzorak nakon restarta ili `WiFi` reconnecta ne salje se odmah Megi
-- prvi uzorak se pamti, a `ESP` odmah trazi drugi uzorak radi stabilizacije
-- tek potvrden drugi uzorak postaje autoritet za prvu `NTP` sinkronizaciju toranjskog sata
-- `ESP` iz odgovora racuna precizniji `UTC ms`, a prema Megi sada salje i milisekundni dio `NTP:` zapisa
-- `Mega` i dalje ostaje jedini vlasnik `RTC` upisa i poravnanja na `RTC SQW` granicu sekunde, ali pri odluci o pomaku koristi i milisekundni dio uzorka
+- the `ESP` does not use `NTPClient`; it uses its own UDP `NTP` fetch flow in `esp_time_ntp.ino`
+- stale UDP packets are discarded before a new request so late replies do not corrupt new `RTT` measurements
+- only valid `NTP` replies are accepted, including basic checks of `mode`, `stratum`, and time data
+- the first `NTP` sample after restart or WiFi reconnect is not sent to the Mega immediately
+- the first sample is stored, and the `ESP` immediately requests a second sample for stabilization
+- only the confirmed second sample becomes the authority for the first `NTP` synchronization of the tower clock
+- the `ESP` calculates a more precise `UTC ms` value from the reply and sends the millisecond part inside the `NTP:` record
+- the `Mega` remains the only owner of RTC writes and of alignment to the `RTC SQW` second boundary
 
-## 🛡️ Rad uz sigurnosne blokade Mege
+## 🛡️ Behavior under Mega safety blocks
 
-- `ESP` i dalje moze odrzavati `WiFi` i `NTP` dok je `Mega` u ogranicenom radu
-- `ESP` ne otkljucava `safe mode` i ne potvrduje latched faultove
-- kad `Mega` blokira automatiku zbog `RTC` ili `EEPROM` problema, `ESP` ostaje samo pomocni izvor mreze i vremena bez ovlasti nad mehanikom toranjskog sata
-- nakon `WiFi` watchdog reseta `Mega` dobiva `NTP:` tek kad `ESP` ponovno potvrdi svjeze vrijeme
+- the `ESP` can keep WiFi and NTP alive while the `Mega` is in limited operation
+- the `ESP` does not unlock `safe mode` and does not acknowledge latched faults
+- when the `Mega` blocks automation because of `RTC` or `EEPROM` problems, the `ESP` remains only a helper source of networking and time, without authority over tower-clock mechanics
+- after a WiFi watchdog reset, the `Mega` receives `NTP:` only when the `ESP` has again confirmed fresh time
 
-## 📶 Setup WiFi
+## 📶 WiFi setup
 
-- setup `AP` ima `SSID` `ZVONKO_setup`
-- lozinka setup `AP`-a je `zvonko10`
-- setup `AP` se moze pokrenuti i dugim istovremenim pritiskom `lijevo + desno` na Mega tipkovnici, ali samo s glavnog prikaza sata
-- na `ESP32` zadano se koristi tipka na `GPIO27` i status `LED` na `GPIO26`
-- serijska veza prema `Megi` koristi odvojene pinove `GPIO16` kao `RX` i `GPIO17` kao `TX`
-- dok je setup `AP` aktivan, i root ruta `http://192.168.4.1/` i `http://192.168.4.1/setup` otvaraju setup stranicu
-- nakon spremanja mreze `ESP` prosljeduje novu konfiguraciju Megi preko `SETUPWIFI:`
+- the setup `AP` uses the `SSID` `ZVONKO_setup`
+- the setup `AP` password is `zvonko10`
+- the setup `AP` can also be started by holding `LIJEVO + DESNO` on the Mega keypad, but only from the main clock screen
+- on the `ESP32`, the default setup button is on `GPIO27` and the status LED is on `GPIO26`
+- the serial connection to the `Mega` uses `GPIO16` as `RX` and `GPIO17` as `TX`
+- while the setup `AP` is active, both `http://192.168.4.1/` and `http://192.168.4.1/setup` open the setup page
+- after saving the network, the `ESP` forwards the new configuration to the Mega through `SETUPWIFI:`
 
-## 🛠️ Upload i provjera
+## 🛠️ Upload and verification
 
-1. Otvori `esp_firmware.ino` u `Arduino IDE`-u ili `PlatformIO` okruzenju.
-2. Odaberi odgovarajucu plocicu.
-- `ESP32 Dev Module` ili odgovarajuci `ESP32` profil za `ESP32`
-3. Za `ESP32` spoji `Mega TX3 (pin 14)` na `ESP RX GPIO16` preko djelitelja napona te `ESP TX GPIO17` na `Mega RX3 (pin 15)`.
-4. Prenesi firmware i provjeri da su `GND` vodovi zajednicki.
+1. Open `esp_firmware.ino` in `Arduino IDE` or `PlatformIO`.
+2. Select the correct board, for example `ESP32 Dev Module`.
+3. For the serial bridge, connect `Mega TX3 (pin 14)` to `ESP RX GPIO16` through a voltage divider and `ESP TX GPIO17` to `Mega RX3 (pin 15)`.
+4. Verify that both boards share the same `GND`.
 
-Napomena:
-- `OTA` nadogradnja ne trazi `GPIO1/GPIO3`; toranjski sat sigurnije radi kad je serijska veza prema `Megi` odvojena na `GPIO16/GPIO17`.
-- mnoge `ESP32` plocice imaju `GPIO1/GPIO3` oznacene kao `TX/RX`, ali te pinove ovdje namjerno ne koristimo za radni most prema `Megi`.
+### OTA upload over the network
 
-### OTA upload preko mreze
+1. Compile the firmware in the same development environment and locate the output `.bin` file.
+2. Open `http://<ip-esp>/update`.
+3. Log in with the same `Basic Auth` credentials used by the tower-clock dashboard.
+4. Select the new `.bin` file and wait for the success message.
+5. Wait for the automatic restart of the `ESP` module before reopening the dashboard.
 
-1. U istom razvojnom okruzenju kompajliraj firmware i pronadi izlaznu `.bin` datoteku.
-2. Otvori `http://<ip-esp>/update`.
-3. Prijavi se istim `Basic Auth` podacima kao za dashboard toranjskog sata.
-4. Odaberi novu `.bin` datoteku i pricekaj potvrdu o uspjesnoj nadogradnji.
-5. Pricekaj automatski restart `ESP` modula prije novog otvaranja dashboarda.
+## ✅ What to verify after boot
 
-## ✅ Sto provjeriti nakon boota
-
-- serijski monitor treba pokazati `CFGREQ`, `WIFI:CONNECTED` i `WIFI:LOCAL_IP:...` kada je mreza dostupna
-- prvi `NTP` nakon restarta treba u `NTPLOG:` prikazati spremanje prvog uzorka i potvrdu drugim uzorkom
-- `ESP` vise ne treba sam slati `NTP:` po spajanju; `NTP` prema Megi ide tek nakon `NTPREQ:SYNC`
-- `http://<ip-esp>/api/status` treba vratiti `JSON` sa stanjem `WiFi` veze, glavnih tipki, suncevih tipki i `TIHOG MODA`
-- `http://<ip-esp>/settings` treba otvoriti stranicu sa skupinama `Sustav`, `Stapici`, `BAT` i `Sunce` te pri ulazu povuci stvarno stanje s `Mege`
-- `http://<ip-esp>/blagdani` treba otvoriti zasebnu stranicu za redovite i blagdanske mise te pri ulazu povuci stvarno stanje s `Mege`
-- `http://<ip-esp>/api/settings/system?force=1` treba vratiti `JSON` sa stanjem `Sustav` postavki
-- `http://<ip-esp>/api/settings/stapici?force=1` treba vratiti `JSON` sa stanjem `Stapica`
-- `http://<ip-esp>/api/settings/bat?force=1` treba vratiti `JSON` sa stanjem `BAT` postavki
-- `http://<ip-esp>/api/settings/sunce?force=1` treba vratiti `JSON` sa stanjem `Sunce` postavki
-- `http://<ip-esp>/api/settings/blagdani?force=1` treba vratiti `JSON` sa stanjem `Blagdana`
-- pocetna stranica treba prikazati samo glavne tipke, sunceve tipke i crveni `TIHI MOD`
-- API pozivi poput `http://<ip-esp>/api/bell1/on` i `http://<ip-esp>/api/quiet/on` trebaju poslati odgovarajuci `CMD:` prema Megi
-- `http://<ip-esp>/update` treba otvoriti `OTA` upload stranicu i nakon uspjesnog slanja firmwarea izazvati restart `ESP` modula
-
-## 📄 Datoteke
-
-- [esp_firmware.ino](esp_firmware.ino) - glavni firmware za `WiFi`, setup `AP`, UDP `NTP`, dashboard i servisni web/API sloj toranjskog sata
-- [Popis ESP web API ruta toranjskog sata](../docs/esp_web_api_toranjskog_sata.md)
+- the serial monitor should show `CFGREQ`, `WIFI:CONNECTED`, and `WIFI:LOCAL_IP:...` when the network is available
+- the first `NTP` after restart should show first-sample storage and second-sample confirmation inside `NTPLOG:`
+- the `ESP` should not send `NTP:` on its own after connecting; `NTP` reaches the Mega only after `NTPREQ:SYNC`
+- `http://<ip-esp>/api/status` should return `JSON` with WiFi state, main buttons, sun buttons, and `TIHI MOD`
+- `http://<ip-esp>/settings` should open the page with the groups `Sustav`, `Stapici`, `BAT`, and `Sunce`, and pull the real state from the `Mega` on entry
+- `http://<ip-esp>/blagdani` should open the separate page for regular and feast-day Masses and pull the real state from the `Mega` on entry
+- `http://<ip-esp>/update` should open the `OTA` upload page and restart the `ESP` module after a successful upload

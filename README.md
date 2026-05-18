@@ -1,9 +1,11 @@
 # 🕰️ ZVONKO v. 1.0
 
+Croatian version: [README.hr.md](README.hr.md)
+
 `ZVONKO v. 1.0` is the firmware and control logic for a tower clock system built around a split architecture:
 
-- `Arduino Mega 2560` handles all real clock mechanics and safety-critical logic
-- `ESP32` provides WiFi, NTP, OTA updates, the service dashboard, and safe web-based settings
+- `Arduino Mega 2560` handles all real clock mechanics and safety-critical logic.
+- `ESP32` provides WiFi, NTP, OTA updates, the service dashboard, and safe web-based settings.
 
 The tower clock must remain operational even if the network layer is unavailable.
 
@@ -27,11 +29,11 @@ The tower clock must remain operational even if the network layer is unavailable
 
 ## 🧭 Architecture
 
-- `Arduino Mega 2560` is the single source of truth for the tower clock state
-- `ESP32` is an auxiliary network bridge only
-- the `ESP32` does not make mechanical decisions about hands, plate, bells, or hammers
-- the `Mega` decides when `NTP` is allowed and when the moment is safe for synchronization
-- a fault or restart of the network bridge must not stop the basic clock operation
+- `Arduino Mega 2560` is the single source of truth for the tower clock state.
+- `ESP32` is an auxiliary network bridge only.
+- The `ESP32` does not make mechanical decisions about hands, plate, bells, or hammers.
+- The `Mega` decides when `NTP` is allowed and when the moment is safe for synchronization.
+- A fault or restart of the network bridge must not stop the basic clock operation.
 
 ## 🔐 Mega ↔ ESP rules
 
@@ -91,7 +93,7 @@ The tower clock must remain operational even if the network layer is unavailable
 - `main/menu_system.*`, `main/tipke.*`, `main/lcd_display.*` – local LCD menu and input
 - `main/postavke.*` – core persistent settings logic
 - `main/postavke_skladistenje.*` – checksums, EEPROM containers, and low-level settings storage helpers
-- `main/postavke_mreza.*` – WiFi, IP, and NTP string validation/helpers
+- `main/postavke_mreza.*` – WiFi, IP, and NTP string validation helpers
 - `main/postavke_kalendar.*` – liturgical calendar, feast-day settings, and Mass settings
 - `main/unified_motion_state.*` – shared state of hands and rotating plate
 - `main/power_recovery.*` and `main/watchdog.*` – recovery and 24/7 reliability
@@ -182,7 +184,7 @@ The tower clock must remain operational even if the network layer is unavailable
 
 ### Important safety note
 
-The tower clock uses a **shared I2C bus preparation with timeout** for:
+The tower clock uses a shared I2C bus preparation with timeout for:
 
 - `LCD`
 - `DS3231 RTC`

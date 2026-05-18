@@ -1,143 +1,143 @@
 # 🔧 ZVONKO v. 1.0 - Mega firmware
 
-Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 2560`. Mega je glavni kontroler toranjskog sata i jedino mjesto istine za mehaniku, postavke i recovery.
+Croatian version: [README.hr.md](README.hr.md)
 
-## ✨ Odgovornosti Mege
+This folder contains the main `Arduino Mega 2560` firmware for `ZVONKO v. 1.0`. The Mega is the primary controller of the tower clock and the only source of truth for mechanics, settings, and recovery.
 
-- upravljanje kazaljkama sata
-- upravljanje okretnom plocom
-- upravljanje zvonima i cekicima
-- odvojena inercija `INR1` i `INR2` za dva zvona
-- izbor rada s kocnicom zvona kroz `K:0/1`
-- sigurnosno gasenje rucnih sklopki `ZVONO 1`, `ZVONO 2` i prekidaca `SLAVLJENJE` nakon `30 min` neprekidnog ukljucenja
-- termalna zastita slavljenja nakon `3 minute` rada kroz pauzu `3 s` svakih `30 s`
-- blagdansko slavljenje i posebni raspored mrtvackog za Svi sveti / Dusni dan
-- lokalne postavke preko LCD izbornika i tipki
-- pohrana postavki i stanja u vanjski `24C32 EEPROM` ili `FM24W256 FRAM`
-- recovery nakon watchdog i power-loss reseta
-- watchdog `safe mode` i servisno otkljucavanje nakon previse resetova
-- runtime dijagnostika `EEPROM-a` i latched fault potvrda preko LCD-a i tipki
-- obrada RTC i NTP izvora vremena
-- degradirani nacin rada za `RTC` i `EEPROM` kad se kvar ponavlja
-- jedinstveni tihi rezim, BAT logika, lokalni overridei i webski virtualni toggle tihog moda
-- `UPS mod` s odvojenim ulazom za nadzor mreznog napona
+## ✨ Mega responsibilities
 
-## 🧭 Podjela poslova Mega / ESP
+- control of the clock hands
+- control of the rotating program plate
+- control of bells and hammers
+- separate inertia settings `INR1` and `INR2` for two bells
+- selection of bell-brake mode through `K:0/1`
+- safety shutdown of manual `ZVONO 1`, `ZVONO 2`, and `SLAVLJENJE` switches after `30 min` of continuous activation
+- thermal protection of celebration ringing after `3 minutes` by inserting a `3 s` pause every `30 s`
+- festive celebration ringing and the special funeral schedule for `All Saints' Day / All Souls' Day`
+- local settings through the LCD menu and buttons
+- storage of settings and state in external `24C32 EEPROM` or `FM24W256 FRAM`
+- recovery after watchdog and power-loss resets
+- watchdog `safe mode` and service unlock after repeated resets
+- runtime `EEPROM` diagnostics and latched-fault acknowledgement through the LCD and buttons
+- handling of RTC and NTP time sources
+- degraded operating modes for `RTC` and `EEPROM` when faults repeat
+- unified silent mode, BAT logic, local overrides, and the web-based silent-mode toggle
+- `UPS mode` with dedicated mains monitoring input
 
-- `Mega 2560` vodi sve radne odluke toranjskog sata
-- vanjski `ESP32` je samo pomocni mrezni sloj
-- vanjski mrezni sloj donosi WiFi, NTP, setup WiFi i bezicni servisni API
-- preko `ESP32` weba sada su dopustene sigurne skupine `Sustav`, `Stapici`, `BAT`, `Sunce` i `Blagdani`, dok `Mega` i dalje ostaje jedini autoritet za validaciju i spremanje
-- zasebni modul `main/mise_automatika.*` sada vodi redovite dnevne i nedjeljne mise te posebne blagdanske mise, odvojeno od `main/sunceva_automatika.*`
-- zasebni modul `main/pogrebne_skripte.*` sada vodi jednokratne sekvence `POKOJNIK` i `POKOJNICA` s `ESP32` dashboarda
-- `POKOJNIK` pokrece `MUSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
-- `POKOJNICA` pokrece `ZENSKO` zvono `2 minute`, ceka zavrsetak inercije pa zatim pokrece `MRTVACKO` `10 minuta`
-- `Blagdani` koriste unaprijed zadanu listu nepomicnih i pomicnih blagdana; web i serijski sloj uredjuju samo ukljucenje i vrijeme mise `HH:MM`, a toranjski sat zatim sam vodi nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise, bez dodatnog `slavljenja`
-- `Redovite mise` nose dnevno i nedjeljno vrijeme mise `HH:MM`; dnevna misa koristi samo `MUSKO` zvono `30 min` prije mise, a nedjeljna misa nedjeljno zvonjenje oba zvona `2 h` i `1 h` prije mise
-- prazno vrijeme iz web sloja znaci da su odgovarajuca dnevna misa, nedjeljna misa ili blagdan iskljuceni, bez obzira na stanje kvacice
-- sva misna zvonjenja iz [main/mise_automatika.cpp](mise_automatika.cpp) startaju u `25.` sekundi minute, sinkronizirano s citanjem cavala iz [main/okretna_ploca.cpp](okretna_ploca.cpp)
-- `BAT od/do` iz weba i lokalnog menija tumace se kao raspon u kojem je redovno otkucavanje dopusteno; izvan njega `Mega` blokira samo otkucavanje
+## 🧭 Mega / ESP split
 
-## 🧩 Najvazniji moduli
+- `Mega 2560` makes all runtime decisions for the tower clock
+- the external `ESP32` is only the network layer
+- the network layer provides WiFi, NTP, WiFi setup, and the wireless service API
+- the `ESP32` web interface can edit only safe groups: `Sustav`, `Stapici`, `BAT`, `Sunce`, and `Blagdani`, while the `Mega` remains the only authority for validation and persistent storage
+- `main/mise_automatika.*` handles regular daily and Sunday Masses plus special feast-day Masses, independently from `main/sunceva_automatika.*`
+- `main/pogrebne_skripte.*` handles one-shot `POKOJNIK` and `POKOJNICA` sequences from the `ESP32` dashboard
+- `POKOJNIK` starts the male bell for `2 minutes`, waits for inertia to finish, then starts funeral ringing for `10 minutes`
+- `POKOJNICA` starts the female bell for `2 minutes`, waits for inertia to finish, then starts funeral ringing for `10 minutes`
+- `Blagdani` use a predefined list of fixed and movable feasts; the web and serial layers only edit enable flags and the Mass time `HH:MM`, while the tower clock itself performs Sunday-style ringing `2 h` and `1 h` before Mass without extra celebration ringing
+- `Redovite mise` store the daily and Sunday Mass time `HH:MM`; the daily Mass uses only the male bell `30 min` before Mass, while the Sunday Mass uses Sunday-style ringing on both bells `2 h` and `1 h` before Mass
+- an empty time from the web layer means that the corresponding daily Mass, Sunday Mass, or feast is disabled regardless of the checkbox state
+- all Mass-related ringing in `main/mise_automatika.cpp` starts at second `:25`, synchronized with pin reading in `main/okretna_ploca.cpp`
+- `BAT od/do` from the web layer and the local menu is interpreted as the range in which regular striking is allowed; outside that range the `Mega` blocks only striking
 
-- `main.ino` - inicijalizacija i glavna petlja
-- `time_glob.*` - upravljanje izvorima vremena, DST-om i sinkronizacijom
-- `esp_serial.*` - javna jezgra UART protokola prema vanjskom mreznom mostu
-- `esp_serial_internal.h` - interni dogovor izmedu serijskih podmodula
-- `esp_serial_status.cpp` - `STATUS` snapshot i push prema `ESP32` dashboardu
-- `esp_serial_ntp.cpp` - `WiFi`, `NTP` i vremenska koordinacija prema mreznom mostu
-- `esp_serial_postavke.cpp` - `SETREQ/SETCFG` razmjena skupina postavki
-- `esp_serial_cmd.cpp` - `CMD:` komande za zvona, slavljenje, tihi mod i pogrebne skripte
-- `esp_serial_parser.cpp` - parser dolaznih redaka s `ESP32` mosta
-- `kazaljke_sata.*` - kretanje i sinkronizacija kazaljki
-- `okretna_ploca.*` - polozaj, koraci, faze i cavli ploce
-- `mise_automatika.*` - redovite dnevne/nedjeljne mise i blagdanske mise
-- `pogrebne_skripte.*` - jednokratne sekvence `POKOJNIK` i `POKOJNICA`
-- `zvonjenje.*` - zvona i pripadna stanja
-- `otkucavanje.*` - satno i polusatno otkucavanje
-- `slavljenje_mrtvacko.*` - slavljenje, mrtvacko i thumbwheel timer
-- `prekidac_tisine.*` - jedinstveni tihi rezim i lampica
-- `ups_nadzor.*` - nadzor mreznog napona i blokada mehanike dok toranjski sat radi samo s UPS-a
-- `menu_system.*`, `lcd_display.*`, `tipke.*` - lokalni korisnicki sloj
-- `postavke.*` - glavna jezgra trajnih postavki toranjskog sata
-- `postavke_skladistenje.*` - checksum, citanje/pisanje spremnika i EEPROM helperi
-- `postavke_mreza.*` - WiFi, IP i NTP tekstualna validacija za `ESP32` most
-- `postavke_kalendar.*` - liturgijski kalendar, blagdani i satnice misa
-- `unified_motion_state.*` - zajednicko stanje gibanja
-- `power_recovery.*` i `watchdog.*` - pouzdanost rada 24/7
-- `wear_leveling.*` i `i2c_eeprom.*` - trajna pohrana i raspodjela zapisa
+## 🧩 Key modules
 
-## ⏱️ Izvori vremena
+- `main.ino` - initialization and main loop
+- `time_glob.*` - time-source handling, DST, and synchronization
+- `esp_serial.*` - public UART bridge layer towards the external network bridge
+- `esp_serial_internal.h` - shared internal contract between serial submodules
+- `esp_serial_status.cpp` - `STATUS` snapshot and push updates towards the `ESP32` dashboard
+- `esp_serial_ntp.cpp` - WiFi, NTP, and time coordination towards the network bridge
+- `esp_serial_postavke.cpp` - `SETREQ/SETCFG` exchange for settings groups
+- `esp_serial_cmd.cpp` - `CMD:` commands for bells, celebration ringing, silent mode, and funeral scripts
+- `esp_serial_parser.cpp` - parser for incoming lines from the `ESP32` bridge
+- `kazaljke_sata.*` - hand movement and synchronization
+- `okretna_ploca.*` - plate position, phases, steps, and pin reading
+- `mise_automatika.*` - regular daily/Sunday Masses and feast-day Masses
+- `pogrebne_skripte.*` - one-shot `POKOJNIK` and `POKOJNICA` sequences
+- `zvonjenje.*` - bell control and related states
+- `otkucavanje.*` - hourly and half-hour striking
+- `slavljenje_mrtvacko.*` - celebration ringing, funeral mode, and thumbwheel timing
+- `prekidac_tisine.*` - unified silent mode and silent-mode indicator
+- `ups_nadzor.*` - mains monitoring and output blocking while the tower clock runs only from UPS power
+- `menu_system.*`, `lcd_display.*`, `tipke.*` - local user interface
+- `postavke.*` - core persistent settings logic
+- `postavke_skladistenje.*` - checksums, container read/write logic, and EEPROM helpers
+- `postavke_mreza.*` - WiFi, IP, and NTP text validation for the `ESP32` bridge
+- `postavke_kalendar.*` - liturgical calendar, feast days, and Mass schedules
+- `unified_motion_state.*` - shared motion state
+- `power_recovery.*` and `watchdog.*` - 24/7 reliability and recovery
+- `wear_leveling.*` and `i2c_eeprom.*` - persistent storage and write distribution
 
-- `DS3231 RTC` je glavni izvor za offline rad
-- `NTP` dolazi preko ESP modula, ali trenutak sinkronizacije bira `Mega 2560`
-- automatski prijelaz CET/CEST ostaje pod kontrolom firmwarea toranjskog sata
-- `Mega` trazi `NTP` samo u sigurnom prozoru, kad kazaljke i okretna ploca nisu usred koraka
-- nakon restarta se starost zadnje sinkronizacije rekonstruira iz RTC vremena kako novi boot ne bi lazno izgledao svjez `24 sata`
-- nakon vise uzastopnih nevaljanih RTC ocitanja aktivira se `RTC OGRANICEN RAD` i automatika se drzi na sigurnoj strani dok se RTC ne oporavi
-- gubitak `RTC/I2C` veze sada pali strogi izlazni fail-safe u [main/time_glob.cpp](time_glob.cpp), pa zvona, cekici, kazaljke i okretna ploca ostaju blokirani dok se `DS3231` ponovno ne oporavi
+## ⏱️ Time sources
 
-## 🔄 Serijska komunikacija s ESP-om
+- `DS3231 RTC` is the primary source for offline operation
+- `NTP` comes through the `ESP32`, but the `Mega 2560` chooses when synchronization is allowed
+- automatic CET/CEST switching remains under tower-clock firmware control
+- the `Mega` requests `NTP` only in a safe window when the hands and rotating plate are not mid-step
+- after a restart, the age of the last synchronization is reconstructed from RTC time so a new boot does not falsely appear “fresh for 24 hours”
+- after repeated invalid RTC reads, `RTC OGRANICEN RAD` becomes active and automation remains conservative until the RTC recovers
+- loss of `RTC/I2C` connectivity enables a strict output fail-safe in `main/time_glob.cpp`, so bells, hammers, hands, and the rotating plate remain blocked until the `DS3231` recovers
 
-- Mega trenutno koristi `Serial3` za vanjski `ESP32` mrezni most
-- `Serial1` je aktivni `RS485` transportni sloj, dok komunikacija prema `ESP-u` ostaje na `Serial3`
-- aktivni tokovi su `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*` i `SETCFG:*` za skupine `SUSTAV`, `STAPICI`, `BAT`, `SUNCE`, `MISE`, `BLAGDANI_NEP` i `BLAGDANI_POM`
-- `NTPREQ:SYNC` sluzi za kontrolirani zahtjev prema ESP-u kad je mehanika toranjskog sata mirna
-- vanjski mrezni most vise ne salje `NTP:` po vlastitom rasporedu, nego odgovara na zahtjev Mege
-- prvi `NTP` nakon restarta ili `WiFi` reconnecta `ESP` potvrduje drugim uzorkom prije nego sto ga `Mega` prihvati za toranjski sat
-- prihvaceni `NTP` zapis i start redovnog otkucavanja poravnavaju se na `RTC SQW` granicu sekunde kad je dostupna
-- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE`, `SETREQ:MISE`, `SETREQ:BLAGDANI_NEP` i `SETREQ:BLAGDANI_POM` traze trenutno stanje pojedine skupine iz `main/postavke.*`
-- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...`, `SETCFG:MISE|...`, `SETCFG:BLAGDANI_NEP|...` i `SETCFG:BLAGDANI_POM|...` salju puni paket pojedine skupine, a `Mega` ga validira i sprema
-- `SET:MISE|rd=...|nd=...` vraca dnevnu i nedjeljnu misu, `SET:BLAGDANI_NEP|...` vraca nepomicne blagdane, a `SET:BLAGDANI_POM|...` vraca pomicne blagdane
+## 🔄 Serial communication with the ESP
 
-## 💾 EEPROM i recovery
+- the `Mega` uses `Serial3` for the external `ESP32` network bridge
+- `Serial1` is the active `RS485` transport, while communication towards the `ESP` remains on `Serial3`
+- active flows are `WIFI:`, `WIFIEN:`, `WIFISTATUS?`, `NTPCFG:`, `NTPREQ:SYNC`, `NTP:`, `CMD:`, `STATUS?`, `SETREQ:*`, and `SETCFG:*` for the groups `SUSTAV`, `STAPICI`, `BAT`, `SUNCE`, `MISE`, `BLAGDANI_NEP`, and `BLAGDANI_POM`
+- `NTPREQ:SYNC` is a controlled request towards the `ESP` only when the tower-clock mechanism is idle
+- the external network bridge no longer sends `NTP:` on its own schedule; it only answers `Mega` requests
+- the first `NTP` after restart or WiFi reconnection is confirmed by the `ESP` with a second sample before the `Mega` accepts it for the tower clock
+- accepted `NTP` records and the start of regular striking are aligned to the `RTC SQW` second boundary when available
+- `SETREQ:SUSTAV`, `SETREQ:STAPICI`, `SETREQ:BAT`, `SETREQ:SUNCE`, `SETREQ:MISE`, `SETREQ:BLAGDANI_NEP`, and `SETREQ:BLAGDANI_POM` ask for the current state of a single web settings group from `main/postavke.*`
+- `SETCFG:SUSTAV|...`, `SETCFG:STAPICI|...`, `SETCFG:BAT|...`, `SETCFG:SUNCE|...`, `SETCFG:MISE|...`, `SETCFG:BLAGDANI_NEP|...`, and `SETCFG:BLAGDANI_POM|...` send a new full payload for the corresponding group towards the `Mega`
 
-- vanjska `24C32 EEPROM` ili `FM24W256 FRAM` memorija cuva postavke i kriticno radno stanje
-- iako je fizicki kapacitet veci, toranjski sat zadrzava postojeci kompatibilni raspored unutar prvih `4096 B`
-- `UnifiedMotionState` koristi `24` rotirajuca slota za kazaljke i okretnu plocu
-- svaki zapis `UnifiedMotionState` nosi checksum kako bi se preskocio korumpirani slot nakon prekida napajanja usred upisa
-- zapis zadnje sinkronizacije vremena ima vlastiti checksum i kompatibilan legacy fallback
-- `power_recovery.*` vraca kazaljke i plocu u dosljedno stanje nakon restarta
-- watchdog resetovi se pamte u zasebnom EEPROM bloku i tek ponovljeni watchdog resetovi bez power-loss oznake vode u `safe mode`
-- `safe mode` blokira mehaniku i prikazuje `SUSTAV ZAKLJUCAN / PREVISE RESETA` dok operater ne drzi `ENT / SELECT` `5 s`
-- `power_recovery.*` radi periodicki `EEPROM` health-check svakih `6 sati`
-- latched fault `EEPROM-a` ostaje spremljen do rucne potvrde operatera i pali degradirani nacin rada za `EEPROM`
-- u degradiranom `EEPROM` nacinu rada pauziraju se periodicni backup i pomocni zapisi iz `time_glob.*`
-- `LCD`, `RTC`, vanjska `EEPROM/FRAM` memorija i servisni `I2C` scan koriste zajednicku pripremu `Wire` sabirnice s timeoutom
-- `EEPROM/I2C` retry i polling petlje osvjezavaju watchdog kad je aktivan
-- pri svakoj izmjeni EEPROM rasporeda ili recovery logike provjeri:
-- `eeprom_konstante.h`
-- `unified_motion_state.*`
-- `power_recovery.*`
+## 💾 EEPROM and recovery
 
-## 🔩 Hardver koji Mega vodi
+- external `24C32 EEPROM` or `FM24W256 FRAM` stores settings and critical runtime state
+- even though the physical capacity may be larger, the tower clock intentionally keeps the compatible layout within the first `4096 B`
+- `UnifiedMotionState` uses `24` rotating slots for the hands and rotating plate
+- every `UnifiedMotionState` record carries a checksum so corrupted slots can be skipped after power loss during a write
+- the last time-synchronization record has its own checksum and a compatible legacy fallback
+- `power_recovery.*` restores the hands and rotating plate to a consistent state after restart
+- watchdog resets are stored in a separate EEPROM block, and only repeated watchdog resets without a power-loss marker lead to `safe mode`
+- `safe mode` blocks mechanics and shows `SUSTAV ZAKLJUCAN / PREVISE RESETA` until the operator holds `ENT / SELECT` for `5 s`
+- `power_recovery.*` performs a periodic `EEPROM` health check every `6 hours`
+- latched `EEPROM` faults remain stored until manual operator acknowledgement and enable degraded `EEPROM` mode
+- in degraded `EEPROM` mode, periodic backups and helper records from `time_glob.*` are paused
+- `LCD`, `RTC`, external `EEPROM/FRAM`, and the service `I2C` scan all use shared `Wire` bus preparation with timeout
+- `EEPROM/I2C` retry and polling loops refresh the watchdog whenever it is active
+- whenever EEPROM layout or recovery logic changes, always review:
+  - `eeprom_konstante.h`
+  - `unified_motion_state.*`
+  - `power_recovery.*`
 
-- dva trofazna elektromotora `Koncar 0.55 kW / 380 V`, po jedan za `Zvono 1` i `Zvono 2`
-- mikroprekidaci na straznjoj osovini svakog zvonarskog motora za okretanje faza i sigurnu izmjenu rada zvona
-- dva elektromagnetska bata / cekica `310 VDC`, po jedan po zvonu, s impulsom oko `0,01 s`
-- pogonski motor kazaljki s mehanizmom zupcanika koji radi na `PARNI/NEPARNI` impuls oko `6 s`, sto odgovara logici u `main/kazaljke_sata.*`
-- elektroormar s kontaktorima za okretanje faza zvona, kontaktorima za batove, osiguracima i ostalom razvodnom i zastitnom opremom
-- releji za parne i neparne faze kazaljki
-- releji za okretnu plocu
-- izlazi za zvona i cekice
-- DS3231 RTC i vanjska `24C32 EEPROM` ili `FM24W256 FRAM` memorija preko `I2C`
-- LCD 16x2 preko I2C
-- thumbwheel `00-99` za trajanje mrtvackog zvona
-- kip-prekidac tihog moda i lampica tihog moda
-- ulaz za nadzor mreznog napona radi `UPS moda`
-- LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
-- 6 direktnih tipki lokalnog izbornika (`GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`)
-- uredivanje polozaja okretne ploce u izborniku sada ide samo po valjanim koracima od `15 min`
-- glavni LCD u `UPS modu` prikazuje `NEMA STRUJE!`, a ponedjeljak skracuje u `PON.` radi urednog prikaza datuma
-- prvi red LCD-a koristi polja `11-13` za `NTP`, `MAN`, `ERR` ili `---`, dok polja `15-16` prikazuju temperaturu `DS3231` modula
-- zvjezdica aktivnosti `*`, oznaka `R/N` i `W` za `WiFi` vise se ne prikazuju na glavnom retku
-- dvotocke trepere u ritmu `1/2 SQW` samo dok [main/zvonjenje.cpp](zvonjenje.cpp), [main/otkucavanje.cpp](otkucavanje.cpp), [main/kazaljke_sata.cpp](kazaljke_sata.cpp) ili [main/okretna_ploca.cpp](okretna_ploca.cpp) trenutno rade, ili kad `WiFi` nije spojen
+## 🔩 Hardware controlled by the Mega
 
-## ✅ Smjernice za razvoj
+- two `Koncar 0.55 kW / 380 V` three-phase motors, one for `Zvono 1` and one for `Zvono 2`
+- microswitches on the rear shaft of each bell motor for phase reversal and safe bell-operation transitions
+- two `310 VDC` electromagnetic hammers, one per bell, with pulses of about `0.01 s`
+- the hand-drive motor with gearbox running from `EVEN/ODD` pulses of about `6 s`, matching the logic in `main/kazaljke_sata.*`
+- the electrical cabinet with bell phase-reversal contactors, hammer contactors, fuses, and protective equipment
+- relays for the even/odd hand phases
+- relays for the rotating plate
+- outputs for bells and hammers
+- `DS3231 RTC` and external `24C32 EEPROM` or `FM24W256 FRAM` over `I2C`
+- `16x2 LCD` over `I2C`
+- `00-99` thumbwheel for funeral-ringing duration
+- the silent-mode toggle switch and silent-mode indicator lamp
+- a mains-monitoring input for `UPS` mode
+- LED indicators for `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE`, and `MRTVACKO`
+- 6 direct local-menu buttons: `GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`
+- rotating-plate position editing in the menu moves only through valid `15 min` steps
+- the main LCD shows `NEMA STRUJE!` in `UPS` mode and abbreviates Monday to `PON.` for a clean date layout
+- the first LCD row uses positions `11-13` for `NTP`, `MAN`, `ERR`, or `---`, while positions `15-16` show the `DS3231` temperature
+- the activity `*`, `R/N`, and WiFi `W` markers are no longer shown on the main row
+- the time colon blinks at `1/2 SQW` only while `main/zvonjenje.cpp`, `main/otkucavanje.cpp`, `main/kazaljke_sata.cpp`, or `main/okretna_ploca.cpp` is currently active, or while WiFi is disconnected
 
-- glavna petlja mora ostati neblokirajuca
-- Mega mora ostati sigurna i bez ovisnosti o stalnoj mrezi
-- kvar ili restart ESP-a ne smije ugroziti osnovni rad sata
-- `I2C` pristup za `LCD`, `RTC` i vanjsku `EEPROM/FRAM` memoriju treba ostati na zajednickoj pripremi sabirnice s timeoutom
-- svaka promjena koja dira kazaljke, plocu, zvona ili recovery treba se provjeriti u odnosu na postojece module u `main/`
-- lokalni SRAM tuning zadnje revizije prebacio je vecinu fiksnih log stringova u flash i smanjio velike serijske buffere u `esp_serial.*`
+## ✅ Development guidelines
+
+- the main loop must remain non-blocking
+- the `Mega 2560` must remain safe and independent of constant network access
+- an `ESP32` fault or restart must not endanger the basic clock operation
+- `I2C` access for the `LCD`, `RTC`, and external `EEPROM/FRAM` must remain on the shared bus-preparation path with timeout
+- every change touching the hands, plate, bells, or recovery should be checked against the existing modules in `main/`
