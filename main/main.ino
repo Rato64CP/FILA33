@@ -46,6 +46,7 @@ void inicijalizirajSigurnaPocetnaStanjaIzlaza() {
       PIN_LAMPICA_MRTVACKO,
       PIN_LAMPICA_TIHI_REZIM,
       PIN_LAMPICA_SUNCE_JUTRO,
+      PIN_LAMPICA_SUNCE_PODNE,
       PIN_LAMPICA_SUNCE_VECER,
       PIN_RS485_SMJER
   };

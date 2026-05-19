@@ -163,15 +163,29 @@ static bool jeLokacijaValjana(int32_t sirinaE5, int32_t duzinaE5) {
 }
 
 static bool jeRucnoUpravljivSuncevDogadaj(uint8_t dogadaj) {
-  return dogadaj == SUNCEVI_DOGADAJ_JUTRO || dogadaj == SUNCEVI_DOGADAJ_VECER;
+  return dogadaj == SUNCEVI_DOGADAJ_JUTRO ||
+         dogadaj == SUNCEVI_DOGADAJ_PODNE ||
+         dogadaj == SUNCEVI_DOGADAJ_VECER;
 }
 
 static uint8_t dohvatiPinLampiceSuncevogDogadaja(uint8_t dogadaj) {
-  return (dogadaj == SUNCEVI_DOGADAJ_JUTRO) ? PIN_LAMPICA_SUNCE_JUTRO : PIN_LAMPICA_SUNCE_VECER;
+  if (dogadaj == SUNCEVI_DOGADAJ_JUTRO) {
+    return PIN_LAMPICA_SUNCE_JUTRO;
+  }
+  if (dogadaj == SUNCEVI_DOGADAJ_PODNE) {
+    return PIN_LAMPICA_SUNCE_PODNE;
+  }
+  return PIN_LAMPICA_SUNCE_VECER;
 }
 
 static uint8_t dohvatiPinTipkeSuncevogDogadaja(uint8_t dogadaj) {
-  return (dogadaj == SUNCEVI_DOGADAJ_JUTRO) ? PIN_TIPKA_SUNCE_JUTRO : PIN_TIPKA_SUNCE_VECER;
+  if (dogadaj == SUNCEVI_DOGADAJ_JUTRO) {
+    return PIN_TIPKA_SUNCE_JUTRO;
+  }
+  if (dogadaj == SUNCEVI_DOGADAJ_PODNE) {
+    return PIN_TIPKA_SUNCE_PODNE;
+  }
+  return PIN_TIPKA_SUNCE_VECER;
 }
 
 static bool izracunajSunceveMinuteZaDatum(const DateTime& datum,
@@ -879,10 +893,13 @@ void inicijalizirajSuncevuAutomatiku() {
   pinMode(PIN_RELEJ_NOCNE_RASVJETE, OUTPUT);
   postaviRelejNocneRasvjete(false);
   pinMode(PIN_TIPKA_SUNCE_JUTRO, INPUT_PULLUP);
+  pinMode(PIN_TIPKA_SUNCE_PODNE, INPUT_PULLUP);
   pinMode(PIN_TIPKA_SUNCE_VECER, INPUT_PULLUP);
   pinMode(PIN_LAMPICA_SUNCE_JUTRO, OUTPUT);
+  pinMode(PIN_LAMPICA_SUNCE_PODNE, OUTPUT);
   pinMode(PIN_LAMPICA_SUNCE_VECER, OUTPUT);
   postaviLampicuSuncevogDogadaja(SUNCEVI_DOGADAJ_JUTRO, false);
+  postaviLampicuSuncevogDogadaja(SUNCEVI_DOGADAJ_PODNE, false);
   postaviLampicuSuncevogDogadaja(SUNCEVI_DOGADAJ_VECER, false);
   nocnaRasvjetaUkljucena = false;
   raspored.valjano = false;

@@ -126,7 +126,7 @@ This folder contains the main `Arduino Mega 2560` firmware for `ZVONKO v. 1.0`. 
 - `00-99` thumbwheel for funeral-ringing duration
 - the silent-mode toggle switch and silent-mode indicator lamp
 - a mains-monitoring input for `UPS` mode
-- LED indicators for `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE`, and `MRTVACKO`
+- LED indicators for `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE`, `MRTVACKO`, `SUNCE JUTRO`, `SUNCE PODNE`, and `SUNCE VECER`
 - 6 direct local-menu buttons: `GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`
 - rotating-plate position editing in the menu moves only through valid `15 min` steps
 - the main LCD shows `NEMA STRUJE!` in `UPS` mode and abbreviates Monday to `PON.` for a clean date layout

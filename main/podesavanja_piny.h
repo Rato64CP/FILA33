@@ -58,13 +58,16 @@
 #define PIN_TIPKA_NE                  12  // Povratak / BACK (LOW=pritisnuto)
 
 // ==================== SUNCEVA AUTOMATIKA - LOKALNE TIPKE I LAMPICE ====================
-// Dvije fizicke tipke ukljucuju/iskljucuju jutarnju i vecernju automatiku,
-// a dvije LED lampice prikazuju stanje tih suncevih dogadaja.
+// Tri fizicka tipkala ukljucuju/iskljucuju jutarnju, podnevnu i vecernju automatiku.
+// Svaki pritisak jednom prebaci stanje (nije kip-prekidac), a tri LED lampice
+// prikazuju trenutno stanje tih suncevih dogadaja.
 
-#define PIN_TIPKA_SUNCE_VECER         A9   // Tipka vecernje automatike (LOW=toggle)
+#define PIN_TIPKA_SUNCE_VECER         A9   // Tipkalo vecernje automatike (jedan pritisak = promjena stanja)
 #define PIN_LAMPICA_SUNCE_VECER       A10  // LED za vecernju automatiku (HIGH=upali)
-#define PIN_TIPKA_SUNCE_JUTRO         A11  // Tipka jutarnje automatike (LOW=toggle)
+#define PIN_TIPKA_SUNCE_JUTRO         A11  // Tipkalo jutarnje automatike (jedan pritisak = promjena stanja)
 #define PIN_LAMPICA_SUNCE_JUTRO       A12  // LED za jutarnju automatiku (HIGH=upali)
+#define PIN_TIPKA_SUNCE_PODNE         A13  // Tipkalo podnevne automatike (jedan pritisak = promjena stanja)
+#define PIN_LAMPICA_SUNCE_PODNE       A14  // LED za podnevnu automatiku (HIGH=upali)
 
 // ==================== SLAVLJENJE I MRTVACKO ULAZI ====================
 // Slavljenje koristi kip-prekidac, a mrtvacko zasebno tipkalo.

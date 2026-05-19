@@ -126,7 +126,7 @@ Ova podmapa sadrzi glavni firmware projekta `ZVONKO v. 1.0` za `Arduino Mega 256
 - thumbwheel `00-99` za trajanje mrtvackog zvona
 - kip-prekidac tihog moda i lampica tihog moda
 - ulaz za nadzor mreznog napona radi `UPS` moda
-- LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE` i `MRTVACKO`
+- LED lampice za `ZVONO 1`, `ZVONO 2`, `SLAVLJENJE`, `MRTVACKO`, `SUNCE JUTRO`, `SUNCE PODNE` i `SUNCE VECER`
 - 6 direktnih tipki lokalnog izbornika: `GORE`, `DOLJE`, `LIJEVO`, `DESNO`, `DA`, `NE`
 - uredivanje polozaja okretne ploce u izborniku ide samo po valjanim koracima od `15 min`
 - glavni LCD u `UPS modu` prikazuje `NEMA STRUJE!`, a ponedjeljak skracuje u `PON.` radi urednog prikaza datuma
